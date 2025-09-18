@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from './config/config.module';
 import { ApiModule } from './api/api.module';
-import { GuardModule } from './guard/guard.module';
+import { AuthModule } from './auth/auth.module';
 import { MailModule } from './mail/mail.module';
 
 @Module({
-    imports: [ApiModule, ConfigModule, GuardModule, MailModule],
+    imports: [ApiModule, AuthModule, ConfigModule, MailModule],
 })
 export class ModulesModule {}

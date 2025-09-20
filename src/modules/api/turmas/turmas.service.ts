@@ -131,6 +131,9 @@ export class TurmasService {
                       }
                     : undefined,
                 alunos_count: turma.turmasAlunos ? turma.turmasAlunos.length : 0,
+                alunos_confirmados_count: turma.turmasAlunos
+                    ? turma.turmasAlunos.filter((aluno) => aluno.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO).length
+                    : 0,
             }));
 
             const totalPages = Math.ceil(total / limit);
@@ -211,6 +214,9 @@ export class TurmasService {
                       }
                     : undefined,
                 alunos_count: turma.turmasAlunos ? turma.turmasAlunos.length : 0,
+                alunos_confirmados_count: turma.turmasAlunos
+                    ? turma.turmasAlunos.filter((aluno) => aluno.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO).length
+                    : 0,
             };
         } catch (error) {
             console.error('Erro ao buscar turma por ID:', error);
@@ -252,7 +258,6 @@ export class TurmasService {
             if (createTurmaDto.autorizar_bonus && createTurmaDto.bonus_treinamentos?.length > 0) {
                 detalhamento_bonus = createTurmaDto.bonus_treinamentos.map((id_treinamento) => ({
                     id_treinamento_db: id_treinamento,
-                    id_turma_db: null, // Será definido após salvar a turma, se necessário
                 }));
             }
 
@@ -324,7 +329,6 @@ export class TurmasService {
                     // Criar novo detalhamento de bônus
                     detalhamento_bonus = updateTurmaDto.bonus_treinamentos.map((id_treinamento) => ({
                         id_treinamento_db: id_treinamento,
-                        id_turma_db: null, // Será definido após salvar a turma, se necessário
                     }));
                 } else {
                     // Limpar detalhamento de bônus se não há treinamentos ou bônus não autorizado
@@ -404,6 +408,8 @@ export class TurmasService {
                 nome_cracha: turmaAluno.nome_cracha,
                 numero_cracha: turmaAluno.numero_cracha,
                 vaga_bonus: turmaAluno.vaga_bonus,
+                status_aluno_turma: turmaAluno.status_aluno_turma,
+                url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 created_at: turmaAluno.criado_em,
                 aluno: turmaAluno.id_aluno_fk
                     ? {

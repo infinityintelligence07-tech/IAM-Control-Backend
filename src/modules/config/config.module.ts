@@ -4,5 +4,6 @@ import { UnitOfWorkModule } from './unit_of_work/uow.module';
 
 @Module({
     imports: [TypeORMModule, UnitOfWorkModule],
+    exports: [TypeORMModule, UnitOfWorkModule],
 })
 export class ConfigModule {}

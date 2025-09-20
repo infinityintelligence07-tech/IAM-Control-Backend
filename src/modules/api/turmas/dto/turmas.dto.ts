@@ -276,6 +276,7 @@ export class TurmaResponseDto {
         nome: string;
     };
     alunos_count?: number;
+    alunos_confirmados_count?: number;
 }
 
 export class TurmasListResponseDto {
@@ -293,12 +294,15 @@ export class AlunoTurmaResponseDto {
     nome_cracha: string;
     numero_cracha: string;
     vaga_bonus: boolean;
+    status_aluno_turma?: string;
+    url_comprovante_pgto?: string;
     created_at: Date;
     aluno?: {
         id: number;
         nome: string;
         email: string;
         nome_cracha: string;
+        status_aluno_geral?: string;
     };
 }
 

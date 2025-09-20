@@ -15,6 +15,7 @@ import { TurmasAlunosProdutos } from '../entities/turmasAlunosProdutos.entity';
 import { TurmasAlunosTreinamentos } from '../entities/turmasAlunosTreinamentos.entity';
 import { TurmasAlunosTreinamentosBonus } from '../entities/turmasAlunosTreinamentosBonus.entity';
 import { TurmasAlunosTreinamentosContratos } from '../entities/turmasAlunosTreinamentosContratos.entity';
+import { MasterclassPreCadastros } from '../entities/masterclassPreCadastros.entity';
 import { Usuarios } from '../entities/usuarios.entity';
 /*****************************************************************************/
 
@@ -123,6 +124,12 @@ export class UnitOfWorkService {
     get usuariosRP(): Repository<Usuarios> {
         if (!this._usuariosRP) this._usuariosRP = this.postgresEM.getRepository(Usuarios);
         return this._usuariosRP;
+    }
+
+    private _masterclassPreCadastrosRP?: Repository<MasterclassPreCadastros>;
+    get masterclassPreCadastrosRP(): Repository<MasterclassPreCadastros> {
+        if (!this._masterclassPreCadastrosRP) this._masterclassPreCadastrosRP = this.postgresEM.getRepository(MasterclassPreCadastros);
+        return this._masterclassPreCadastrosRP;
     }
     /*****************************************************************************/
 }

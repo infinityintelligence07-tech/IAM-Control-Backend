@@ -8,6 +8,7 @@ import { EStatusTurmas } from './enum/index';
 import { TurmasAlunos } from './turmasAlunos.entity';
 import { Usuarios } from './usuarios.entity';
 import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.entity';
+import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 
 @Entity('turmas', { schema: type_schema })
 export class Turmas extends BaseEntity {
@@ -88,4 +89,7 @@ export class Turmas extends BaseEntity {
 
     @OneToMany(() => TurmasAlunos, (turmasAlunos) => turmasAlunos.id_turma_fk)
     turmasAlunos: TurmasAlunos[];
+
+    @OneToMany(() => MasterclassPreCadastros, (masterclassPreCadastros) => masterclassPreCadastros.id_turma_fk)
+    masterclassPreCadastros: MasterclassPreCadastros[];
 }

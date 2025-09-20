@@ -5,6 +5,7 @@ import { type_schema } from '../database/typeORM.provider';
 import { TurmasAlunos } from './turmasAlunos.entity';
 import { EStatusAlunosGeral } from './enum';
 import { Polos } from './polos.entity';
+import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 
 @Entity('alunos', { schema: type_schema })
 export class Alunos extends BaseEntity {
@@ -90,4 +91,7 @@ export class Alunos extends BaseEntity {
 
     @OneToMany(() => TurmasAlunos, (turmasAlunos) => turmasAlunos.id_aluno_fk)
     turmasAlunos: TurmasAlunos[];
+
+    @OneToMany(() => MasterclassPreCadastros, (masterclassPreCadastros) => masterclassPreCadastros.id_aluno_vinculado)
+    masterclassPreCadastros: MasterclassPreCadastros[];
 }

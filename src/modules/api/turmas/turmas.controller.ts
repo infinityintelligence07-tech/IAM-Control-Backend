@@ -11,6 +11,7 @@ import {
     AlunosTurmaListResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
+    SoftDeleteTurmaDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
@@ -46,6 +47,20 @@ export class TurmasController {
         return this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum);
     }
 
+    @Get('aluno/:id')
+    @UseGuards(JwtAuthGuard)
+    async getAlunoTurmaById(@Param('id') id: string): Promise<AlunoTurmaResponseDto> {
+        console.log('Buscando aluno da turma ID:', id);
+        try {
+            const result = await this.turmasService.getAlunoTurmaByIdDetailed(id);
+            console.log('Aluno encontrado:', result);
+            return result;
+        } catch (error) {
+            console.error('Erro no controller ao buscar aluno da turma:', error);
+            throw error;
+        }
+    }
+
     // CRUD de Turmas
 
     @Get()
@@ -74,11 +89,18 @@ export class TurmasController {
         return this.turmasService.update(id, updateTurmaDto);
     }
 
+    @Put(':id/soft-delete')
+    async softDelete(@Param('id', ParseIntPipe) id: number, @Body() softDeleteDto: SoftDeleteTurmaDto): Promise<{ message: string }> {
+        console.log('Soft delete da turma ID:', id, 'Dados:', softDeleteDto);
+        await this.turmasService.softDelete(id, softDeleteDto);
+        return { message: 'Turma marcada como deletada com sucesso' };
+    }
+
     @Delete(':id')
     async delete(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
-        console.log('Deletando turma ID:', id);
+        console.log('Deletando turma ID (hard delete):', id);
         await this.turmasService.delete(id);
-        return { message: 'Turma deletada com sucesso' };
+        return { message: 'Turma deletada permanentemente' };
     }
 
     // Gerenciamento de Alunos na Turma

@@ -15,6 +15,7 @@ export class CreateMasterclassEventoDto {
 
 export class UploadMasterclassCsvDto {
     @IsNumber()
+    @Transform(({ value }) => parseInt(value))
     id_turma: number;
 
     @IsOptional()
@@ -38,7 +39,12 @@ export class MasterclassPreCadastroDto {
     @IsOptional()
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
-    confirmou_presenca?: boolean;
+    presente?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    teve_interesse?: boolean;
 
     @IsOptional()
     @IsString()
@@ -56,6 +62,14 @@ export class ConfirmarPresencaDto {
     @IsOptional()
     @IsString()
     observacoes?: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
+
+    @IsOptional()
+    @IsString()
+    atualizado_em?: string;
 }
 
 export class VincularAlunoDto {
@@ -70,6 +84,27 @@ export class VincularAlunoDto {
     observacoes?: string;
 }
 
+export class AlterarInteresseDto {
+    @IsString()
+    id_pre_cadastro: string;
+
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    teve_interesse: boolean;
+
+    @IsOptional()
+    @IsString()
+    observacoes?: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
+
+    @IsOptional()
+    @IsString()
+    atualizado_em?: string;
+}
+
 export class MasterclassPreCadastroResponseDto {
     id: string;
     nome_aluno: string;
@@ -77,8 +112,8 @@ export class MasterclassPreCadastroResponseDto {
     telefone: string;
     evento_nome: string;
     data_evento: Date;
-    confirmou_presenca: boolean;
-    data_confirmacao_presenca?: Date;
+    presente: boolean;
+    teve_interesse: boolean;
     id_aluno_vinculado?: string;
     data_vinculacao_aluno?: Date;
     observacoes?: string;
@@ -131,4 +166,85 @@ export class MasterclassStatsDto {
         telefone: string;
         data_evento: Date;
     }[];
+}
+
+export class CreateMasterclassPreCadastroDto {
+    @IsString()
+    nome_aluno: string;
+
+    @IsEmail()
+    email: string;
+
+    @IsString()
+    telefone: string;
+
+    @IsNumber()
+    id_turma: number;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    presente?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    teve_interesse?: boolean;
+
+    @IsOptional()
+    @IsString()
+    observacoes?: string;
+
+    @IsOptional()
+    @IsNumber()
+    criado_por?: number;
+}
+
+export class UpdateMasterclassPreCadastroDto {
+    @IsOptional()
+    @IsString()
+    nome_aluno?: string;
+
+    @IsOptional()
+    @IsEmail()
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    telefone?: string;
+
+    @IsOptional()
+    @IsNumber()
+    id_turma?: number;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    presente?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    teve_interesse?: boolean;
+
+    @IsOptional()
+    @IsString()
+    observacoes?: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
+
+    @IsOptional()
+    @IsString()
+    atualizado_em?: string;
+}
+
+export class SoftDeleteMasterclassPreCadastroDto {
+    @IsString()
+    deletado_em: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
 }

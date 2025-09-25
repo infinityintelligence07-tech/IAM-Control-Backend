@@ -2,9 +2,10 @@ import { Module } from '@nestjs/common';
 import { TurmasController } from './turmas.controller';
 import { TurmasService } from './turmas.service';
 import { UnitOfWorkModule } from '../../config/unit_of_work/uow.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-    imports: [UnitOfWorkModule],
+    imports: [UnitOfWorkModule, WhatsAppModule],
     controllers: [TurmasController],
     providers: [TurmasService],
     exports: [TurmasService],

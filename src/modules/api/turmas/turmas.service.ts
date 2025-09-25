@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas } from '../../config/entities/enum';
+import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas } from '../../config/entities/enum';
 import {
     GetTurmasDto,
     CreateTurmaDto,
@@ -12,12 +12,49 @@ import {
     AlunosTurmaListResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
+    SoftDeleteTurmaDto,
 } from './dto/turmas.dto';
 import { FindManyOptions, ILike, Not, In } from 'typeorm';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 @Injectable()
 export class TurmasService {
-    constructor(private readonly uow: UnitOfWorkService) {}
+    constructor(
+        private readonly uow: UnitOfWorkService,
+        private readonly whatsappService: WhatsAppService,
+    ) {}
+
+    /**
+     * Buscar contadores de pré-cadastrados por turmas
+     */
+    private async getPreCadastrosCountByTurmas(turmasIds: number[]): Promise<Record<number, { total: number; presentes: number }>> {
+        if (!turmasIds.length) return {};
+
+        try {
+            const preCadastros = await this.uow.masterclassPreCadastrosRP.find({
+                where: {
+                    id_turma: In(turmasIds),
+                },
+            });
+
+            const counts: Record<number, { total: number; presentes: number }> = {};
+
+            preCadastros.forEach((pc) => {
+                if (!counts[pc.id_turma]) {
+                    counts[pc.id_turma] = { total: 0, presentes: 0 };
+                }
+                counts[pc.id_turma].total++;
+                if (pc.presente) {
+                    counts[pc.id_turma].presentes++;
+                }
+            });
+
+            return counts;
+        } catch (error) {
+            console.error('Erro ao buscar contadores de pré-cadastrados:', error);
+            return {};
+        }
+    }
 
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
         const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento } = filters;
@@ -42,6 +79,9 @@ export class TurmasService {
         if (id_treinamento) {
             whereConditions.id_treinamento = id_treinamento;
         }
+
+        // Adicionar condição para excluir registros deletados
+        whereConditions.deletado_em = null;
 
         // Configurar opções de busca
         const findOptions: FindManyOptions = {
@@ -82,6 +122,10 @@ export class TurmasService {
                     return false;
                 });
             }
+
+            // Buscar contadores de pré-cadastrados para turmas de masterclass
+            const turmasIds = turmasFiltradas.map((t) => t.id);
+            const preCadastrosCount = await this.getPreCadastrosCountByTurmas(turmasIds);
 
             // Transformar dados para o formato de resposta
             const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => ({
@@ -134,6 +178,8 @@ export class TurmasService {
                 alunos_confirmados_count: turma.turmasAlunos
                     ? turma.turmasAlunos.filter((aluno) => aluno.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO).length
                     : 0,
+                pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
+                presentes_count: preCadastrosCount[turma.id]?.presentes || 0,
             }));
 
             const totalPages = Math.ceil(total / limit);
@@ -159,7 +205,10 @@ export class TurmasService {
     async findById(id: number): Promise<TurmaResponseDto | null> {
         try {
             const turma = await this.uow.turmasRP.findOne({
-                where: { id },
+                where: {
+                    id,
+                    deletado_em: null,
+                },
                 relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos'],
             });
 
@@ -270,6 +319,7 @@ export class TurmasService {
                 turma_aberta: createTurmaDto.turma_aberta || false,
                 id_turma_bonus: createTurmaDto.id_turma_bonus || null,
                 detalhamento_bonus,
+                criado_por: createTurmaDto.criado_por,
             });
 
             const turmaSalva = await this.uow.turmasRP.save(novaTurma);
@@ -287,36 +337,51 @@ export class TurmasService {
 
     async update(id: number, updateTurmaDto: UpdateTurmaDto): Promise<TurmaResponseDto> {
         try {
-            const turma = await this.uow.turmasRP.findOne({ where: { id } });
+            console.log(`[DEBUG] Atualizando turma ID: ${id}`);
+            console.log(`[DEBUG] Dados recebidos:`, updateTurmaDto);
+
+            const turma = await this.uow.turmasRP.findOne({
+                where: {
+                    id,
+                    deletado_em: null,
+                },
+            });
 
             if (!turma) {
+                console.log(`[DEBUG] Turma não encontrada: ${id}`);
                 throw new NotFoundException('Turma não encontrada');
             }
 
             // Validações se campos forem fornecidos
             if (updateTurmaDto.id_polo) {
+                console.log(`[DEBUG] Validando polo ID: ${updateTurmaDto.id_polo}`);
                 const polo = await this.uow.polosRP.findOne({
                     where: { id: updateTurmaDto.id_polo },
                 });
                 if (!polo) {
+                    console.log(`[DEBUG] Polo não encontrado: ${updateTurmaDto.id_polo}`);
                     throw new NotFoundException('Polo não encontrado');
                 }
             }
 
             if (updateTurmaDto.id_treinamento) {
+                console.log(`[DEBUG] Validando treinamento ID: ${updateTurmaDto.id_treinamento}`);
                 const treinamento = await this.uow.treinamentosRP.findOne({
                     where: { id: updateTurmaDto.id_treinamento },
                 });
                 if (!treinamento) {
+                    console.log(`[DEBUG] Treinamento não encontrado: ${updateTurmaDto.id_treinamento}`);
                     throw new NotFoundException('Treinamento não encontrado');
                 }
             }
 
             if (updateTurmaDto.lider_evento) {
+                console.log(`[DEBUG] Validando lider ID: ${updateTurmaDto.lider_evento}`);
                 const lider = await this.uow.usuariosRP.findOne({
                     where: { id: updateTurmaDto.lider_evento },
                 });
                 if (!lider) {
+                    console.log(`[DEBUG] Líder não encontrado: ${updateTurmaDto.lider_evento}`);
                     throw new NotFoundException('Líder do evento não encontrado');
                 }
             }
@@ -343,6 +408,7 @@ export class TurmasService {
             await this.uow.turmasRP.update(id, {
                 ...updateData,
                 detalhamento_bonus,
+                atualizado_por: updateTurmaDto.atualizado_por,
             });
 
             // Retornar turma atualizada
@@ -353,6 +419,33 @@ export class TurmasService {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao atualizar turma');
+        }
+    }
+
+    async softDelete(id: number, softDeleteDto: SoftDeleteTurmaDto): Promise<void> {
+        try {
+            const turma = await this.uow.turmasRP.findOne({
+                where: {
+                    id,
+                    deletado_em: null,
+                },
+            });
+
+            if (!turma) {
+                throw new NotFoundException(`Turma com ID ${id} não encontrada`);
+            }
+
+            turma.deletado_em = new Date(softDeleteDto.deletado_em);
+            turma.atualizado_por = softDeleteDto.atualizado_por;
+
+            await this.uow.turmasRP.save(turma);
+            console.log('Turma marcada como deletada:', id);
+        } catch (error) {
+            console.error('Erro ao fazer soft delete da turma:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao fazer soft delete da turma');
         }
     }
 
@@ -370,12 +463,13 @@ export class TurmasService {
             });
 
             if (alunosNaTurma > 0) {
-                throw new BadRequestException('Não é possível excluir uma turma que possui alunos matriculados');
+                throw new BadRequestException('Não é possível excluir permanentemente uma turma que possui alunos matriculados');
             }
 
             await this.uow.turmasRP.delete(id);
+            console.log('Turma excluída permanentemente:', id);
         } catch (error) {
-            console.error('Erro ao deletar turma:', error);
+            console.error('Erro ao deletar turma permanentemente:', error);
             if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
@@ -409,6 +503,7 @@ export class TurmasService {
                 numero_cracha: turmaAluno.numero_cracha,
                 vaga_bonus: turmaAluno.vaga_bonus,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
+                presenca_turma: turmaAluno.presenca_turma, // Adicionado campo presenca_turma
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 created_at: turmaAluno.criado_em,
                 aluno: turmaAluno.id_aluno_fk
@@ -554,6 +649,62 @@ export class TurmasService {
         }
     }
 
+    async getAlunoTurmaByIdDetailed(id: string): Promise<AlunoTurmaResponseDto> {
+        try {
+            const turmaAluno = await this.uow.turmasAlunosRP.findOne({
+                where: { id },
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_treinamento_fk'],
+            });
+
+            if (!turmaAluno) {
+                throw new NotFoundException('Aluno não encontrado na turma');
+            }
+
+            return {
+                id: turmaAluno.id,
+                id_turma: turmaAluno.id_turma,
+                id_aluno: turmaAluno.id_aluno,
+                nome_cracha: turmaAluno.nome_cracha,
+                numero_cracha: turmaAluno.numero_cracha,
+                vaga_bonus: turmaAluno.vaga_bonus,
+                status_aluno_turma: turmaAluno.status_aluno_turma,
+                url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
+                created_at: turmaAluno.criado_em,
+                aluno: {
+                    id: turmaAluno.id_aluno_fk.id,
+                    nome: turmaAluno.id_aluno_fk.nome,
+                    email: turmaAluno.id_aluno_fk.email,
+                    nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
+                    status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
+                },
+                // Campos extras para credenciamento (não estão no DTO padrão)
+                telefone: turmaAluno.id_aluno_fk.telefone_um,
+                presenca_turma: turmaAluno.presenca_turma,
+                turma: {
+                    id: turmaAluno.id_turma_fk.id,
+                    edicao_turma: turmaAluno.id_turma_fk.edicao_turma,
+                    data_inicio: turmaAluno.id_turma_fk.data_inicio,
+                    data_final: turmaAluno.id_turma_fk.data_final,
+                    treinamento: {
+                        nome: turmaAluno.id_turma_fk.id_treinamento_fk.treinamento,
+                        sigla: turmaAluno.id_turma_fk.id_treinamento_fk.sigla_treinamento,
+                    },
+                    polo: {
+                        nome: turmaAluno.id_turma_fk.id_polo_fk.polo,
+                        cidade: turmaAluno.id_turma_fk.id_polo_fk.cidade,
+                        estado: turmaAluno.id_turma_fk.id_polo_fk.estado,
+                    },
+                },
+            } as any;
+        } catch (error) {
+            console.error('Erro ao buscar aluno da turma por ID:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao buscar aluno da turma');
+        }
+    }
+
     async getAlunosDisponiveis(id_turma?: number, page: number = 1, limit: number = 10): Promise<AlunosDisponiveisResponseDto> {
         try {
             // Buscar IDs dos alunos que já estão em alguma turma
@@ -621,12 +772,15 @@ export class TurmasService {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id_turma_aluno },
-                relations: ['id_aluno_fk'],
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_treinamento_fk'],
             });
 
             if (!turmaAluno) {
                 throw new NotFoundException('Aluno não encontrado na turma');
             }
+
+            // Armazenar status anterior para verificar mudança
+            const statusAnterior = turmaAluno.status_aluno_turma;
 
             // Atualizar campos fornecidos
             if (updateAlunoDto.nome_cracha !== undefined) {
@@ -638,6 +792,12 @@ export class TurmasService {
             if (updateAlunoDto.status_aluno_turma !== undefined) {
                 turmaAluno.status_aluno_turma = updateAlunoDto.status_aluno_turma as EStatusAlunosTurmas;
             }
+            if (updateAlunoDto.presenca_turma !== undefined) {
+                turmaAluno.presenca_turma = updateAlunoDto.presenca_turma as EPresencaTurmas;
+            }
+            if (updateAlunoDto.atualizado_por !== undefined) {
+                turmaAluno.atualizado_por = updateAlunoDto.atualizado_por;
+            }
 
             console.log('Atualizando aluno turma com dados:', updateAlunoDto);
             console.log('Dados antes do save:', turmaAluno);
@@ -645,6 +805,14 @@ export class TurmasService {
             const turmaAlunoAtualizada = await this.uow.turmasAlunosRP.save(turmaAluno);
 
             console.log('Dados após save:', turmaAlunoAtualizada);
+
+            // Verificar se o status foi alterado para CHECKIN_REALIZADO
+            if (statusAnterior !== EStatusAlunosTurmas.CHECKIN_REALIZADO && turmaAlunoAtualizada.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO) {
+                console.log('🎉 Status alterado para CHECKIN_REALIZADO - Enviando QR Code via WhatsApp...');
+
+                // Enviar QR Code via WhatsApp automaticamente
+                await this.enviarQRCodeWhatsApp(turmaAlunoAtualizada);
+            }
 
             return {
                 id: turmaAlunoAtualizada.id,
@@ -719,5 +887,55 @@ export class TurmasService {
 
         // Se não conseguir gerar um número único após muitas tentativas
         throw new Error('Não foi possível gerar um número de crachá único para esta turma');
+    }
+
+    /**
+     * Envia QR Code de credenciamento via WhatsApp quando status é alterado para CHECKIN_REALIZADO
+     */
+    private async enviarQRCodeWhatsApp(turmaAluno: any): Promise<void> {
+        try {
+            // Verificar se temos os dados necessários
+            if (!turmaAluno.id_aluno_fk || !turmaAluno.id_turma_fk) {
+                console.error('❌ Dados insuficientes para enviar QR Code:', {
+                    hasAluno: !!turmaAluno.id_aluno_fk,
+                    hasTurma: !!turmaAluno.id_turma_fk,
+                });
+                return;
+            }
+
+            const aluno = turmaAluno.id_aluno_fk;
+            const turma = turmaAluno.id_turma_fk;
+            const polo = turma.id_polo_fk;
+            const treinamento = turma.id_treinamento_fk;
+
+            // Preparar dados para o QR Code
+            const qrCodeData = {
+                alunoTurmaId: turmaAluno.id,
+                alunoNome: aluno.nome,
+                alunoTelefone: aluno.telefone_um,
+                turmaId: turma.id,
+                treinamentoNome: treinamento?.treinamento || 'Treinamento não informado',
+                poloNome: polo?.polo || 'Polo não informado',
+                dataEvento: turma.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : 'Data não informada',
+            };
+
+            console.log('📱 Enviando QR Code para:', {
+                nome: aluno.nome,
+                telefone: aluno.telefone_um,
+                treinamento: qrCodeData.treinamentoNome,
+            });
+
+            // Enviar QR Code via WhatsApp
+            const result = await this.whatsappService.sendQRCodeCredenciamento(qrCodeData);
+
+            if (result.success) {
+                console.log('✅ QR Code enviado com sucesso para:', aluno.nome);
+            } else {
+                console.error('❌ Erro ao enviar QR Code para:', aluno.nome, result.error);
+            }
+        } catch (error) {
+            console.error('❌ Erro interno ao enviar QR Code via WhatsApp:', error);
+            // Não relançar o erro para não interromper o fluxo principal
+        }
     }
 }

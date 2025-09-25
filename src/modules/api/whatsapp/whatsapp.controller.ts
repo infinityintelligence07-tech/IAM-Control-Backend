@@ -18,6 +18,16 @@ export interface SendCheckInLinksDto {
     students: CheckInStudentDto[];
 }
 
+export interface SendQRCodeDto {
+    alunoTurmaId: string;
+    alunoNome: string;
+    alunoTelefone: string;
+    turmaId: number;
+    treinamentoNome: string;
+    poloNome: string;
+    dataEvento: string;
+}
+
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -41,6 +51,13 @@ export class WhatsAppController {
     async processCheckIn(@Param('token') token: string, @Query('student') studentId?: string) {
         console.log('Processando check-in via token:', token, 'para aluno:', studentId);
         return this.whatsappService.processCheckIn(token, studentId);
+    }
+
+    @Post('send-qrcode')
+    @UseGuards(JwtAuthGuard)
+    async sendQRCode(@Body() data: SendQRCodeDto) {
+        console.log('Enviando QR code de credenciamento para:', data.alunoNome);
+        return this.whatsappService.sendQRCodeCredenciamento(data);
     }
 
     @Get('test-connection')

@@ -28,11 +28,11 @@ export class MasterclassPreCadastros extends BaseEntity {
     @Column({ type: 'bigint', name: 'id_turma', nullable: false })
     id_turma: number;
 
-    @Column({ type: 'boolean', name: 'confirmou_presenca', default: false, nullable: false })
-    confirmou_presenca: boolean;
+    @Column({ type: 'boolean', name: 'presente', default: false, nullable: false })
+    presente: boolean;
 
-    @Column({ type: 'timestamp', name: 'data_confirmacao_presenca', nullable: true })
-    data_confirmacao_presenca: Date;
+    @Column({ type: 'boolean', name: 'teve_interesse', default: false, nullable: false })
+    teve_interesse: boolean;
 
     @Column({ type: 'bigint', name: 'id_aluno_vinculado', nullable: true })
     id_aluno_vinculado: string;

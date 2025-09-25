@@ -81,11 +81,11 @@ export class AuthController {
             const result = await this.auth.googleAuth(user.primeiro_nome, user.sobrenome, user.email, user.providerId, user.picture);
 
             // Redireciona para o frontend com o token
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+            const frontendUrl = process.env.FRONTEND_URL || 'https://localhost:3001';
             res.redirect(`${frontendUrl}/auth/google/callback?token=${result.token}`);
         } catch (error) {
             console.error('Erro no Google OAuth:', error);
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+            const frontendUrl = process.env.FRONTEND_URL || 'https://localhost:3001';
             res.redirect(`${frontendUrl}/signin?error=google_auth_failed`);
         }
     }
@@ -101,7 +101,7 @@ export class AuthController {
 
     @Post('forgot')
     async forgot(@Body() dto: ForgotPasswordDto) {
-        const frontend = process.env.FRONTEND_URL || 'http://localhost:3001';
+        const frontend = process.env.FRONTEND_URL || 'https://localhost:3001';
         await this.auth.requestPasswordReset(dto.email, frontend);
         return { ok: true };
     }

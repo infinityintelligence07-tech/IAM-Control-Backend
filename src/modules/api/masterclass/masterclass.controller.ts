@@ -1,14 +1,33 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UploadedFile, UseInterceptors, ParseIntPipe, ClassSerializerInterceptor } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Post,
+    Put,
+    Delete,
+    Body,
+    Param,
+    Query,
+    UploadedFile,
+    UseInterceptors,
+    ParseIntPipe,
+    ClassSerializerInterceptor,
+    BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MasterclassService } from './masterclass.service';
+import { MasterclassPreCadastros } from '../../config/entities/masterclassPreCadastros.entity';
 import {
     CreateMasterclassEventoDto,
     UploadMasterclassCsvDto,
     ConfirmarPresencaDto,
     VincularAlunoDto,
+    AlterarInteresseDto,
     MasterclassEventoResponseDto,
     MasterclassListResponseDto,
     MasterclassStatsDto,
+    CreateMasterclassPreCadastroDto,
+    UpdateMasterclassPreCadastroDto,
+    SoftDeleteMasterclassPreCadastroDto,
 } from './dto/masterclass.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { UseGuards } from '@nestjs/common';
@@ -34,16 +53,43 @@ export class MasterclassController {
     @Post('upload-csv')
     @UseInterceptors(FileInterceptor('file'))
     async uploadCsv(
-        @Body() uploadDto: UploadMasterclassCsvDto,
+        @Body() body: any,
         @UploadedFile() file: any,
-    ): Promise<{ message: string; total_processados: number; erros: string[] }> {
-        console.log('Upload CSV para turma:', uploadDto.id_turma);
+    ): Promise<{ message: string; total_processados: number; duplicados_ignorados: number; erros: string[] }> {
+        console.log('Dados recebidos no upload:', {
+            body,
+            file: file
+                ? {
+                      filename: file.filename,
+                      originalname: file.originalname,
+                      mimetype: file.mimetype,
+                      size: file.size,
+                  }
+                : null,
+        });
 
         if (!file) {
-            throw new Error('Arquivo não fornecido');
+            throw new BadRequestException('Arquivo não fornecido');
         }
 
-        return this.masterclassService.uploadCsv(uploadDto.id_turma, file.buffer, uploadDto.observacoes);
+        // Verificar se todos os campos necessários estão presentes
+        if (!body.id_turma) {
+            console.error('Campo id_turma não encontrado no body:', body);
+            throw new BadRequestException('Campo id_turma é obrigatório');
+        }
+
+        // Validar e converter dados do form
+        const id_turma = parseInt(body.id_turma);
+        if (isNaN(id_turma)) {
+            console.error('Valor inválido para id_turma:', body.id_turma);
+            throw new BadRequestException('ID da turma deve ser um número válido');
+        }
+
+        const observacoes = body.observacoes || undefined;
+        const criado_por = body.criado_por ? parseInt(body.criado_por) : undefined;
+
+        console.log('Processando upload para turma:', id_turma, 'criado_por:', criado_por);
+        return this.masterclassService.uploadCsv(id_turma, file.buffer, observacoes, file.originalname, criado_por);
     }
 
     /**
@@ -83,6 +129,15 @@ export class MasterclassController {
     }
 
     /**
+     * Alterar interesse de um pré-cadastro
+     */
+    @Put('alterar-interesse')
+    async alterarInteresse(@Body() alterarDto: AlterarInteresseDto): Promise<any> {
+        console.log('Alterando interesse para pré-cadastro:', alterarDto.id_pre_cadastro, 'teve_interesse:', alterarDto.teve_interesse);
+        return this.masterclassService.alterarInteresse(alterarDto);
+    }
+
+    /**
      * Buscar alunos ausentes para campanhas de marketing
      */
     @Get('alunos-ausentes-marketing')
@@ -95,13 +150,13 @@ export class MasterclassController {
      * Estatísticas gerais de masterclass
      */
     @Get('estatisticas')
-    async obterEstatisticas(): Promise<{
+    obterEstatisticas(): {
         total_eventos: number;
         total_inscritos: number;
         total_presentes: number;
         total_ausentes: number;
         taxa_presenca_geral: number;
-    }> {
+    } {
         console.log('Obtendo estatísticas gerais de masterclass');
 
         // Implementar lógica de estatísticas gerais
@@ -114,5 +169,43 @@ export class MasterclassController {
             total_ausentes: 0,
             taxa_presenca_geral: 0,
         };
+    }
+
+    /**
+     * Inserir novo pré-cadastro manualmente
+     */
+    @Post('pre-cadastro')
+    async inserirPreCadastro(@Body() data: CreateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
+        console.log('Inserindo novo pré-cadastro:', data);
+        return this.masterclassService.inserirPreCadastro(data);
+    }
+
+    /**
+     * Editar pré-cadastro existente
+     */
+    @Put('pre-cadastro/:id')
+    async editarPreCadastro(@Param('id') id: string, @Body() data: UpdateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
+        console.log('Editando pré-cadastro:', id, data);
+        return this.masterclassService.editarPreCadastro(id, data);
+    }
+
+    /**
+     * Soft delete pré-cadastro
+     */
+    @Put('pre-cadastro/:id/soft-delete')
+    async softDeletePreCadastro(@Param('id') id: string, @Body() softDeleteDto: SoftDeleteMasterclassPreCadastroDto): Promise<{ message: string }> {
+        console.log('Soft delete do pré-cadastro:', id, 'Dados:', softDeleteDto);
+        await this.masterclassService.softDeletePreCadastro(id, softDeleteDto);
+        return { message: 'Pré-cadastro marcado como deletado com sucesso' };
+    }
+
+    /**
+     * Excluir pré-cadastro
+     */
+    @Delete('pre-cadastro/:id')
+    async excluirPreCadastro(@Param('id') id: string): Promise<{ message: string }> {
+        console.log('Excluindo pré-cadastro (hard delete):', id);
+        await this.masterclassService.excluirPreCadastro(id);
+        return { message: 'Pré-cadastro excluído permanentemente' };
     }
 }

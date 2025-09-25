@@ -108,6 +108,10 @@ export class CreateTurmaDto {
     @IsArray()
     @IsNumber({}, { each: true })
     bonus_treinamentos?: number[];
+
+    @IsOptional()
+    @IsNumber()
+    criado_por?: number;
 }
 
 export class UpdateTurmaDto {
@@ -192,6 +196,14 @@ export class UpdateTurmaDto {
     @IsArray()
     @IsNumber({}, { each: true })
     bonus_treinamentos?: number[];
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
+
+    @IsOptional()
+    @IsString()
+    atualizado_em?: string;
 }
 
 export class AddAlunoTurmaDto {
@@ -233,6 +245,18 @@ export class UpdateAlunoTurmaDto {
     @IsOptional()
     @IsString()
     status_aluno_turma?: string;
+
+    @IsOptional()
+    @IsString()
+    presenca_turma?: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
+
+    @IsOptional()
+    @IsString()
+    atualizado_em?: string;
 }
 
 export class TurmaResponseDto {
@@ -277,6 +301,8 @@ export class TurmaResponseDto {
     };
     alunos_count?: number;
     alunos_confirmados_count?: number;
+    pre_cadastrados_count?: number;
+    presentes_count?: number;
 }
 
 export class TurmasListResponseDto {
@@ -295,6 +321,7 @@ export class AlunoTurmaResponseDto {
     numero_cracha: string;
     vaga_bonus: boolean;
     status_aluno_turma?: string;
+    presenca_turma?: string; // Adicionado campo presenca_turma
     url_comprovante_pgto?: string;
     created_at: Date;
     aluno?: {
@@ -332,4 +359,13 @@ export class AlunosDisponiveisResponseDto {
     page: number;
     limit: number;
     totalPages: number;
+}
+
+export class SoftDeleteTurmaDto {
+    @IsString()
+    deletado_em: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
 }

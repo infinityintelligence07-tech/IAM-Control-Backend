@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsNotEmpty } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class GetPolosDto {
@@ -31,6 +31,7 @@ export class GetPolosDto {
 export class PoloResponseDto {
     id: number;
     polo: string;
+    sigla_polo?: string;
     cidade: string;
     estado: string;
     created_at: Date;
@@ -44,4 +45,70 @@ export class PolosListResponseDto {
     page: number;
     limit: number;
     totalPages: number;
+}
+
+export class CreatePoloDto {
+    @IsNotEmpty()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    polo: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    sigla_polo?: string;
+
+    @IsNotEmpty()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    cidade: string;
+
+    @IsNotEmpty()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    estado: string;
+
+    @IsOptional()
+    @IsNumber()
+    criado_por?: number;
+}
+
+export class UpdatePoloDto {
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    polo?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    sigla_polo?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    cidade?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    estado?: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
+
+    @IsOptional()
+    @IsString()
+    atualizado_em?: string;
+}
+
+export class SoftDeletePoloDto {
+    @IsNotEmpty()
+    @IsString()
+    deletado_em: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
 }

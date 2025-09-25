@@ -3,12 +3,23 @@ import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import axios from 'axios';
 import * as jwt from 'jsonwebtoken';
+import * as QRCode from 'qrcode';
 
 export interface CheckInStudentDto {
     alunoTurmaId: string;
     alunoNome: string;
     turmaId: number;
     treinamentoNome: string;
+}
+
+export interface SendQRCodeDto {
+    alunoTurmaId: string;
+    alunoNome: string;
+    alunoTelefone: string;
+    turmaId: number;
+    treinamentoNome: string;
+    poloNome: string;
+    dataEvento: string;
 }
 
 @Injectable()
@@ -25,7 +36,7 @@ export class WhatsAppService {
         this.zApiToken = process.env.Z_API_TOKEN || '';
         this.zApiInstance = process.env.Z_API_INSTANCE_ID || '';
         this.zApiClientToken = process.env.Z_API_CLIENT_TOKEN || '';
-        this.frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+        this.frontendUrl = process.env.FRONTEND_URL || 'https://localhost:3001';
         this.jwtSecret = process.env.JWT_SECRET;
     }
 
@@ -337,6 +348,130 @@ export class WhatsAppService {
     /**
      * Gera mensagem padrão para check-in
      */
+    /**
+     * Envia QR code de credenciamento via WhatsApp após check-in
+     */
+    async sendQRCodeCredenciamento(data: SendQRCodeDto): Promise<{ success: boolean; message?: string; error?: string }> {
+        try {
+            console.log('🔍 [sendQRCodeCredenciamento] Iniciando envio de QR code...');
+            console.log('🔍 [sendQRCodeCredenciamento] Dados recebidos:', data);
+
+            // Verificar se temos as credenciais da Z-API
+            console.log('🔍 [sendQRCodeCredenciamento] Verificando credenciais Z-API...');
+            console.log(`URL: ${this.zApiUrl}`);
+            console.log(`Token: ${this.zApiToken ? 'CONFIGURADO' : 'NÃO CONFIGURADO'}`);
+            console.log(`Instance: ${this.zApiInstance ? 'CONFIGURADO' : 'NÃO CONFIGURADO'}`);
+
+            if (!this.zApiToken || !this.zApiInstance) {
+                console.log('❌ [sendQRCodeCredenciamento] Credenciais Z-API não configuradas');
+                return {
+                    success: false,
+                    error: 'Credenciais da Z-API não configuradas. Verifique as variáveis de ambiente.',
+                };
+            }
+
+            // Gerar dados do QR code
+            const qrData = {
+                id_turma_aluno: data.alunoTurmaId,
+                aluno_nome: data.alunoNome,
+                turma_id: data.turmaId,
+                treinamento: data.treinamentoNome,
+                polo: data.poloNome,
+                data_evento: data.dataEvento,
+                timestamp: new Date().toISOString(),
+            };
+
+            // Converter para string JSON para o QR code
+            const qrCodeData = JSON.stringify(qrData);
+            console.log('🔍 [sendQRCodeCredenciamento] QR Data gerado:', qrCodeData);
+
+            // Gerar QR code como imagem base64
+            const qrCodeImage = await QRCode.toDataURL(qrCodeData, {
+                errorCorrectionLevel: 'M',
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF',
+                },
+                width: 256,
+            });
+
+            // Limpar telefone (remover caracteres não numéricos)
+            const cleanPhone = data.alunoTelefone.replace(/\D/g, '');
+
+            // Gerar mensagem de texto
+            const message = this.generateQRCodeMessage(data.alunoNome, data.treinamentoNome);
+
+            // Enviar mensagem de texto primeiro
+            await this.sendMessage(cleanPhone, message);
+
+            // Enviar QR code como imagem
+            const imageResult = await this.sendImageMessage(cleanPhone, qrCodeImage, `QR Code - ${data.alunoNome}`);
+
+            console.log(`✅ QR code enviado para ${data.alunoNome} (${cleanPhone})`);
+            return imageResult;
+        } catch (error: any) {
+            console.error('❌ Erro ao enviar QR code:', error);
+            return {
+                success: false,
+                error: error.message || 'Erro interno ao enviar QR code',
+            };
+        }
+    }
+
+    /**
+     * Envia imagem via WhatsApp usando Z-API
+     */
+    async sendImageMessage(phone: string, imageBase64: string, caption: string): Promise<{ success: boolean; message?: string; error?: string }> {
+        try {
+            const headers: any = {
+                'Content-Type': 'application/json',
+            };
+
+            if (this.zApiClientToken) {
+                headers['Client-Token'] = this.zApiClientToken;
+            }
+
+            const payload = {
+                phone: phone,
+                image: imageBase64,
+                caption: caption,
+            };
+
+            console.log(`📱 Enviando imagem para: ${phone}`);
+
+            const response = await axios.post(`${this.zApiUrl}/instances/${this.zApiInstance}/token/${this.zApiToken}/send-image`, payload, { headers });
+
+            console.log('✅ Imagem enviada com sucesso:', response.data);
+            return {
+                success: true,
+                message: 'Imagem enviada com sucesso',
+            };
+        } catch (error: any) {
+            console.error('❌ Erro ao enviar imagem Z-API:', error.response?.data || error.message);
+            return {
+                success: false,
+                error: error.response?.data?.message || error.message || 'Erro ao enviar imagem',
+            };
+        }
+    }
+
+    private generateQRCodeMessage(alunoNome: string, treinamentoNome: string): string {
+        return `🎉 Parabéns ${alunoNome}!
+
+✅ Seu check-in foi realizado com sucesso para o treinamento *${treinamentoNome}*!
+
+📱 *SEU QR CODE DE CREDENCIAMENTO:*
+(Imagem anexada abaixo)
+
+💡 *Como usar:*
+• Salve a imagem do QR code
+• Use na próxima vez para credenciamento rápido
+• Apresente na entrada do evento
+
+🎓 Obrigado por participar do IAM Control!`;
+    }
+
     private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string): string {
         return `Olá ${alunoNome}! 👋
 

@@ -5,6 +5,7 @@ import { type_schema } from '../database/typeORM.provider';
 import { Turmas } from './turmas.entity';
 import { Alunos } from './alunos.entity';
 import { TurmasAlunosTreinamentosContratos } from './turmasAlunosTreinamentosContratos.entity';
+import { ETipoDocumento } from './enum';
 
 @Entity('documentos', { schema: type_schema })
 export class Documentos extends BaseEntity {
@@ -14,8 +15,11 @@ export class Documentos extends BaseEntity {
     @Column({ type: 'varchar', name: 'documento', nullable: true })
     documento: string;
 
+    @Column({ type: 'enum', enum: ETipoDocumento, name: 'tipo_documento', nullable: false })
+    tipo_documento: ETipoDocumento;
+
     @Column({ type: 'jsonb', name: 'campos_documento', nullable: true })
-    campos: { campo: string; tipo: string }[];
+    campos: { campo: string; tipo: string; descricao?: string; opcoes?: string[] }[];
 
     @Column({ type: 'text', name: 'clausulas', nullable: false })
     clausulas: string;

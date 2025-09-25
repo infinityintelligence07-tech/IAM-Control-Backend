@@ -77,3 +77,8 @@ export enum ETiposProdutos {
     OUTRO = 'OUTRO',
     VESTUARIO = 'VESTUARIO',
 }
+
+export enum ETipoDocumento {
+    CONTRATO = 'CONTRATO',
+    TERMO = 'TERMO',
+}

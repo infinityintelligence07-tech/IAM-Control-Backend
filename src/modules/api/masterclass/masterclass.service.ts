@@ -1,19 +1,25 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EStatusAlunosGeral } from '../../config/entities/enum';
+import { MasterclassPreCadastros } from '../../config/entities/masterclassPreCadastros.entity';
 import {
     CreateMasterclassEventoDto,
     UploadMasterclassCsvDto,
     MasterclassPreCadastroDto,
     ConfirmarPresencaDto,
     VincularAlunoDto,
+    AlterarInteresseDto,
     MasterclassPreCadastroResponseDto,
     MasterclassEventoResponseDto,
     MasterclassListResponseDto,
     MasterclassStatsDto,
+    CreateMasterclassPreCadastroDto,
+    UpdateMasterclassPreCadastroDto,
+    SoftDeleteMasterclassPreCadastroDto,
 } from './dto/masterclass.dto';
 import * as csv from 'csv-parser';
 import { Readable } from 'stream';
+import * as XLSX from 'xlsx';
 
 @Injectable()
 export class MasterclassService {
@@ -57,9 +63,139 @@ export class MasterclassService {
     }
 
     /**
+     * Detectar tipo de arquivo e converter para dados JSON
+     */
+    private parseFileToJson(buffer: Buffer, filename: string): any[] {
+        const extension = filename.toLowerCase().split('.').pop();
+
+        console.log('Processando arquivo:', { filename, extension, size: buffer.length });
+
+        const rawData: any[] = [];
+
+        if (extension === 'csv') {
+            // Processar CSV
+            const csvText = buffer.toString('utf-8');
+            const lines = csvText.split('\n').filter((line) => line.trim());
+            const headers = lines[0].split(',').map((h) => h.trim().replace(/['"]/g, ''));
+
+            console.log('Headers do CSV:', headers);
+
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim()) {
+                    const values = lines[i].split(',').map((v) => v.trim().replace(/['"]/g, ''));
+                    const row: any = {};
+                    headers.forEach((header, index) => {
+                        row[header] = values[index] || '';
+                    });
+                    rawData.push(row);
+                }
+            }
+        } else if (extension === 'xls' || extension === 'xlsx') {
+            // Processar Excel - sempre usar linha 2 como cabeçalho
+            const workbook = XLSX.read(buffer, {
+                type: 'buffer',
+                cellText: false,
+                cellDates: true,
+                raw: false,
+            });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+
+            // Ler como array para ter controle total sobre as linhas
+            const arrayData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            console.log('Dados brutos do Excel (primeiras 5 linhas):', arrayData.slice(0, 5));
+            console.log('Total de linhas brutas do Excel:', arrayData.length);
+
+            // Verificar se há pelo menos 3 linhas (linha 1: logos, linha 2: cabeçalho, linha 3: separador)
+            if (arrayData.length < 3) {
+                throw new Error('Arquivo Excel deve ter pelo menos 3 linhas (logo, cabeçalho e dados)');
+            }
+
+            // Linha 2 é sempre o cabeçalho
+            const headers = arrayData[1].map((header: any) => header?.toString().trim() || '');
+            console.log('Cabeçalho da linha 2:', headers);
+
+            // Processar dados a partir da linha 4 (pular linha 3 que é separador)
+            for (let i = 3; i < arrayData.length; i++) {
+                const row = arrayData[i];
+                if (row && row.some((cell: any) => cell && cell.toString().trim())) {
+                    const rowData: any = {};
+                    headers.forEach((header, index) => {
+                        rowData[header] = row[index]?.toString().trim() || '';
+                    });
+                    rawData.push(rowData);
+                }
+            }
+
+            console.log('Dados processados (primeiras 3 linhas):', rawData.slice(0, 3));
+            console.log('Total de registros válidos:', rawData.length);
+        }
+
+        // Normalizar nomes das colunas para garantir compatibilidade
+        const normalizedData = rawData
+            .map((row) => {
+                const normalizedRow: any = {};
+
+                Object.keys(row).forEach((key) => {
+                    const normalizedKey = key.toLowerCase().trim();
+                    const value = row[key];
+
+                    // Log detalhado para debug
+                    if (value && value.toString().trim()) {
+                        console.log(`Processando campo: "${key}" -> "${normalizedKey}" = "${value}"`);
+                    }
+
+                    // Pular apenas valores realmente vazios
+                    if (!value || !value.toString().trim()) {
+                        return;
+                    }
+
+                    const cleanValue = value?.toString().trim();
+
+                    // Mapear campos baseado nos cabeçalhos específicos da linha 2
+                    if (normalizedKey.includes('nome') || normalizedKey === 'name') {
+                        normalizedRow.nome = cleanValue;
+                        console.log('✅ Nome mapeado:', normalizedRow.nome);
+                    } else if (normalizedKey.includes('email') || normalizedKey === 'e-mail') {
+                        normalizedRow.email = cleanValue.toLowerCase();
+                        console.log('✅ Email mapeado:', normalizedRow.email);
+                    } else if (normalizedKey.includes('whatsapp') || normalizedKey.includes('telefone') || normalizedKey.includes('phone')) {
+                        normalizedRow.telefone = cleanValue.replace(/\D/g, '');
+                        console.log('✅ Telefone mapeado:', normalizedRow.telefone);
+                    } else if (normalizedKey.includes('confirma') || normalizedKey.includes('presen')) {
+                        // Campo de confirmação de presença - pode ser usado para valor inicial
+                        normalizedRow.confirmacao_presenca = cleanValue;
+                        console.log('✅ Confirmação de presença mapeada:', normalizedRow.confirmacao_presenca);
+                    } else {
+                        // Manter campos adicionais
+                        normalizedRow[normalizedKey] = cleanValue;
+                        console.log(`📝 Campo adicional: ${normalizedKey} = ${cleanValue}`);
+                    }
+                });
+
+                return normalizedRow;
+            })
+            .filter((row) => {
+                // Filtrar linhas que têm pelo menos um dos campos obrigatórios preenchidos
+                return row.nome || row.email || row.telefone;
+            });
+
+        console.log('Dados normalizados - primeira linha:', normalizedData[0]);
+        console.log('Total de linhas válidas:', normalizedData.length);
+
+        return normalizedData;
+    }
+
+    /**
      * Upload e processamento de arquivo CSV/Excel
      */
-    async uploadCsv(id_turma: number, csvBuffer: Buffer, observacoes?: string): Promise<{ message: string; total_processados: number; erros: string[] }> {
+    async uploadCsv(
+        id_turma: number,
+        fileBuffer: Buffer,
+        observacoes?: string,
+        filename?: string,
+        criado_por?: number,
+    ): Promise<{ message: string; total_processados: number; duplicados_ignorados: number; erros: string[] }> {
         try {
             const erros: string[] = [];
             let total_processados = 0;
@@ -74,60 +210,112 @@ export class MasterclassService {
                 throw new NotFoundException(`Turma com ID ${id_turma} não encontrada`);
             }
 
-            // Converter buffer para stream
-            const stream = Readable.from(csvBuffer.toString());
+            // Processar arquivo (CSV, XLS ou XLSX)
+            const fileData = this.parseFileToJson(fileBuffer, filename || 'arquivo.csv');
 
-            const preCadastros: MasterclassPreCadastroDto[] = [];
-
-            // Processar CSV
-            await new Promise((resolve, reject) => {
-                stream
-                    .pipe(csv())
-                    .on('data', (row) => {
-                        try {
-                            // Validar dados obrigatórios
-                            if (!row.nome || !row.email || !row.telefone) {
-                                erros.push(`Linha inválida: ${JSON.stringify(row)} - Campos obrigatórios faltando`);
-                                return;
-                            }
-
-                            // Limpar e formatar dados
-                            const preCadastro: MasterclassPreCadastroDto = {
-                                nome_aluno: row.nome?.trim(),
-                                email: row.email?.trim().toLowerCase(),
-                                telefone: row.telefone?.trim().replace(/\D/g, ''), // Remover caracteres não numéricos
-                                id_turma,
-                                observacoes: observacoes || row.observacoes?.trim(),
-                            };
-
-                            preCadastros.push(preCadastro);
-                            total_processados++;
-                        } catch (error: unknown) {
-                            const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-                            erros.push(`Erro ao processar linha: ${JSON.stringify(row)} - ${errorMessage}`);
-                        }
-                    })
-                    .on('end', resolve)
-                    .on('error', reject);
+            // Buscar pré-cadastros existentes para esta turma
+            const preCadastrosExistentes = await this.uow.masterclassPreCadastrosRP.find({
+                where: { id_turma },
+                select: ['email', 'telefone', 'nome_aluno'],
             });
 
-            // Inserir no banco de dados
-            const eventosParaInserir = preCadastros.map((pc) => ({
-                nome_aluno: pc.nome_aluno,
-                email: pc.email,
-                telefone: pc.telefone,
-                evento_nome: `Masterclass - ${turma.cidade}`,
-                data_evento: new Date(turma.data_inicio),
-                id_turma: pc.id_turma,
-                observacoes: pc.observacoes,
-                confirmou_presenca: false,
-            }));
+            console.log(`Encontrados ${preCadastrosExistentes.length} pré-cadastros existentes para a turma ${id_turma}`);
 
-            await this.uow.masterclassPreCadastrosRP.save(eventosParaInserir);
+            // Criar conjunto de emails, telefones e nomes existentes para verificação rápida
+            const emailsExistentes = new Set(preCadastrosExistentes.map((pc) => pc.email.toLowerCase()));
+            const telefonesExistentes = new Set(preCadastrosExistentes.map((pc) => pc.telefone));
+            const nomesExistentes = new Set(preCadastrosExistentes.map((pc) => pc.nome_aluno.toLowerCase().trim()));
+
+            const preCadastros: MasterclassPreCadastroDto[] = [];
+            let duplicadosEncontrados = 0;
+
+            // Processar cada linha do arquivo
+            for (const row of fileData) {
+                try {
+                    // Validar dados obrigatórios
+                    if (!row.nome || !row.email || !row.telefone) {
+                        erros.push(`Linha inválida: ${JSON.stringify(row)} - Campos obrigatórios faltando`);
+                        continue;
+                    }
+
+                    // Limpar e formatar dados
+                    const nomeLimpo = row.nome?.toString().trim().toLowerCase();
+                    const emailLimpo = row.email?.toString().trim().toLowerCase();
+                    const telefoneLimpo = row.telefone?.toString().trim().replace(/\D/g, '');
+
+                    // Verificar se já existe um pré-cadastro com este email, telefone ou nome+email nesta turma
+                    const emailExiste = emailsExistentes.has(emailLimpo);
+                    const telefoneExiste = telefonesExistentes.has(telefoneLimpo);
+                    const nomeEmailExiste = nomesExistentes.has(nomeLimpo) && emailsExistentes.has(emailLimpo);
+
+                    if (emailExiste || telefoneExiste || nomeEmailExiste) {
+                        duplicadosEncontrados++;
+                        let motivoDuplicacao = '';
+                        if (nomeEmailExiste) {
+                            motivoDuplicacao = `nome e email iguais (${nomeLimpo} / ${emailLimpo})`;
+                        } else if (emailExiste) {
+                            motivoDuplicacao = `email já cadastrado (${emailLimpo})`;
+                        } else if (telefoneExiste) {
+                            motivoDuplicacao = `telefone já cadastrado (${telefoneLimpo})`;
+                        }
+
+                        erros.push(`Duplicado: ${row.nome} - ${motivoDuplicacao} já está cadastrado nesta masterclass`);
+                        console.log(`⚠️ Pré-cadastro duplicado encontrado: ${row.nome} - ${motivoDuplicacao}`);
+                        continue;
+                    }
+
+                    const preCadastro: MasterclassPreCadastroDto = {
+                        nome_aluno: row.nome?.toString().trim(),
+                        email: emailLimpo,
+                        telefone: this.formatarTelefone(telefoneLimpo),
+                        id_turma,
+                        observacoes: observacoes || row.observacoes?.toString().trim(),
+                    };
+
+                    preCadastros.push(preCadastro);
+                    total_processados++;
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+                    erros.push(`Erro ao processar linha: ${JSON.stringify(row)} - ${errorMessage}`);
+                }
+            }
+
+            console.log(`Processamento concluído. Total: ${preCadastros.length} registros, ${duplicadosEncontrados} duplicados encontrados`);
+
+            let mensagem = '';
+            if (preCadastros.length > 0) {
+                // Inserir no banco de dados apenas os novos registros
+                const eventosParaInserir = preCadastros.map((pc) => ({
+                    nome_aluno: pc.nome_aluno,
+                    email: pc.email,
+                    telefone: pc.telefone,
+                    evento_nome: `Masterclass - ${turma.cidade}`,
+                    data_evento: new Date(turma.data_inicio),
+                    id_turma: pc.id_turma,
+                    presente: pc.presente || false,
+                    teve_interesse: pc.teve_interesse || false,
+                    observacoes: pc.observacoes,
+                    criado_por: criado_por,
+                }));
+
+                await this.uow.masterclassPreCadastrosRP.save(eventosParaInserir);
+                mensagem = `${total_processados} pré-cadastros inseridos com sucesso.`;
+            } else {
+                mensagem = 'Nenhum novo pré-cadastro inserido.';
+            }
+
+            if (duplicadosEncontrados > 0) {
+                mensagem += ` ${duplicadosEncontrados} registros duplicados foram ignorados.`;
+            }
+
+            if (erros.length > 0) {
+                mensagem += ` ${erros.length} erros encontrados.`;
+            }
 
             return {
-                message: `CSV processado com sucesso. ${total_processados} pré-cadastros inseridos.`,
+                message: mensagem,
                 total_processados,
+                duplicados_ignorados: duplicadosEncontrados,
                 erros,
             };
         } catch (error) {
@@ -172,7 +360,7 @@ export class MasterclassService {
                     evento.total_inscritos++;
                 }
 
-                if (pc.confirmou_presenca) {
+                if (pc.presente) {
                     evento.total_presentes++;
                 } else {
                     evento.total_ausentes++;
@@ -232,8 +420,8 @@ export class MasterclassService {
                 evento_nome: `${turma.id_treinamento_fk?.treinamento || 'Masterclass'} - ${turma.cidade}`,
                 data_evento: new Date(turma.data_inicio),
                 total_inscritos: preCadastros.length,
-                total_presentes: preCadastros.filter((pc) => pc.confirmou_presenca).length,
-                total_ausentes: preCadastros.filter((pc) => !pc.confirmou_presenca).length,
+                total_presentes: preCadastros.filter((pc) => pc.presente).length,
+                total_ausentes: preCadastros.filter((pc) => !pc.presente).length,
                 total_vinculados: preCadastros.filter((pc) => pc.id_aluno_vinculado).length,
                 taxa_presenca: 0,
                 pre_cadastros: preCadastros.map((pc) => this.mapToResponseDto(pc)),
@@ -265,7 +453,7 @@ export class MasterclassService {
                 throw new NotFoundException('Pré-cadastro não encontrado');
             }
 
-            if (preCadastro.confirmou_presenca) {
+            if (preCadastro.presente) {
                 throw new BadRequestException('Presença já foi confirmada anteriormente');
             }
 
@@ -273,9 +461,9 @@ export class MasterclassService {
             await this.uow.masterclassPreCadastrosRP.update(
                 { id: confirmarDto.id_pre_cadastro },
                 {
-                    confirmou_presenca: true,
-                    data_confirmacao_presenca: new Date(),
+                    presente: true,
                     observacoes: confirmarDto.observacoes || preCadastro.observacoes,
+                    atualizado_por: confirmarDto.atualizado_por,
                 },
             );
 
@@ -359,12 +547,56 @@ export class MasterclassService {
     }
 
     /**
+     * Alterar interesse de um pré-cadastro
+     */
+    async alterarInteresse(alterarDto: AlterarInteresseDto): Promise<MasterclassPreCadastroResponseDto> {
+        try {
+            const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
+                where: { id: alterarDto.id_pre_cadastro },
+                relations: ['aluno_vinculado', 'aluno_vinculado.id_polo_fk'],
+            });
+
+            if (!preCadastro) {
+                throw new NotFoundException('Pré-cadastro não encontrado');
+            }
+
+            // Atualizar interesse
+            await this.uow.masterclassPreCadastrosRP.update(
+                { id: alterarDto.id_pre_cadastro },
+                {
+                    teve_interesse: alterarDto.teve_interesse,
+                    observacoes: alterarDto.observacoes || preCadastro.observacoes,
+                    atualizado_por: alterarDto.atualizado_por,
+                },
+            );
+
+            // Buscar dados atualizados
+            const preCadastroAtualizado = await this.uow.masterclassPreCadastrosRP.findOne({
+                where: { id: alterarDto.id_pre_cadastro },
+                relations: ['aluno_vinculado', 'aluno_vinculado.id_polo_fk'],
+            });
+
+            if (!preCadastroAtualizado) {
+                throw new NotFoundException('Pré-cadastro atualizado não encontrado');
+            }
+
+            return this.mapToResponseDto(preCadastroAtualizado);
+        } catch (error) {
+            console.error('Erro ao alterar interesse:', error);
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao alterar interesse');
+        }
+    }
+
+    /**
      * Buscar alunos ausentes para campanhas de marketing
      */
     async buscarAlunosAusentesParaMarketing(evento_nome?: string): Promise<MasterclassStatsDto[]> {
         try {
             const whereCondition: any = {
-                confirmou_presenca: false, // Apenas ausentes
+                presente: false, // Apenas ausentes
             };
 
             if (evento_nome) {
@@ -424,10 +656,10 @@ export class MasterclassService {
             nome_aluno: pc.nome_aluno,
             email: pc.email,
             telefone: pc.telefone,
+            presente: pc.presente,
+            teve_interesse: pc.teve_interesse,
             evento_nome: pc.evento_nome,
             data_evento: pc.data_evento,
-            confirmou_presenca: pc.confirmou_presenca,
-            data_confirmacao_presenca: pc.data_confirmacao_presenca,
             id_aluno_vinculado: pc.id_aluno_vinculado,
             data_vinculacao_aluno: pc.data_vinculacao_aluno,
             observacoes: pc.observacoes,
@@ -449,5 +681,153 @@ export class MasterclassService {
             criado_em: pc.criado_em,
             atualizado_em: pc.atualizado_em,
         };
+    }
+
+    /**
+     * Formatar telefone com máscara
+     */
+    private formatarTelefone(telefone: string): string {
+        if (!telefone) return '';
+
+        // Remove todos os caracteres não numéricos
+        const numeros = telefone.replace(/\D/g, '');
+
+        // Aplica a máscara baseada no tamanho
+        if (numeros.length === 11) {
+            // (11) 99999-9999
+            return `(${numeros.slice(0, 2)}) ${numeros.slice(2, 7)}-${numeros.slice(7)}`;
+        } else if (numeros.length === 10) {
+            // (11) 9999-9999
+            return `(${numeros.slice(0, 2)}) ${numeros.slice(2, 6)}-${numeros.slice(6)}`;
+        } else if (numeros.length === 13) {
+            // +55 (11) 99999-9999
+            return `+${numeros.slice(0, 2)} (${numeros.slice(2, 4)}) ${numeros.slice(4, 9)}-${numeros.slice(9)}`;
+        } else if (numeros.length === 12) {
+            // +55 (11) 9999-9999
+            return `+${numeros.slice(0, 2)} (${numeros.slice(2, 4)}) ${numeros.slice(4, 8)}-${numeros.slice(8)}`;
+        }
+
+        // Se não se encaixar em nenhum padrão, retorna apenas os números
+        return numeros;
+    }
+
+    /**
+     * Inserir novo pré-cadastro manualmente
+     */
+    async inserirPreCadastro(data: CreateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
+        try {
+            // Buscar dados da turma
+            const turma = await this.uow.turmasRP.findOne({
+                where: { id: data.id_turma },
+                relations: ['id_treinamento_fk', 'id_polo_fk'],
+            });
+
+            if (!turma) {
+                throw new NotFoundException(`Turma com ID ${data.id_turma} não encontrada`);
+            }
+
+            // Criar novo pré-cadastro
+            const novoPreCadastro = this.uow.masterclassPreCadastrosRP.create({
+                nome_aluno: data.nome_aluno,
+                email: data.email,
+                telefone: this.formatarTelefone(data.telefone),
+                evento_nome: `Masterclass - ${turma.cidade}`,
+                data_evento: new Date(turma.data_inicio),
+                id_turma: data.id_turma,
+                presente: data.presente || false,
+                teve_interesse: data.teve_interesse || false,
+                criado_por: data.criado_por,
+            });
+
+            return await this.uow.masterclassPreCadastrosRP.save(novoPreCadastro);
+        } catch (error) {
+            console.error('Erro ao inserir pré-cadastro:', error);
+            throw new Error('Erro interno do servidor ao inserir pré-cadastro');
+        }
+    }
+
+    /**
+     * Editar pré-cadastro existente
+     */
+    async editarPreCadastro(id: string, data: UpdateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
+        try {
+            const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
+                where: {
+                    id,
+                    deletado_em: null,
+                },
+            });
+
+            if (!preCadastro) {
+                throw new NotFoundException(`Pré-cadastro com ID ${id} não encontrado`);
+            }
+
+            // Atualizar dados
+            if (data.nome_aluno !== undefined) preCadastro.nome_aluno = data.nome_aluno;
+            if (data.email !== undefined) preCadastro.email = data.email;
+            if (data.telefone !== undefined) preCadastro.telefone = this.formatarTelefone(data.telefone);
+            if (data.presente !== undefined) preCadastro.presente = data.presente;
+            if (data.teve_interesse !== undefined) preCadastro.teve_interesse = data.teve_interesse;
+            if (data.atualizado_por !== undefined) preCadastro.atualizado_por = data.atualizado_por;
+
+            return await this.uow.masterclassPreCadastrosRP.save(preCadastro);
+        } catch (error) {
+            console.error('Erro ao editar pré-cadastro:', error);
+            throw new Error('Erro interno do servidor ao editar pré-cadastro');
+        }
+    }
+
+    /**
+     * Soft delete pré-cadastro
+     */
+    async softDeletePreCadastro(id: string, softDeleteDto: SoftDeleteMasterclassPreCadastroDto): Promise<void> {
+        try {
+            const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
+                where: {
+                    id,
+                    deletado_em: null,
+                },
+            });
+
+            if (!preCadastro) {
+                throw new NotFoundException(`Pré-cadastro com ID ${id} não encontrado`);
+            }
+
+            preCadastro.deletado_em = new Date(softDeleteDto.deletado_em);
+            preCadastro.atualizado_por = softDeleteDto.atualizado_por;
+
+            await this.uow.masterclassPreCadastrosRP.save(preCadastro);
+            console.log('Pré-cadastro marcado como deletado:', id);
+        } catch (error) {
+            console.error('Erro ao fazer soft delete do pré-cadastro:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao fazer soft delete do pré-cadastro');
+        }
+    }
+
+    /**
+     * Excluir pré-cadastro permanentemente
+     */
+    async excluirPreCadastro(id: string): Promise<void> {
+        try {
+            const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
+                where: { id },
+            });
+
+            if (!preCadastro) {
+                throw new NotFoundException(`Pré-cadastro com ID ${id} não encontrado`);
+            }
+
+            await this.uow.masterclassPreCadastrosRP.remove(preCadastro);
+            console.log('Pré-cadastro excluído permanentemente:', id);
+        } catch (error) {
+            console.error('Erro ao excluir pré-cadastro permanentemente:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao excluir pré-cadastro');
+        }
     }
 }

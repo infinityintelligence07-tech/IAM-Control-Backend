@@ -5,8 +5,9 @@ import { TreinamentosModule } from './treinamentos/treinamentos.module';
 import { TurmasModule } from './turmas/turmas.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { MasterclassModule } from './masterclass/masterclass.module';
+import { DocumentosModule } from './documentos/documentos.module';
 
 @Module({
-    imports: [AlunosModule, PolosModule, TreinamentosModule, TurmasModule, WhatsAppModule, MasterclassModule],
+    imports: [AlunosModule, PolosModule, TreinamentosModule, TurmasModule, WhatsAppModule, MasterclassModule, DocumentosModule],
 })
 export class ApiModule {}

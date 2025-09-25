@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto } from './dto/alunos.dto';
+import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto } from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike } from 'typeorm';
+import { Alunos } from '../../config/entities/alunos.entity';
 
 @Injectable()
 export class AlunosService {
@@ -34,6 +35,9 @@ export class AlunosService {
         if (id_polo) {
             whereConditions.id_polo = id_polo;
         }
+
+        // Adicionar condição para excluir registros deletados
+        whereConditions.deletado_em = null;
 
         // Configurar opções de busca
         const findOptions: FindManyOptions = {
@@ -112,7 +116,10 @@ export class AlunosService {
     async findById(id: number): Promise<AlunoResponseDto | null> {
         try {
             const aluno = await this.uow.alunosRP.findOne({
-                where: { id },
+                where: {
+                    id,
+                    deletado_em: null,
+                },
                 relations: ['id_polo_fk'],
             });
 
@@ -155,6 +162,160 @@ export class AlunosService {
         } catch (error) {
             console.error('Erro ao buscar aluno por ID:', error);
             throw new Error('Erro interno do servidor ao buscar aluno');
+        }
+    }
+
+    async create(createAlunoDto: CreateAlunoDto): Promise<AlunoResponseDto> {
+        try {
+            const novoAluno = new Alunos();
+            Object.assign(novoAluno, createAlunoDto);
+            novoAluno.criado_por = createAlunoDto.criado_por;
+
+            const alunoSalvo = await this.uow.alunosRP.save(novoAluno);
+            console.log('Aluno criado com sucesso:', alunoSalvo);
+
+            return {
+                id: alunoSalvo.id,
+                id_polo: alunoSalvo.id_polo,
+                nome: alunoSalvo.nome,
+                nome_cracha: alunoSalvo.nome_cracha,
+                email: alunoSalvo.email,
+                genero: alunoSalvo.genero,
+                cpf: alunoSalvo.cpf,
+                data_nascimento: alunoSalvo.data_nascimento,
+                telefone_um: alunoSalvo.telefone_um,
+                telefone_dois: alunoSalvo.telefone_dois,
+                cep: alunoSalvo.cep,
+                logradouro: alunoSalvo.logradouro,
+                complemento: alunoSalvo.complemento,
+                numero: alunoSalvo.numero,
+                bairro: alunoSalvo.bairro,
+                cidade: alunoSalvo.cidade,
+                estado: alunoSalvo.estado,
+                profissao: alunoSalvo.profissao,
+                status_aluno_geral: alunoSalvo.status_aluno_geral,
+                possui_deficiencia: alunoSalvo.possui_deficiencia,
+                desc_deficiencia: alunoSalvo.desc_deficiencia,
+                url_foto_aluno: alunoSalvo.url_foto_aluno,
+                created_at: alunoSalvo.criado_em,
+                updated_at: alunoSalvo.atualizado_em,
+                polo: undefined, // Será carregado se necessário
+            };
+        } catch (error) {
+            console.error('Erro ao criar aluno:', error);
+            throw new Error('Erro interno do servidor ao criar aluno');
+        }
+    }
+
+    async update(id: number, updateAlunoDto: UpdateAlunoDto): Promise<AlunoResponseDto> {
+        try {
+            const aluno = await this.uow.alunosRP.findOne({
+                where: {
+                    id,
+                    deletado_em: null,
+                },
+                relations: ['id_polo_fk'],
+            });
+
+            if (!aluno) {
+                throw new NotFoundException(`Aluno com ID ${id} não encontrado`);
+            }
+
+            // Atualizar campos fornecidos
+            Object.assign(aluno, updateAlunoDto);
+            if (updateAlunoDto.atualizado_por !== undefined) {
+                aluno.atualizado_por = updateAlunoDto.atualizado_por;
+            }
+
+            const alunoAtualizado = await this.uow.alunosRP.save(aluno);
+            console.log('Aluno atualizado com sucesso:', alunoAtualizado);
+
+            return {
+                id: alunoAtualizado.id,
+                id_polo: alunoAtualizado.id_polo,
+                nome: alunoAtualizado.nome,
+                nome_cracha: alunoAtualizado.nome_cracha,
+                email: alunoAtualizado.email,
+                genero: alunoAtualizado.genero,
+                cpf: alunoAtualizado.cpf,
+                data_nascimento: alunoAtualizado.data_nascimento,
+                telefone_um: alunoAtualizado.telefone_um,
+                telefone_dois: alunoAtualizado.telefone_dois,
+                cep: alunoAtualizado.cep,
+                logradouro: alunoAtualizado.logradouro,
+                complemento: alunoAtualizado.complemento,
+                numero: alunoAtualizado.numero,
+                bairro: alunoAtualizado.bairro,
+                cidade: alunoAtualizado.cidade,
+                estado: alunoAtualizado.estado,
+                profissao: alunoAtualizado.profissao,
+                status_aluno_geral: alunoAtualizado.status_aluno_geral,
+                possui_deficiencia: alunoAtualizado.possui_deficiencia,
+                desc_deficiencia: alunoAtualizado.desc_deficiencia,
+                url_foto_aluno: alunoAtualizado.url_foto_aluno,
+                created_at: alunoAtualizado.criado_em,
+                updated_at: alunoAtualizado.atualizado_em,
+                polo: alunoAtualizado.id_polo_fk
+                    ? {
+                          id: alunoAtualizado.id_polo_fk.id,
+                          nome: alunoAtualizado.id_polo_fk.polo,
+                      }
+                    : undefined,
+            };
+        } catch (error) {
+            console.error('Erro ao atualizar aluno:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao atualizar aluno');
+        }
+    }
+
+    async softDelete(id: number, softDeleteDto: SoftDeleteAlunoDto): Promise<void> {
+        try {
+            const aluno = await this.uow.alunosRP.findOne({
+                where: {
+                    id,
+                    deletado_em: null,
+                },
+            });
+
+            if (!aluno) {
+                throw new NotFoundException(`Aluno com ID ${id} não encontrado`);
+            }
+
+            aluno.deletado_em = new Date(softDeleteDto.deletado_em);
+            aluno.atualizado_por = softDeleteDto.atualizado_por;
+
+            await this.uow.alunosRP.save(aluno);
+            console.log('Aluno marcado como deletado:', id);
+        } catch (error) {
+            console.error('Erro ao fazer soft delete do aluno:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao fazer soft delete do aluno');
+        }
+    }
+
+    async delete(id: number): Promise<void> {
+        try {
+            const aluno = await this.uow.alunosRP.findOne({
+                where: { id },
+            });
+
+            if (!aluno) {
+                throw new NotFoundException(`Aluno com ID ${id} não encontrado`);
+            }
+
+            await this.uow.alunosRP.remove(aluno);
+            console.log('Aluno excluído permanentemente:', id);
+        } catch (error) {
+            console.error('Erro ao excluir aluno permanentemente:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao excluir aluno');
         }
     }
 }

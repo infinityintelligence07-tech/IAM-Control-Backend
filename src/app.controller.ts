@@ -9,4 +9,9 @@ export class AppController {
     getHello(): string {
         return this.appService.getHello();
     }
+
+    @Get('test')
+    getTest() {
+        return { message: 'App controller funcionando!', timestamp: new Date().toISOString() };
+    }
 }

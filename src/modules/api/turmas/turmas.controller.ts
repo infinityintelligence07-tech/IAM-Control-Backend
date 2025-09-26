@@ -44,7 +44,7 @@ export class TurmasController {
         console.log('Buscando alunos disponíveis para turma:', id_turma);
         const pageNum = page ? parseInt(page.toString()) : 1;
         const limitNum = limit ? parseInt(limit.toString()) : 10;
-        return this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum);
+        return await this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum);
     }
 
     @Get('aluno/:id')
@@ -67,13 +67,39 @@ export class TurmasController {
     @UseGuards(JwtAuthGuard)
     async findAll(@Query() filters: GetTurmasDto): Promise<TurmasListResponseDto> {
         console.log('Buscando turmas com filtros:', filters);
-        return this.turmasService.findAll(filters);
+        return await this.turmasService.findAll(filters);
+    }
+
+    @Get('public')
+    async findAllPublic(@Query() filters: GetTurmasDto): Promise<TurmasListResponseDto> {
+        console.log('🔓 Buscando turmas (endpoint público) com filtros:', filters);
+        return await this.turmasService.findAll(filters);
+    }
+
+    @Get('ipr-bonus')
+    async findIPRTurmasBonus(): Promise<TurmaResponseDto[]> {
+        console.log('🎯 Buscando turmas de IPR para bônus...');
+        return this.turmasService.findIPRTurmasBonus();
+    }
+
+    @Get('public/ipr-bonus')
+    async findIPRTurmasBonusPublic(): Promise<TurmaResponseDto[]> {
+        console.log('🔓 [DEBUG] Endpoint público /api/turmas/public/ipr-bonus chamado');
+        console.log('🔓 [DEBUG] Chamando turmasService.findIPRTurmasBonus()');
+        try {
+            const result = await this.turmasService.findIPRTurmasBonus();
+            console.log('🔓 [DEBUG] Resultado do service:', result.length, 'turmas encontradas');
+            return result;
+        } catch (error) {
+            console.error('🔓 [DEBUG] Erro no controller:', error);
+            throw error;
+        }
     }
 
     @Get(':id')
     async findById(@Param('id', ParseIntPipe) id: number): Promise<TurmaResponseDto | null> {
         console.log('Buscando turma por ID:', id);
-        return this.turmasService.findById(id);
+        return await this.turmasService.findById(id);
     }
 
     @Post()

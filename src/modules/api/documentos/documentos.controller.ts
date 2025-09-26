@@ -8,9 +8,13 @@ import {
     DocumentosListResponseDto,
     GerarContratoDto,
     DocumentosFilterDto,
+    CriarContratoZapSignDto,
+    RespostaContratoZapSignDto,
+    AtualizarStatusContratoDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { Request } from 'express';
+import { EFormasPagamento } from '@/modules/config/entities/enum';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('documentos')
@@ -92,5 +96,114 @@ export class DocumentosController {
         console.log('Buscando termos - página:', page, 'limite:', limit);
         const filter: DocumentosFilterDto = { tipo_documento: 'TERMO' as any };
         return this.documentosService.findAllDocumentos(page, limit, filter);
+    }
+
+    @Get('formas-pagamento')
+    getFormasPagamento() {
+        console.log('Buscando formas de pagamento disponíveis');
+        return {
+            formas_pagamento: Object.values(EFormasPagamento).map((forma) => ({
+                id: forma,
+                nome: forma
+                    .replace(/_/g, ' ')
+                    .toLowerCase()
+                    .replace(/\b\w/g, (l) => l.toUpperCase()),
+                valor: forma,
+            })),
+        };
+    }
+
+    // Endpoints para integração com ZapSign
+    @Get('zapsign/templates')
+    async buscarTemplatesZapSign() {
+        console.log('=== ENDPOINT CHAMADO: /api/documentos/zapsign/templates ===');
+        console.log('Buscando templates do banco de dados');
+        try {
+            const resultado = await this.documentosService.buscarTemplatesZapSign();
+            console.log('Templates encontrados:', resultado.length);
+            console.log('Primeiros templates:', resultado.slice(0, 3));
+            return resultado;
+        } catch (error) {
+            console.error('Erro no controller:', error);
+            throw error;
+        }
+    }
+
+    // Endpoint público para teste (TEMPORÁRIO)
+    @Get('public/templates')
+    async buscarTemplatesPublico() {
+        console.log('=== ENDPOINT PÚBLICO CHAMADO: /api/documentos/public/templates ===');
+        try {
+            const resultado = await this.documentosService.buscarTemplatesZapSign();
+            console.log('Templates encontrados (público):', resultado.length);
+            return resultado;
+        } catch (error) {
+            console.error('Erro no endpoint público:', error);
+            throw error;
+        }
+    }
+
+    @Get('public/documentos')
+    async buscarDocumentosPublico() {
+        console.log('=== ENDPOINT PÚBLICO CHAMADO: /api/documentos/public/documentos ===');
+        try {
+            const resultado = await this.documentosService.buscarTemplatesZapSign();
+            console.log('Documentos encontrados (público):', resultado.length);
+            return resultado;
+        } catch (error) {
+            console.error('Erro no endpoint público:', error);
+            throw error;
+        }
+    }
+
+    // Endpoint de teste simples
+    @Get('test')
+    teste() {
+        console.log('=== ENDPOINT DE TESTE CHAMADO ===');
+        return { message: 'Endpoint funcionando!', timestamp: new Date().toISOString() };
+    }
+
+    // Endpoint público de teste sem autenticação
+    @Get('public/test')
+    testePublico() {
+        console.log('=== ENDPOINT PÚBLICO DE TESTE CHAMADO ===');
+        return { message: 'Teste público funcionando!', timestamp: new Date().toISOString() };
+    }
+
+    @Get('zapsign/buscar-aluno')
+    async buscarAluno(@Query('q') query: string) {
+        console.log('Buscando aluno por:', query);
+        return this.documentosService.buscarAluno(query);
+    }
+
+    @Post('zapsign/criar-contrato')
+    async criarContratoZapSign(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
+        console.log('Criando contrato no ZapSign para aluno:', criarContratoDto.id_aluno);
+        const userId = (req.user as any)?.sub;
+        return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
+    }
+
+    @Get('zapsign/documento/:id')
+    async buscarDocumentoZapSign(@Param('id') id: string): Promise<RespostaContratoZapSignDto> {
+        console.log('Buscando documento do ZapSign:', id);
+        return this.documentosService.buscarDocumentoZapSign(id);
+    }
+
+    @Get('zapsign/documentos')
+    async listarDocumentosZapSign() {
+        console.log('Listando documentos do ZapSign');
+        return this.documentosService.listarDocumentosZapSign();
+    }
+
+    @Delete('zapsign/documento/:id/cancelar')
+    async cancelarDocumentoZapSign(@Param('id') id: string) {
+        console.log('Cancelando documento do ZapSign:', id);
+        return this.documentosService.cancelarDocumentoZapSign(id);
+    }
+
+    @Post('zapsign/documento/:id/lembrete')
+    async enviarLembreteAssinatura(@Param('id') id: string) {
+        console.log('Enviando lembrete para documento:', id);
+        return this.documentosService.enviarLembreteAssinatura(id);
     }
 }

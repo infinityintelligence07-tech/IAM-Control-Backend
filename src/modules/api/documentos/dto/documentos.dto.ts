@@ -110,3 +110,102 @@ export class DocumentosFilterDto {
     @IsEnum(ETipoDocumento)
     tipo_documento?: ETipoDocumento;
 }
+
+// DTOs para integração com ZapSign
+export class CriarContratoZapSignDto {
+    @IsString()
+    @IsNotEmpty()
+    template_id: string;
+
+    @IsString()
+    @IsNotEmpty()
+    id_aluno: string;
+
+    @IsString()
+    @IsNotEmpty()
+    id_treinamento: string;
+
+    @IsString()
+    @IsNotEmpty()
+    forma_pagamento: string; // 'A_VISTA' | 'PARCELADO'
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => FormaPagamentoDto)
+    formas_pagamento?: FormaPagamentoDto[];
+
+    @IsOptional()
+    @IsString()
+    id_turma_bonus?: string; // Turma de IPR (Imersão Prosperar)
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_id?: string; // ID do aluno se for do banco
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_nome?: string; // Nome manual se não for do banco
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_cpf?: string; // CPF manual se não for do banco
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_id?: string; // ID do aluno se for do banco
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_nome?: string; // Nome manual se não for do banco
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_cpf?: string; // CPF manual se não for do banco
+
+    @IsOptional()
+    @IsString()
+    observacoes?: string;
+}
+
+export class FormaPagamentoDto {
+    @IsString()
+    @IsNotEmpty()
+    forma: string; // 'PIX', 'BOLETO', 'CARTAO_CREDITO', etc.
+
+    @IsNotEmpty()
+    valor: number;
+
+    @IsOptional()
+    @IsString()
+    descricao?: string;
+}
+
+export class RespostaContratoZapSignDto {
+    id: string;
+    nome_documento: string;
+    status: string;
+    url_assinatura?: string;
+    signers: Array<{
+        nome: string;
+        email: string;
+        status: string;
+        tipo: 'sign' | 'witness';
+    }>;
+    created_at: string;
+    file_url?: string;
+}
+
+export class AtualizarStatusContratoDto {
+    @IsString()
+    @IsNotEmpty()
+    documento_id: string;
+
+    @IsString()
+    @IsNotEmpty()
+    status: string;
+
+    @IsOptional()
+    @IsString()
+    observacoes?: string;
+}

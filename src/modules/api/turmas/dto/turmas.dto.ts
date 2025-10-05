@@ -294,6 +294,9 @@ export class TurmaResponseDto {
         id: number;
         nome: string;
         tipo: string;
+        sigla_treinamento?: string;
+        treinamento?: string;
+        url_logo_treinamento?: string;
     };
     lider?: {
         id: number;
@@ -303,6 +306,7 @@ export class TurmaResponseDto {
     alunos_confirmados_count?: number;
     pre_cadastrados_count?: number;
     presentes_count?: number;
+    inadimplentes_count?: number;
 }
 
 export class TurmasListResponseDto {
@@ -329,7 +333,10 @@ export class AlunoTurmaResponseDto {
         nome: string;
         email: string;
         nome_cracha: string;
+        cpf?: string;
         status_aluno_geral?: string;
+        possui_deficiencia?: boolean;
+        desc_deficiencia?: string;
     };
 }
 

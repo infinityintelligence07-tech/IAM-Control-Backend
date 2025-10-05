@@ -21,7 +21,7 @@ export class TurmasAlunosTreinamentos extends BaseEntity {
     @Column({ type: 'float', name: 'preco_treinamento', nullable: false })
     preco_treinamento: number;
 
-    @Column({ type: 'jsonb', array: true, name: 'forma_pgto', nullable: false })
+    @Column({ type: 'jsonb', name: 'forma_pgto', nullable: false })
     forma_pgto: { forma: EFormasPagamento; valor: number }[];
 
     @Column({ type: 'float', name: 'preco_total_pago', nullable: false })

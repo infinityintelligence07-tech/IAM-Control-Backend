@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ETipoDocumento } from '@/modules/config/entities/enum';
 
@@ -127,7 +127,7 @@ export class CriarContratoZapSignDto {
 
     @IsString()
     @IsNotEmpty()
-    forma_pagamento: string; // 'A_VISTA' | 'PARCELADO'
+    forma_pagamento: string; // 'A_VISTA' | 'PARCELADO' | 'AMBOS'
 
     @IsOptional()
     @IsArray()
@@ -138,6 +138,19 @@ export class CriarContratoZapSignDto {
     @IsOptional()
     @IsString()
     id_turma_bonus?: string; // Turma de IPR (Imersão Prosperar)
+
+    @IsOptional()
+    @IsArray()
+    tipos_bonus?: string[]; // Array com os tipos de bônus selecionados
+
+    @IsOptional()
+    valores_bonus?: Record<string, boolean>; // Objeto com os valores dos bônus
+
+    @IsOptional()
+    campos_variaveis?: Record<string, string>; // Campos variáveis do contrato
+
+    @IsOptional()
+    valores_formas_pagamento?: Record<string, any>; // Valores das formas de pagamento
 
     @IsOptional()
     @IsString()
@@ -208,4 +221,34 @@ export class AtualizarStatusContratoDto {
     @IsOptional()
     @IsString()
     observacoes?: string;
+}
+
+export class FiltrosContratosDto {
+    @IsOptional()
+    @IsNumberString()
+    page?: string;
+
+    @IsOptional()
+    @IsNumberString()
+    limit?: string;
+
+    @IsOptional()
+    @IsString()
+    id_aluno?: string;
+
+    @IsOptional()
+    @IsString()
+    id_treinamento?: string;
+
+    @IsOptional()
+    @IsString()
+    status?: string;
+
+    @IsOptional()
+    @IsString()
+    data_inicio?: string;
+
+    @IsOptional()
+    @IsString()
+    data_fim?: string;
 }

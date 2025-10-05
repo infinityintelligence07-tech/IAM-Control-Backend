@@ -15,6 +15,7 @@ import {
 } from './dto/documentos.dto';
 import { ETipoDocumento, EFormasPagamento } from '@/modules/config/entities/enum';
 import { ZapSignService } from './zapsign.service';
+import * as PDFDocument from 'pdfkit';
 
 @Injectable()
 export class DocumentosService {
@@ -292,6 +293,42 @@ export class DocumentosService {
         return nomeCampo;
     }
 
+    // Método para gerar PDF real usando PDFKit
+    private gerarPDFReal(titulo: string, conteudo: string): Promise<string> {
+        const doc = new PDFDocument({
+            size: 'A4',
+            margins: {
+                top: 50,
+                bottom: 50,
+                left: 50,
+                right: 50,
+            },
+        });
+
+        const buffers: Buffer[] = [];
+        doc.on('data', buffers.push.bind(buffers));
+
+        return new Promise((resolve, reject) => {
+            doc.on('end', () => {
+                const pdfBuffer = Buffer.concat(buffers);
+                resolve(pdfBuffer.toString('base64'));
+            });
+
+            doc.on('error', reject);
+
+            // Título
+            doc.fontSize(18).font('Helvetica-Bold').text(titulo, { align: 'center' }).moveDown(2);
+
+            // Conteúdo
+            doc.fontSize(12).font('Helvetica').text(conteudo, {
+                align: 'justify',
+                lineGap: 5,
+            });
+
+            doc.end();
+        });
+    }
+
     // Métodos para integração com ZapSign
     async buscarTemplatesZapSign() {
         try {
@@ -322,6 +359,18 @@ export class DocumentosService {
         } catch (error) {
             console.error('Erro ao buscar documentos do banco:', error);
             throw new BadRequestException('Erro ao buscar documentos');
+        }
+    }
+
+    async buscarTemplatesZapSignReais() {
+        try {
+            console.log('Buscando templates reais do ZapSign...');
+            const templates = await this.zapSignService.getTemplates();
+            console.log('Templates do ZapSign encontrados:', templates.length);
+            return templates;
+        } catch (error) {
+            console.error('Erro ao buscar templates do ZapSign:', error);
+            throw new BadRequestException('Erro ao buscar templates do ZapSign');
         }
     }
 
@@ -440,8 +489,9 @@ export class DocumentosService {
                 });
             }
 
-            // Calcular preço total baseado na forma de pagamento
+            // Calcular preço total e processar formas de pagamento
             const precoTotal = treinamento.preco_treinamento;
+            console.log('Preço total calculado:', precoTotal, 'Tipo:', typeof precoTotal);
             const formasPagamento: { forma: EFormasPagamento; valor: number }[] = [];
 
             if (criarContratoDto.forma_pagamento === 'A_VISTA') {
@@ -456,6 +506,106 @@ export class DocumentosService {
                         valor: fp.valor,
                     });
                 });
+            } else if (criarContratoDto.forma_pagamento === 'PARCELADO' && criarContratoDto.valores_formas_pagamento) {
+                // Processar formas de pagamento do novo formato para PARCELADO
+                const valoresFormas = criarContratoDto.valores_formas_pagamento;
+
+                // Parcelado - Cartão de Crédito
+                if (valoresFormas['Parcelado - Cartão de Crédito']) {
+                    const valorParcelado = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
+                    const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas);
+                    const valorParcela = valorParcelado / numeroParcelas;
+
+                    // Adicionar entrada
+                    formasPagamento.push({
+                        forma: EFormasPagamento.CARTAO_CREDITO,
+                        valor: valorParcela,
+                    });
+
+                    // Adicionar parcelas restantes (todas no cartão de crédito)
+                    for (let i = 1; i < numeroParcelas; i++) {
+                        formasPagamento.push({
+                            forma: EFormasPagamento.CARTAO_CREDITO,
+                            valor: valorParcela,
+                        });
+                    }
+                }
+
+                // Parcelado - Boleto
+                if (valoresFormas['Parcelado - Boleto: Entrada de  em  +  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .']) {
+                    const dadosBoleto = valoresFormas['Parcelado - Boleto: Entrada de  em  +  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .'];
+                    const valorEntrada = parseInt(dadosBoleto.valor_entrada) / 100;
+                    const valorParcelas = parseInt(dadosBoleto.valor_parcelas) / 100;
+                    const numeroParcelas = parseInt(dadosBoleto.numero_parcelas);
+                    const valorParcela = valorParcelas / numeroParcelas;
+
+                    // Adicionar entrada (cartão de crédito)
+                    formasPagamento.push({
+                        forma: EFormasPagamento.CARTAO_CREDITO,
+                        valor: valorEntrada,
+                    });
+
+                    // Adicionar parcelas restantes (todas em boleto)
+                    for (let i = 0; i < numeroParcelas; i++) {
+                        formasPagamento.push({
+                            forma: EFormasPagamento.BOLETO,
+                            valor: valorParcela,
+                        });
+                    }
+                }
+            } else if (criarContratoDto.forma_pagamento === 'AMBOS' && criarContratoDto.valores_formas_pagamento) {
+                // Processar formas de pagamento do novo formato
+                const valoresFormas = criarContratoDto.valores_formas_pagamento;
+
+                // À Vista
+                if (valoresFormas['À Vista - Cartão de Crédito']) {
+                    formasPagamento.push({
+                        forma: EFormasPagamento.CARTAO_CREDITO,
+                        valor: parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100, // Converter centavos para reais
+                    });
+                }
+
+                // Parcelado - Cartão de Crédito
+                if (valoresFormas['Parcelado - Cartão de Crédito']) {
+                    const valorParcelado = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
+                    const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas);
+                    const valorParcela = valorParcelado / numeroParcelas;
+
+                    // Adicionar entrada
+                    formasPagamento.push({
+                        forma: EFormasPagamento.CARTAO_CREDITO,
+                        valor: valorParcela,
+                    });
+
+                    // Adicionar parcelas restantes (todas no cartão de crédito)
+                    for (let i = 1; i < numeroParcelas; i++) {
+                        formasPagamento.push({
+                            forma: EFormasPagamento.CARTAO_CREDITO,
+                            valor: valorParcela,
+                        });
+                    }
+                }
+
+                // Parcelado - Boleto
+                if (valoresFormas['Parcelado - Boleto']) {
+                    const valorParcelado = parseInt(valoresFormas['Parcelado - Boleto'].valor) / 100;
+                    const numeroParcelas = parseInt(valoresFormas['Parcelado - Boleto'].numero_parcelas);
+                    const valorParcela = valorParcelado / numeroParcelas;
+
+                    // Adicionar entrada (cartão de crédito)
+                    formasPagamento.push({
+                        forma: EFormasPagamento.CARTAO_CREDITO,
+                        valor: valorParcela,
+                    });
+
+                    // Adicionar parcelas restantes (todas em boleto)
+                    for (let i = 1; i < numeroParcelas; i++) {
+                        formasPagamento.push({
+                            forma: EFormasPagamento.BOLETO,
+                            valor: valorParcela,
+                        });
+                    }
+                }
             }
 
             // Buscar template do documento
@@ -467,25 +617,49 @@ export class DocumentosService {
                 throw new NotFoundException('Template não encontrado');
             }
 
+            // Mapear template local para template do ZapSign
+            const templateZapSignMap = {
+                '1': '6954d3cd-c6ea-4b9d-beaa-5c9934138e07', // Contrato do Confronto
+                '2': 'a35062c6-c47b-4558-8413-a1362ac19293', // Todos os Demais Treinamentos
+                '3': '40cacb5c-e713-49e1-bf0e-cfe56182de3b', // Liberty
+                '4': '4ada6bdb-6902-4013-a2b9-3b385edd6ea2', // Liberty Begin
+                '6': '56817967-021c-40b4-a863-5a515147a825', // Mesa de Destino
+                '7': 'a35062c6-c47b-4558-8413-a1362ac19293', // Demais Treinamentos
+                '8': '40cbde33-00c1-4355-869c-fbc990f0b7c5', // Termo de Autorização
+                '9': '6a564088-c79b-4907-a3d8-02d55368e9d3', // Termo de Consentimento
+            };
+
+            const templateIdZapSign = templateZapSignMap[criarContratoDto.template_id] || '6954d3cd-c6ea-4b9d-beaa-5c9934138e07';
+
             // Criar nome do documento
             const nomeDocumento = `Contrato ${treinamento.treinamento} - ${aluno.nome} - ${new Date().toLocaleDateString('pt-BR')}`;
 
             // Construir documento dinamicamente baseado nos campos da tabela
             const documentoConteudo = this.construirDocumentoDinamico(template, aluno, treinamento, turma, formasPagamento, criarContratoDto);
 
-            // Criar documento no ZapSign usando o conteúdo construído
+            // Criar documento no ZapSign usando conteúdo gerado
+            console.log('Criando documento no ZapSign com conteúdo gerado');
+            console.log('Signers:', JSON.stringify(signers, null, 2));
+
+            // Gerar PDF real com o conteúdo do contrato
+            console.log('Iniciando geração de PDF...');
+            const pdfBase64 = await this.gerarPDFReal(nomeDocumento, documentoConteudo);
+
+            console.log('PDF gerado com sucesso! Tamanho:', pdfBase64.length);
+            console.log('PDF gerado (primeiros 100 caracteres):', pdfBase64.substring(0, 100));
+
             const documentoZapSign = await this.zapSignService.createDocumentFromContent({
                 name: nomeDocumento,
-                content: documentoConteudo,
+                content: pdfBase64,
                 signers: signers,
                 message: `Contrato para o treinamento ${treinamento.treinamento}. ${criarContratoDto.observacoes || ''}`,
             });
 
             // Salvar informações do contrato no banco
             // Buscar turma do aluno (se houver turma de IPR)
-            let turmaAluno = null;
+            let turmaAlunoBonus = null;
             if (criarContratoDto.id_turma_bonus) {
-                turmaAluno = await this.uow.turmasAlunosRP.findOne({
+                turmaAlunoBonus = await this.uow.turmasAlunosRP.findOne({
                     where: {
                         id_turma: parseInt(criarContratoDto.id_turma_bonus),
                         id_aluno: criarContratoDto.id_aluno,
@@ -494,11 +668,39 @@ export class DocumentosService {
                 });
             }
 
-            // Turma de IPR é opcional
+            // Criar registro de turma_aluno se não existir
+            let turmaAluno = await this.uow.turmasAlunosRP.findOne({
+                where: {
+                    id_aluno: criarContratoDto.id_aluno, // Manter como string
+                    id_turma: turma?.id || 1, // Usar turma padrão se não especificada
+                },
+            });
+
+            if (!turmaAluno) {
+                // Criar registro de turma_aluno
+                turmaAluno = this.uow.turmasAlunosRP.create({
+                    id_turma: turma?.id || 1, // Usar turma padrão se não especificada
+                    id_aluno: criarContratoDto.id_aluno, // Manter como string
+                    nome_cracha: aluno.nome,
+                    numero_cracha: `CR${Date.now()}`, // Número único para o crachá
+                    criado_por: userId,
+                    atualizado_por: userId,
+                });
+                turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
+                console.log('Registro turma_aluno criado:', turmaAluno.id);
+            }
 
             // Criar registro de treinamento do aluno
+            console.log('Dados para criar turmaAlunoTreinamento:', {
+                id_turma_aluno: turmaAluno.id,
+                id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                preco_treinamento: treinamento.preco_treinamento,
+                forma_pgto: formasPagamento,
+                preco_total_pago: precoTotal,
+            });
+
             const turmaAlunoTreinamento = this.uow.turmasAlunosTreinamentosRP.create({
-                id_turma_aluno: turmaAluno?.id || '1', // ID padrão se não houver turma
+                id_turma_aluno: turmaAluno.id, // Usar o ID real da turma_aluno
                 id_treinamento: parseInt(criarContratoDto.id_treinamento),
                 preco_treinamento: treinamento.preco_treinamento,
                 forma_pgto: formasPagamento,
@@ -509,10 +711,13 @@ export class DocumentosService {
 
             const turmaAlunoTreinamentoSalvo = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
 
+            // Compilar todos os dados do contrato para armazenamento
+            const dadosContrato = this.compilarDadosContrato(criarContratoDto, aluno, treinamento, turma, formasPagamento, template, documentoConteudo);
+
             // Criar registro de contrato
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamentoSalvo.id,
-                id_documento: 1, // ID do documento padrão, pode ser ajustado conforme necessário
+                id_documento: parseInt(criarContratoDto.template_id),
                 status_ass_aluno: 'ASSINATURA_PENDENTE' as any,
                 data_ass_aluno: new Date(),
                 testemunha_um: criarContratoDto.testemunha_um_id ? parseInt(criarContratoDto.testemunha_um_id) : null,
@@ -521,11 +726,43 @@ export class DocumentosService {
                 testemunha_dois: criarContratoDto.testemunha_dois_id ? parseInt(criarContratoDto.testemunha_dois_id) : null,
                 status_ass_test_dois: 'ASSINATURA_PENDENTE' as any,
                 data_ass_test_dois: new Date(),
+                dados_contrato: dadosContrato,
                 criado_por: userId,
                 atualizado_por: userId,
             });
 
-            await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+            const contratoSalvo = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+
+            // Atualizar o objeto dados_contrato com o ID do ZapSign e informações das testemunhas
+            const dadosContratoAtualizado = { ...dadosContrato };
+
+            // Adicionar ID do ZapSign
+            dadosContratoAtualizado.contrato.id_documento_zapsign = documentoZapSign.id;
+
+            // Preencher informações das testemunhas se forem do banco
+            if (criarContratoDto.testemunha_um_id) {
+                const testemunhaUm = await this.uow.alunosRP.findOne({
+                    where: { id: parseInt(criarContratoDto.testemunha_um_id), deletado_em: null },
+                });
+                if (testemunhaUm) {
+                    dadosContratoAtualizado.testemunhas.testemunha_um.email = testemunhaUm.email;
+                    dadosContratoAtualizado.testemunhas.testemunha_um.telefone = testemunhaUm.telefone_um;
+                }
+            }
+
+            if (criarContratoDto.testemunha_dois_id) {
+                const testemunhaDois = await this.uow.alunosRP.findOne({
+                    where: { id: parseInt(criarContratoDto.testemunha_dois_id), deletado_em: null },
+                });
+                if (testemunhaDois) {
+                    dadosContratoAtualizado.testemunhas.testemunha_dois.email = testemunhaDois.email;
+                    dadosContratoAtualizado.testemunhas.testemunha_dois.telefone = testemunhaDois.telefone_um;
+                }
+            }
+
+            // Atualizar o registro com os dados completos
+            contratoSalvo.dados_contrato = dadosContratoAtualizado;
+            await this.uow.turmasAlunosTreinamentosContratosRP.save(contratoSalvo);
 
             // Retornar resposta formatada
             return {
@@ -584,20 +821,190 @@ export class DocumentosService {
         }
     }
 
-    async cancelarDocumentoZapSign(documentoId: string) {
+    async cancelarDocumentoZapSign(contratoId: string) {
         try {
-            return await this.zapSignService.cancelDocument(documentoId);
+            console.log('=== INICIANDO SOFT DELETE DE CONTRATO ===');
+            console.log('ID do contrato recebido:', contratoId);
+
+            // Validar se o ID é um número válido
+            const contratoIdNum = parseInt(contratoId);
+            if (isNaN(contratoIdNum)) {
+                throw new BadRequestException('ID do contrato inválido');
+            }
+
+            // Buscar o contrato no banco de dados
+            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: { id: contratoIdNum.toString() },
+            });
+
+            if (!contrato) {
+                console.log('Contrato não encontrado no banco de dados');
+                throw new BadRequestException('Contrato não encontrado');
+            }
+
+            // Verificar se o contrato já foi deletado
+            if (contrato.deletado_em) {
+                console.log('Contrato já foi deletado anteriormente');
+                throw new BadRequestException('Este contrato já foi removido anteriormente');
+            }
+
+            console.log('Contrato encontrado:', {
+                id: contrato.id,
+                temDadosContrato: !!contrato.dados_contrato,
+                statusAssAluno: contrato.status_ass_aluno,
+                jaDeletado: !!contrato.deletado_em,
+            });
+
+            // Tentar cancelar no ZapSign se o contrato foi criado lá
+            let resultadoZapSign = null;
+            if (contrato.dados_contrato) {
+                console.log('=== TENTANDO CANCELAR NO ZAPSIGN ===');
+
+                // Extrair o ID do ZapSign dos dados do contrato
+                const idDocumentoZapSign = contrato.dados_contrato?.contrato?.id_documento_zapsign;
+                const idDocumentoZapSignAlt1 = contrato.dados_contrato?.id_documento_zapsign;
+                const idDocumentoZapSignAlt2 = contrato.dados_contrato?.documento_final?.id_zapsign;
+
+                const idFinal = idDocumentoZapSign || idDocumentoZapSignAlt1 || idDocumentoZapSignAlt2;
+                console.log('ID do documento ZapSign encontrado:', idFinal);
+
+                if (idFinal) {
+                    try {
+                        console.log('Cancelando documento no ZapSign com ID:', idFinal);
+                        resultadoZapSign = await this.zapSignService.cancelDocument(idFinal);
+                        console.log('Documento cancelado no ZapSign com sucesso');
+                    } catch (error) {
+                        console.log('Erro ao cancelar no ZapSign (continuando com soft delete):', error instanceof Error ? error.message : 'Erro desconhecido');
+                        // Não falha o processo se não conseguir cancelar no ZapSign
+                    }
+                } else {
+                    console.log('ID do ZapSign não encontrado - apenas soft delete será realizado');
+                }
+            } else {
+                console.log('Contrato não possui dados_contrato - apenas soft delete será realizado');
+            }
+
+            // Realizar soft delete no banco de dados
+            console.log('=== REALIZANDO SOFT DELETE ===');
+            contrato.deletado_em = new Date();
+            contrato.atualizado_em = new Date();
+
+            await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+
+            console.log('Soft delete realizado com sucesso');
+            console.log('Data de deleção:', contrato.deletado_em);
+
+            return {
+                message: 'Contrato removido com sucesso',
+                deletado_em: contrato.deletado_em,
+                zapSign_cancelado: !!resultadoZapSign,
+                zapSign_resultado: resultadoZapSign,
+            };
         } catch (error) {
-            console.error('Erro ao cancelar documento do ZapSign:', error);
-            throw new BadRequestException('Erro ao cancelar documento do ZapSign');
+            console.error('=== ERRO NO SOFT DELETE ===');
+            console.error('Erro ao realizar soft delete do contrato:', error);
+            // Se já é um BadRequestException, relançar sem modificar
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+            // Para outros erros, criar uma nova exceção
+            throw new BadRequestException('Erro ao remover contrato');
         }
     }
 
-    async enviarLembreteAssinatura(documentoId: string) {
+    async enviarLembreteAssinatura(contratoId: string) {
         try {
-            return await this.zapSignService.sendReminder(documentoId);
+            console.log('=== INICIANDO ENVIO DE LEMBRETE ===');
+            console.log('ID do contrato recebido:', contratoId);
+
+            // Validar se o ID é um número válido
+            const contratoIdNum = parseInt(contratoId);
+            if (isNaN(contratoIdNum)) {
+                throw new BadRequestException('ID do contrato inválido');
+            }
+
+            // Buscar o contrato no banco de dados
+            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: { id: contratoIdNum.toString() },
+            });
+
+            if (!contrato) {
+                console.log('Contrato não encontrado no banco de dados');
+                throw new BadRequestException('Contrato não encontrado');
+            }
+
+            console.log('Contrato encontrado:', {
+                id: contrato.id,
+                temDadosContrato: !!contrato.dados_contrato,
+                statusAssAluno: contrato.status_ass_aluno,
+            });
+
+            // Verificar se o contrato tem dados_contrato
+            if (!contrato.dados_contrato) {
+                console.log('Contrato não possui dados_contrato');
+                throw new BadRequestException('Este contrato não possui dados completos. Não é possível enviar lembrete no ZapSign.');
+            }
+
+            // Extrair o ID do ZapSign dos dados do contrato
+            console.log('=== BUSCANDO ID DO ZAPSIGN ===');
+            console.log('Estrutura dos dados_contrato:', JSON.stringify(contrato.dados_contrato, null, 2));
+
+            // Tentar diferentes caminhos para encontrar o ID do ZapSign
+            const idDocumentoZapSign = contrato.dados_contrato?.contrato?.id_documento_zapsign;
+            const idDocumentoZapSignAlt1 = contrato.dados_contrato?.id_documento_zapsign;
+            const idDocumentoZapSignAlt2 = contrato.dados_contrato?.documento_final?.id_zapsign;
+
+            console.log('ID do documento ZapSign (caminho 1):', idDocumentoZapSign);
+            console.log('ID do documento ZapSign (caminho 2):', idDocumentoZapSignAlt1);
+            console.log('ID do documento ZapSign (caminho 3):', idDocumentoZapSignAlt2);
+
+            const idFinal = idDocumentoZapSign || idDocumentoZapSignAlt1 || idDocumentoZapSignAlt2;
+            console.log('ID final escolhido:', idFinal);
+
+            if (!idFinal) {
+                console.log('=== FALLBACK: BUSCANDO POR NOME ===');
+                // Fallback: tentar encontrar o documento pelo nome
+                try {
+                    const documentos = await this.zapSignService.getDocuments();
+                    console.log('Documentos encontrados no ZapSign:', documentos.length);
+
+                    const nomeDocumento = contrato.dados_contrato?.documento_final?.nome;
+                    const nomeAluno = contrato.dados_contrato?.aluno?.nome;
+
+                    console.log('Procurando documento com nome:', nomeDocumento);
+                    console.log('Nome do aluno:', nomeAluno);
+
+                    const documentoEncontrado = documentos.find((doc) => {
+                        const matchNome = doc.name === nomeDocumento;
+                        const matchAluno = doc.name?.includes(nomeAluno);
+                        console.log(`Documento "${doc.name}" - Match nome: ${matchNome}, Match aluno: ${matchAluno}`);
+                        return matchNome || matchAluno;
+                    });
+
+                    if (documentoEncontrado) {
+                        console.log('Documento encontrado no ZapSign:', documentoEncontrado.id);
+                        return await this.zapSignService.sendReminder(documentoEncontrado.id);
+                    } else {
+                        console.log('Documento não encontrado no ZapSign. Este contrato pode não ter sido criado no ZapSign ou já foi cancelado.');
+                        throw new BadRequestException('Documento não encontrado no ZapSign. Este contrato pode não ter sido criado no ZapSign ou já foi cancelado.');
+                    }
+                } catch (error) {
+                    console.log('Erro ao buscar documentos no ZapSign:', error instanceof Error ? error.message : 'Erro desconhecido');
+                    throw new BadRequestException('Não foi possível enviar lembrete. Verifique se o contrato foi criado no ZapSign.');
+                }
+            }
+
+            console.log('=== ENVIANDO LEMBRETE NO ZAPSIGN ===');
+            console.log('ID do documento ZapSign:', idFinal);
+            return await this.zapSignService.sendReminder(idFinal);
         } catch (error) {
+            console.error('=== ERRO NO ENVIO DE LEMBRETE ===');
             console.error('Erro ao enviar lembrete:', error);
+            // Se já é um BadRequestException, relançar sem modificar
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+            // Para outros erros, criar uma nova exceção
             throw new BadRequestException('Erro ao enviar lembrete');
         }
     }
@@ -660,12 +1067,21 @@ export class DocumentosService {
                             valor = aluno.telefone_um;
                         } else if (campoLower.includes('preço') || campoLower.includes('valor')) {
                             valor = `R$ ${treinamento.preco_treinamento.toFixed(2).replace('.', ',')}`;
+                        } else if (campoLower.includes('data') && campoLower.includes('imersão') && campoLower.includes('prosperar')) {
+                            valor = turma?.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : '___/___/___';
                         } else if (campoLower.includes('data')) {
                             valor = new Date().toLocaleDateString('pt-BR');
                         } else if (campoLower.includes('local')) {
                             valor = aluno.id_polo_fk?.nome || 'Local a definir';
+                        } else if (campoLower.includes('quantidade') && campoLower.includes('inscrições')) {
+                            valor = dadosContrato.campos_variaveis?.['Quantidade de Inscrições'] || '1';
                         } else {
-                            valor = `[${campo.campo}]`;
+                            // Verificar se é um campo variável
+                            if (dadosContrato.campos_variaveis && dadosContrato.campos_variaveis[campo.campo]) {
+                                valor = dadosContrato.campos_variaveis[campo.campo];
+                            } else {
+                                valor = `[${campo.campo}]`;
+                            }
                         }
                         break;
                     }
@@ -695,12 +1111,41 @@ export class DocumentosService {
                     infoPagamento += ` + ${formasPagamento.length - 1} parcelas`;
                 }
             }
+        } else if (dadosContrato.forma_pagamento === 'AMBOS') {
+            infoPagamento = 'AMBOS (À VISTA E PARCELADO)';
+            const valoresFormas = dadosContrato.valores_formas_pagamento || {};
+
+            if (valoresFormas['À Vista - Cartão de Crédito']) {
+                const valorVista = parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100;
+                infoPagamento += ` - À Vista: R$ ${valorVista.toFixed(2).replace('.', ',')}`;
+            }
+
+            if (valoresFormas['Parcelado - Cartão de Crédito']) {
+                const valorParcelado = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
+                const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas);
+                const valorParcela = valorParcelado / numeroParcelas;
+                infoPagamento += ` - Parcelado: ${numeroParcelas}x R$ ${valorParcela.toFixed(2).replace('.', ',')}`;
+            }
         }
 
         // Construir informações de bônus
         let infoBonus = '';
-        if (dadosContrato.id_turma_bonus && turma) {
-            infoBonus = `BÔNUS: INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${turma.data_inicio}`;
+        const tiposBonus = dadosContrato.tipos_bonus || [];
+        const valoresBonus = dadosContrato.valores_bonus || {};
+        const camposVariaveis = dadosContrato.campos_variaveis || {};
+
+        if (tiposBonus.includes('100_dias') && tiposBonus.includes('ipr')) {
+            const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || '1';
+            const dataImersao = turma?.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : '___/___/___';
+            infoBonus = `BÔNUS: 100 DIAS + ${quantidadeInscricoes} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${dataImersao}`;
+        } else if (tiposBonus.includes('100_dias')) {
+            infoBonus = 'BÔNUS: 100 DIAS';
+        } else if (tiposBonus.includes('ipr') && dadosContrato.id_turma_bonus && turma) {
+            const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || '1';
+            const dataImersao = new Date(turma.data_inicio).toLocaleDateString('pt-BR');
+            infoBonus = `BÔNUS: ${quantidadeInscricoes} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${dataImersao}`;
+        } else if (valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}']) {
+            infoBonus = 'BÔNUS: OUTROS (conforme especificado)';
         } else {
             infoBonus = 'BÔNUS: NÃO SE APLICA';
         }
@@ -744,23 +1189,23 @@ O presente instrumento tem como objetivo realizar a inscrição da pessoa abaixo
 │ PREÇO DO CONTRATO: R$ ${treinamento.preco_treinamento.toFixed(2).replace('.', ',')}                    │
 │                                                                                 │
 │ BÔNUS:                                                                          │
-│ ☐ NÃO SE APLICA                                                                 │
-│ ☐ 100 DIAS                                                                      │
-│ ${dadosContrato.id_turma_bonus ? '☑' : '☐'} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ___/___/___            │
-│ ☐ OUTROS: _________________________________________________                     │
+│ ${tiposBonus.length === 0 || (!tiposBonus.includes('100_dias') && !tiposBonus.includes('ipr') && !valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}']) ? '☑' : '☐'} NÃO SE APLICA                                                                 │
+│ ${tiposBonus.includes('100_dias') ? '☑' : '☐'} 100 DIAS                                                                      │
+│ ${tiposBonus.includes('ipr') ? '☑' : '☐'} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${turma?.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : '___/___/___'}            │
+│ ${valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}'] ? '☑' : '☐'} OUTROS: _________________________________________________                     │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │ FORMAS DE PAGAMENTO                                                             │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │ À VISTA:                                                                        │
-│ ${dadosContrato.forma_pagamento === 'A_VISTA' ? '☑' : '☐'} CARTÃO DE CRÉDITO     ${dadosContrato.forma_pagamento === 'A_VISTA' ? '☐' : '☐'} CARTÃO DE DÉBITO    │
+│ ${dadosContrato.forma_pagamento === 'A_VISTA' || dadosContrato.forma_pagamento === 'AMBOS' ? '☑' : '☐'} CARTÃO DE CRÉDITO     ${dadosContrato.forma_pagamento === 'A_VISTA' || dadosContrato.forma_pagamento === 'AMBOS' ? '☐' : '☐'} CARTÃO DE DÉBITO    │
 │ ☐ PIX/TRANSFERÊNCIA    ☐ ESPÉCIE                                               │
 │                                                                                 │
 │ PARCELADO:                                                                      │
-│ ${dadosContrato.forma_pagamento === 'PARCELADO' ? '☑' : '☐'} CARTÃO DE CRÉDITO                                 │
-│ BOLETO: ENTRADA DE R$ _____ EM ___/___/___                                      │
-│ + ____ PARCELAS DE: R$ _____                                                   │
+│ ${dadosContrato.forma_pagamento === 'PARCELADO' || dadosContrato.forma_pagamento === 'AMBOS' ? '☑' : '☐'} CARTÃO DE CRÉDITO                                 │
+│ BOLETO: ENTRADA DE R$ ${dadosContrato.forma_pagamento === 'AMBOS' && dadosContrato.valores_formas_pagamento?.['Parcelado - Cartão de Crédito'] ? (parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].valor) / 100 / parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].numero_parcelas)).toFixed(2).replace('.', ',') : '_____'} EM ___/___/___                                      │
+│ + ${dadosContrato.forma_pagamento === 'AMBOS' && dadosContrato.valores_formas_pagamento?.['Parcelado - Cartão de Crédito'] ? parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].numero_parcelas) - 1 : '____'} PARCELAS DE: R$ ${dadosContrato.forma_pagamento === 'AMBOS' && dadosContrato.valores_formas_pagamento?.['Parcelado - Cartão de Crédito'] ? (parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].valor) / 100 / parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].numero_parcelas)).toFixed(2).replace('.', ',') : '_____'}                                                   │
 │ MELHOR DIA DE VENCIMENTO: _____                                                 │
 │ 1º BOLETO PARA: ___/___/___                                                     │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -792,5 +1237,313 @@ ${infoTestemunhas}
         }
 
         return documento;
+    }
+
+    /**
+     * Compila todos os dados do contrato em um objeto estruturado para armazenamento
+     */
+    private compilarDadosContrato(
+        criarContratoDto: CriarContratoZapSignDto,
+        aluno: any,
+        treinamento: any,
+        turma: any,
+        formasPagamento: any[],
+        template: any,
+        documentoConteudo: string,
+    ): any {
+        const dataAtual = new Date();
+
+        return {
+            // Informações básicas do contrato
+            contrato: {
+                id_documento_zapsign: null, // Será preenchido após criação no ZapSign
+                template_id: criarContratoDto.template_id,
+                data_criacao: dataAtual.toISOString(),
+                data_criacao_brasil: dataAtual.toLocaleDateString('pt-BR'),
+                observacoes: criarContratoDto.observacoes || null,
+                status: 'PENDENTE_ASSINATURA',
+            },
+
+            // Dados do aluno
+            aluno: {
+                id: aluno.id,
+                nome: aluno.nome,
+                email: aluno.email,
+                cpf: aluno.cpf,
+                telefone_um: aluno.telefone_um,
+                telefone_dois: aluno.telefone_dois || null,
+                data_nascimento: aluno.data_nascimento || null,
+                endereco: {
+                    logradouro: aluno.logradouro || null,
+                    numero: aluno.numero || null,
+                    complemento: aluno.complemento || null,
+                    bairro: aluno.bairro || null,
+                    cidade: aluno.cidade || null,
+                    estado: aluno.estado || null,
+                    cep: aluno.cep || null,
+                },
+                polo: {
+                    id: aluno.id_polo_fk?.id || null,
+                    nome: aluno.id_polo_fk?.nome || null,
+                    cidade: aluno.id_polo_fk?.cidade || null,
+                    estado: aluno.id_polo_fk?.estado || null,
+                },
+            },
+
+            // Dados do treinamento
+            treinamento: {
+                id: treinamento.id,
+                nome: treinamento.treinamento,
+                sigla: treinamento.sigla_treinamento || null,
+                preco: treinamento.preco_treinamento,
+                descricao: treinamento.descricao || null,
+                carga_horaria: treinamento.carga_horaria || null,
+                modalidade: treinamento.modalidade || null,
+            },
+
+            // Dados da turma bônus (IPR)
+            turma_bonus: turma
+                ? {
+                      id: turma.id,
+                      turma: turma.turma,
+                      edicao_turma: turma.edicao_turma || null,
+                      data_inicio: turma.data_inicio,
+                      data_fim: turma.data_final,
+                      status_turma: turma.status_turma,
+                      cidade: turma.cidade,
+                      estado: turma.estado,
+                      lider_evento: turma.lider_evento_fk
+                          ? {
+                                id: turma.lider_evento_fk.id,
+                                nome: turma.lider_evento_fk.nome,
+                                email: turma.lider_evento_fk.email,
+                            }
+                          : null,
+                  }
+                : null,
+
+            // Formas de pagamento
+            pagamento: {
+                forma_pagamento: criarContratoDto.forma_pagamento,
+                preco_total: treinamento.preco_treinamento,
+                formas_pagamento: formasPagamento.map((fp) => ({
+                    forma: fp.forma,
+                    valor: fp.valor,
+                    descricao: fp.descricao || null,
+                })),
+                parcelas: formasPagamento.length,
+                valor_entrada: formasPagamento.length > 0 ? formasPagamento[0].valor : treinamento.preco_treinamento,
+                valor_parcelas: formasPagamento.length > 1 ? formasPagamento.slice(1).map((fp) => fp.valor) : [],
+                valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || null,
+            },
+
+            // Bônus e campos variáveis
+            bonus: {
+                tipos_bonus: criarContratoDto.tipos_bonus || [],
+                valores_bonus: criarContratoDto.valores_bonus || {},
+                id_turma_bonus: criarContratoDto.id_turma_bonus || null,
+                turma_bonus_info: turma
+                    ? {
+                          id: turma.id,
+                          turma: turma.turma,
+                          edicao_turma: turma.edicao_turma || null,
+                          data_inicio: turma.data_inicio,
+                          data_fim: turma.data_final,
+                          status_turma: turma.status_turma,
+                          cidade: turma.cidade,
+                          estado: turma.estado,
+                      }
+                    : null,
+            },
+
+            // Campos variáveis do contrato
+            campos_variaveis: criarContratoDto.campos_variaveis || {},
+
+            // Testemunhas
+            testemunhas: {
+                testemunha_um: {
+                    tipo: criarContratoDto.testemunha_um_id ? 'banco' : 'manual',
+                    id: criarContratoDto.testemunha_um_id || null,
+                    nome: criarContratoDto.testemunha_um_nome || null,
+                    cpf: criarContratoDto.testemunha_um_cpf || null,
+                    email: null, // Será preenchido se for do banco
+                    telefone: null, // Será preenchido se for do banco
+                },
+                testemunha_dois: {
+                    tipo: criarContratoDto.testemunha_dois_id ? 'banco' : 'manual',
+                    id: criarContratoDto.testemunha_dois_id || null,
+                    nome: criarContratoDto.testemunha_dois_nome || null,
+                    cpf: criarContratoDto.testemunha_dois_cpf || null,
+                    email: null, // Será preenchido se for do banco
+                    telefone: null, // Será preenchido se for do banco
+                },
+            },
+
+            // Template utilizado
+            template: {
+                id: template.id,
+                nome: template.documento,
+                tipo_documento: template.tipo_documento,
+                campos_disponiveis: template.campos || [],
+                clausulas: template.clausulas || null,
+            },
+
+            // Documento final gerado
+            documento_final: {
+                nome: `Contrato ${treinamento.treinamento} - ${aluno.nome} - ${dataAtual.toLocaleDateString('pt-BR')}`,
+                conteudo: documentoConteudo,
+                data_geracao: dataAtual.toISOString(),
+            },
+
+            // Metadados do sistema
+            metadata: {
+                versao_dados_contrato: '1.0',
+                criado_por: null, // Será preenchido pelo userId
+                data_compilacao: dataAtual.toISOString(),
+                origem: 'CRIACAO_CONTRATO_ZAPSIGN',
+            },
+        };
+    }
+
+    /**
+     * Busca um contrato específico com todos os dados armazenados
+     */
+    async buscarContratoCompleto(contratoId: string): Promise<any> {
+        try {
+            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: { id: contratoId, deletado_em: null },
+                relations: ['id_turma_aluno_treinamento_fk', 'id_documento_fk', 'testemunha_um_fk', 'testemunha_dois_fk'],
+            });
+
+            if (!contrato) {
+                throw new NotFoundException('Contrato não encontrado');
+            }
+
+            return {
+                id: contrato.id,
+                status_ass_aluno: contrato.status_ass_aluno,
+                data_ass_aluno: contrato.data_ass_aluno,
+                status_ass_test_um: contrato.status_ass_test_um,
+                data_ass_test_um: contrato.data_ass_test_um,
+                status_ass_test_dois: contrato.status_ass_test_dois,
+                data_ass_test_dois: contrato.data_ass_test_dois,
+                dados_contrato: {
+                    ...contrato.dados_contrato,
+                    contrato: {
+                        ...contrato.dados_contrato?.contrato,
+                        url_assinatura: contrato.dados_contrato?.contrato?.id_documento_zapsign
+                            ? `https://zapsign.com.br/assinatura/${contrato.dados_contrato.contrato.id_documento_zapsign}`
+                            : null,
+                        file_url: contrato.dados_contrato?.contrato?.file_url || null,
+                    },
+                },
+                aluno_nome: contrato.dados_contrato?.aluno?.nome || 'N/A',
+                treinamento_nome: contrato.dados_contrato?.treinamento?.nome || 'N/A',
+                testemunhas: {
+                    testemunha_um: contrato.testemunha_um_fk
+                        ? {
+                              id: contrato.testemunha_um_fk.id,
+                              nome: contrato.testemunha_um_fk.nome,
+                              email: contrato.testemunha_um_fk.email,
+                          }
+                        : null,
+                    testemunha_dois: contrato.testemunha_dois_fk
+                        ? {
+                              id: contrato.testemunha_dois_fk.id,
+                              nome: contrato.testemunha_dois_fk.nome,
+                              email: contrato.testemunha_dois_fk.email,
+                          }
+                        : null,
+                },
+                documento: contrato.id_documento_fk
+                    ? {
+                          id: contrato.id_documento_fk.id,
+                          nome: contrato.id_documento_fk.documento,
+                          tipo: contrato.id_documento_fk.tipo_documento,
+                      }
+                    : null,
+                turma_aluno_treinamento: contrato.id_turma_aluno_treinamento_fk,
+                created_at: contrato.criado_em,
+                updated_at: contrato.atualizado_em,
+            };
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            console.error('Erro ao buscar contrato completo:', error);
+            throw new BadRequestException('Erro ao buscar contrato completo');
+        }
+    }
+
+    /**
+     * Lista contratos com filtros opcionais
+     */
+    async listarContratos(filtros?: {
+        id_aluno?: string;
+        id_treinamento?: string;
+        status?: string;
+        data_inicio?: string;
+        data_fim?: string;
+        page?: number;
+        limit?: number;
+    }): Promise<any> {
+        try {
+            const query = this.uow.turmasAlunosTreinamentosContratosRP
+                .createQueryBuilder('contrato')
+                .leftJoinAndSelect('contrato.id_turma_aluno_treinamento_fk', 'tat')
+                .leftJoinAndSelect('contrato.id_documento_fk', 'doc')
+                .leftJoinAndSelect('contrato.testemunha_um_fk', 'test1')
+                .leftJoinAndSelect('contrato.testemunha_dois_fk', 'test2')
+                .where('contrato.deletado_em IS NULL');
+
+            // Aplicar filtros
+            if (filtros?.id_aluno) {
+                query.andWhere('JSON_EXTRACT(contrato.dados_contrato, "$.aluno.id") = :id_aluno', { id_aluno: filtros.id_aluno });
+            }
+
+            if (filtros?.id_treinamento) {
+                query.andWhere('JSON_EXTRACT(contrato.dados_contrato, "$.treinamento.id") = :id_treinamento', { id_treinamento: filtros.id_treinamento });
+            }
+
+            if (filtros?.status) {
+                query.andWhere('JSON_EXTRACT(contrato.dados_contrato, "$.contrato.status") = :status', { status: filtros.status });
+            }
+
+            if (filtros?.data_inicio) {
+                query.andWhere('DATE(contrato.criado_em) >= :data_inicio', { data_inicio: filtros.data_inicio });
+            }
+
+            if (filtros?.data_fim) {
+                query.andWhere('DATE(contrato.criado_em) <= :data_fim', { data_fim: filtros.data_fim });
+            }
+
+            // Paginação
+            const page = filtros?.page || 1;
+            const limit = filtros?.limit || 10;
+            const skip = (page - 1) * limit;
+
+            query.orderBy('contrato.criado_em', 'DESC').skip(skip).take(limit);
+
+            const [contratos, total] = await query.getManyAndCount();
+
+            return {
+                data: contratos.map((contrato) => ({
+                    id: contrato.id,
+                    dados_contrato: contrato.dados_contrato,
+                    status_ass_aluno: contrato.status_ass_aluno,
+                    data_ass_aluno: contrato.data_ass_aluno,
+                    created_at: contrato.criado_em,
+                    aluno_nome: contrato.dados_contrato?.aluno?.nome || 'N/A',
+                    treinamento_nome: contrato.dados_contrato?.treinamento?.nome || 'N/A',
+                })),
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            };
+        } catch (error) {
+            console.error('Erro ao listar contratos:', error);
+            throw new BadRequestException('Erro ao listar contratos');
+        }
     }
 }

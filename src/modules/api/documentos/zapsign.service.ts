@@ -86,6 +86,14 @@ export class ZapSignService {
      */
     async createDocument(documentData: ZapSignDocument): Promise<ZapSignResponse> {
         try {
+            console.log('Criando documento no ZapSign com dados:', {
+                template_id: documentData.template_id,
+                name: documentData.name,
+                signers: documentData.signers,
+                message: documentData.message || 'Por favor, assine este documento.',
+                sandbox: documentData.sandbox || false,
+            });
+
             const response = await axios.post(
                 `${this.apiUrl}/docs/`,
                 {
@@ -100,10 +108,43 @@ export class ZapSignService {
                 },
             );
 
+            console.log('Documento criado com sucesso no ZapSign:', response.data);
             return response.data as ZapSignResponse;
         } catch (error: any) {
-            console.error('Erro ao criar documento no ZapSign:', error.response?.data || error.message);
-            throw new BadRequestException('Erro ao criar documento no ZapSign');
+            console.error('Erro ao criar documento no ZapSign - detalhes completos:');
+            console.error('Status:', error.response?.status);
+            console.error('Data:', JSON.stringify(error.response?.data, null, 2));
+            console.error('Headers:', error.response?.headers);
+            throw new BadRequestException(`Erro ao criar documento no ZapSign: ${JSON.stringify(error.response?.data || error.message)}`);
+        }
+    }
+
+    async createDocumentFromTemplate(templateId: string, documentData: ZapSignDocument): Promise<ZapSignResponse> {
+        try {
+            console.log('Criando documento no ZapSign usando template:', templateId);
+
+            const response = await axios.post(
+                `${this.apiUrl}/docs/`,
+                {
+                    template_id: templateId,
+                    name: documentData.name,
+                    signers: documentData.signers,
+                    message: documentData.message || 'Por favor, assine este documento.',
+                    sandbox: documentData.sandbox || false,
+                },
+                {
+                    headers: this.getHeaders(),
+                },
+            );
+
+            console.log('Documento criado com sucesso no ZapSign usando template:', response.data);
+            return response.data as ZapSignResponse;
+        } catch (error: any) {
+            console.error('Erro ao criar documento no ZapSign usando template - detalhes completos:');
+            console.error('Status:', error.response?.status);
+            console.error('Data:', JSON.stringify(error.response?.data, null, 2));
+            console.error('Headers:', error.response?.headers);
+            throw new BadRequestException(`Erro ao criar documento no ZapSign usando template: ${JSON.stringify(error.response?.data || error.message)}`);
         }
     }
 
@@ -177,14 +218,15 @@ export class ZapSignService {
 
     async createDocumentFromContent(data: { name: string; content: string; signers: ZapSignSigner[]; message?: string }): Promise<ZapSignDocument> {
         try {
-            // Converter o conteúdo para base64
-            const contentBase64 = Buffer.from(data.content, 'utf-8').toString('base64');
+            console.log('createDocumentFromContent - Recebendo content (primeiros 100 caracteres):', data.content.substring(0, 100));
+            console.log('createDocumentFromContent - É base64?:', /^[A-Za-z0-9+/]+=*$/.test(data.content.substring(0, 100)));
 
+            // O conteúdo já vem em base64, não precisa converter novamente
             const response = await axios.post(
                 `${this.apiUrl}/docs/`,
                 {
                     name: data.name,
-                    file: contentBase64,
+                    base64_pdf: data.content, // Usar diretamente o conteúdo que já é base64
                     signers: data.signers,
                     message: data.message || 'Documento para assinatura',
                 },
@@ -193,9 +235,12 @@ export class ZapSignService {
                 },
             );
 
+            console.log('Documento criado com sucesso!', response.data);
             return response.data as ZapSignDocument;
         } catch (error: any) {
             console.error('Erro ao criar documento com conteúdo:', error.response?.data || error.message);
+            console.error('Status:', error.response?.status);
+            console.error('Data completa:', JSON.stringify(error.response?.data, null, 2));
             throw new BadRequestException('Erro ao criar documento no ZapSign');
         }
     }

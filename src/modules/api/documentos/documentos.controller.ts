@@ -11,6 +11,7 @@ import {
     CriarContratoZapSignDto,
     RespostaContratoZapSignDto,
     AtualizarStatusContratoDto,
+    FiltrosContratosDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { Request } from 'express';
@@ -18,11 +19,11 @@ import { EFormasPagamento } from '@/modules/config/entities/enum';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('documentos')
-@UseGuards(JwtAuthGuard)
 export class DocumentosController {
     constructor(private readonly documentosService: DocumentosService) {}
 
     @Post()
+    @UseGuards(JwtAuthGuard)
     async createDocumento(@Body() createDocumentoDto: CreateDocumentoDto, @Req() req: Request): Promise<DocumentoResponseDto> {
         console.log('Criando novo documento:', createDocumentoDto.documento);
         const userId = (req.user as any)?.sub;
@@ -30,6 +31,7 @@ export class DocumentosController {
     }
 
     @Get()
+    @UseGuards(JwtAuthGuard)
     async findAllDocumentos(
         @Query('page', ParseIntPipe) page: number = 1,
         @Query('limit', ParseIntPipe) limit: number = 10,
@@ -129,6 +131,20 @@ export class DocumentosController {
         }
     }
 
+    @Get('zapsign/templates-zapsign')
+    async buscarTemplatesZapSignReais() {
+        console.log('=== ENDPOINT CHAMADO: /api/documentos/zapsign/templates-zapsign ===');
+        console.log('Buscando templates reais do ZapSign');
+        try {
+            const resultado = await this.documentosService.buscarTemplatesZapSignReais();
+            console.log('Templates do ZapSign encontrados:', resultado.length);
+            return resultado;
+        } catch (error) {
+            console.error('Erro no endpoint buscarTemplatesZapSignReais:', error);
+            throw error;
+        }
+    }
+
     // Endpoint público para teste (TEMPORÁRIO)
     @Get('public/templates')
     async buscarTemplatesPublico() {
@@ -177,10 +193,18 @@ export class DocumentosController {
     }
 
     @Post('zapsign/criar-contrato')
+    @UseGuards(JwtAuthGuard)
     async criarContratoZapSign(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
         console.log('Criando contrato no ZapSign para aluno:', criarContratoDto.id_aluno);
         const userId = (req.user as any)?.sub;
         return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
+    }
+
+    // Endpoint público para teste (TEMPORÁRIO)
+    @Post('public/criar-contrato')
+    async criarContratoZapSignPublico(@Body() criarContratoDto: CriarContratoZapSignDto): Promise<RespostaContratoZapSignDto> {
+        console.log('Criando contrato no ZapSign para aluno (público):', criarContratoDto.id_aluno);
+        return this.documentosService.criarContratoZapSign(criarContratoDto, 1); // Usar userId 1 para teste
     }
 
     @Get('zapsign/documento/:id')
@@ -193,6 +217,60 @@ export class DocumentosController {
     async listarDocumentosZapSign() {
         console.log('Listando documentos do ZapSign');
         return this.documentosService.listarDocumentosZapSign();
+    }
+
+    @Get('contratos-banco')
+    @UseGuards(JwtAuthGuard)
+    async listarContratosBanco(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('id_aluno') id_aluno?: string,
+        @Query('id_treinamento') id_treinamento?: string,
+        @Query('status') status?: string,
+        @Query('data_inicio') data_inicio?: string,
+        @Query('data_fim') data_fim?: string,
+    ) {
+        const filtrosProcessados = {
+            page: page ? parseInt(page) : undefined,
+            limit: limit ? parseInt(limit) : undefined,
+            id_aluno,
+            id_treinamento,
+            status,
+            data_inicio,
+            data_fim,
+        };
+        console.log('Listando contratos do banco de dados:', filtrosProcessados);
+        return this.documentosService.listarContratos(filtrosProcessados);
+    }
+
+    @Get('public/contratos-banco')
+    async listarContratosBancoPublico(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('id_aluno') id_aluno?: string,
+        @Query('id_treinamento') id_treinamento?: string,
+        @Query('status') status?: string,
+        @Query('data_inicio') data_inicio?: string,
+        @Query('data_fim') data_fim?: string,
+    ) {
+        const filtros = {
+            page: page ? parseInt(page) : undefined,
+            limit: limit ? parseInt(limit) : undefined,
+            id_aluno,
+            id_treinamento,
+            status,
+            data_inicio,
+            data_fim,
+        };
+        console.log('Listando contratos do banco de dados (público):', filtros);
+        return this.documentosService.listarContratos(filtros);
+    }
+
+    @Get('contrato/:id')
+    @UseGuards(JwtAuthGuard)
+    async buscarContratoCompleto(@Param('id') id: string) {
+        console.log('Buscando contrato completo:', id);
+        return this.documentosService.buscarContratoCompleto(id);
     }
 
     @Delete('zapsign/documento/:id/cancelar')

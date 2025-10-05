@@ -31,7 +31,7 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     @Column({ type: 'timestamp', name: 'data_ass_aluno', nullable: false })
     data_ass_aluno: Date;
 
-    @Column({ type: 'int', name: 'testemunha_um', nullable: false })
+    @Column({ type: 'int', name: 'testemunha_um', nullable: true })
     testemunha_um: number;
 
     @Column({
@@ -40,14 +40,14 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
         enumName: 'EStatusAssinaturasContratosTestUm',
         name: 'status_ass_test_um',
         default: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
-        nullable: false,
+        nullable: true,
     })
     status_ass_test_um: EStatusAssinaturasContratos;
 
-    @Column({ type: 'timestamp', name: 'data_ass_test_um', nullable: false })
+    @Column({ type: 'timestamp', name: 'data_ass_test_um', nullable: true })
     data_ass_test_um: Date;
 
-    @Column({ type: 'int', name: 'testemunha_dois', nullable: false })
+    @Column({ type: 'int', name: 'testemunha_dois', nullable: true })
     testemunha_dois: number;
 
     @Column({
@@ -56,12 +56,15 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
         enumName: 'EStatusAssinaturasContratosTestDois',
         name: 'status_ass_test_dois',
         default: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
-        nullable: false,
+        nullable: true,
     })
     status_ass_test_dois: EStatusAssinaturasContratos;
 
-    @Column({ type: 'timestamp', name: 'data_ass_test_dois', nullable: false })
+    @Column({ type: 'timestamp', name: 'data_ass_test_dois', nullable: true })
     data_ass_test_dois: Date;
+
+    @Column({ type: 'jsonb', name: 'dados_contrato', nullable: true })
+    dados_contrato: any;
 
     @ManyToOne(() => TurmasAlunosTreinamentos, (turmasAlunosTreinamentos) => turmasAlunosTreinamentos.turmasAlunosTreinamentosContratos)
     @JoinColumn([{ name: 'id_turma_aluno_treinamento', referencedColumnName: 'id' }])

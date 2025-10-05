@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas } from '../../config/entities/enum';
+import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral } from '../../config/entities/enum';
 import {
     GetTurmasDto,
     CreateTurmaDto,
@@ -63,7 +63,7 @@ export class TurmasService {
         try {
             const usuarios = await this.uow.usuariosRP.find({
                 where: {
-                    funcao: EFuncoes.LIDER_DE_EVENTOS,
+                    funcao: In([EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.ADMINISTRADOR]),
                     deletado_em: null,
                 },
                 select: ['id', 'nome', 'email', 'funcao'],
@@ -111,7 +111,7 @@ export class TurmasService {
         // Configurar opções de busca
         const findOptions: FindManyOptions = {
             where: whereConditions,
-            relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos'],
+            relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos', 'turmasAlunos.id_aluno_fk'],
             order: {
                 criado_em: 'DESC',
             },
@@ -147,57 +147,88 @@ export class TurmasService {
             const preCadastrosCount = await this.getPreCadastrosCountByTurmas(turmasIds);
 
             // Transformar dados para o formato de resposta
-            const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => ({
-                id: turma.id,
-                id_polo: turma.id_polo,
-                id_treinamento: turma.id_treinamento,
-                lider_evento: turma.lider_evento,
-                edicao_turma: turma.edicao_turma,
-                cep: turma.cep,
-                logradouro: turma.logradouro,
-                complemento: turma.complemento,
-                numero: turma.numero,
-                bairro: turma.bairro,
-                cidade: turma.cidade,
-                estado: turma.estado,
-                status_turma: turma.status_turma,
-                autorizar_bonus: turma.autorizar_bonus,
-                id_turma_bonus: turma.id_turma_bonus,
-                capacidade_turma: turma.capacidade_turma,
-                meta: turma.meta,
-                data_inicio: turma.data_inicio,
-                data_final: turma.data_final,
-                turma_aberta: turma.turma_aberta,
-                bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
-                detalhamento_bonus: turma.detalhamento_bonus,
-                created_at: turma.criado_em,
-                updated_at: turma.atualizado_em,
-                polo: turma.id_polo_fk
-                    ? {
-                          id: turma.id_polo_fk.id,
-                          nome: turma.id_polo_fk.polo,
-                          cidade: turma.id_polo_fk.cidade,
-                          estado: turma.id_polo_fk.estado,
-                      }
-                    : undefined,
-                treinamento: turma.id_treinamento_fk
-                    ? {
-                          id: turma.id_treinamento_fk.id,
-                          nome: turma.id_treinamento_fk.treinamento,
-                          tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
-                      }
-                    : undefined,
-                lider: turma.lider_evento_fk
-                    ? {
-                          id: turma.lider_evento_fk.id,
-                          nome: turma.lider_evento_fk.nome,
-                      }
-                    : undefined,
-                alunos_count: turma.turmasAlunos?.length || 0,
-                alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => ta.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO).length || 0,
-                pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
-                presentes_count: preCadastrosCount[turma.id]?.presentes || 0,
-            }));
+            const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => {
+                // Debug: verificar dados dos alunos
+                console.log(`🔍 [DEBUG] Turma ${turma.id} - Total de alunos: ${turma.turmasAlunos?.length || 0}`);
+                if (turma.turmasAlunos) {
+                    turma.turmasAlunos.forEach((ta, index) => {
+                        console.log(`  Aluno ${index + 1}: ID=${ta.id_aluno}, Status=${ta.id_aluno_fk?.status_aluno_geral}, Nome=${ta.id_aluno_fk?.nome}`);
+                    });
+                }
+
+                return {
+                    id: turma.id,
+                    id_polo: turma.id_polo,
+                    id_treinamento: turma.id_treinamento,
+                    lider_evento: turma.lider_evento,
+                    edicao_turma: turma.edicao_turma,
+                    cep: turma.cep,
+                    logradouro: turma.logradouro,
+                    complemento: turma.complemento,
+                    numero: turma.numero,
+                    bairro: turma.bairro,
+                    cidade: turma.cidade,
+                    estado: turma.estado,
+                    status_turma: turma.status_turma,
+                    autorizar_bonus: turma.autorizar_bonus,
+                    id_turma_bonus: turma.id_turma_bonus,
+                    capacidade_turma: turma.capacidade_turma,
+                    meta: turma.meta,
+                    data_inicio: turma.data_inicio,
+                    data_final: turma.data_final,
+                    turma_aberta: turma.turma_aberta,
+                    bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
+                    detalhamento_bonus: turma.detalhamento_bonus,
+                    created_at: turma.criado_em,
+                    updated_at: turma.atualizado_em,
+                    polo: turma.id_polo_fk
+                        ? {
+                              id: turma.id_polo_fk.id,
+                              nome: turma.id_polo_fk.polo,
+                              cidade: turma.id_polo_fk.cidade,
+                              estado: turma.id_polo_fk.estado,
+                          }
+                        : undefined,
+                    treinamento: turma.id_treinamento_fk
+                        ? {
+                              id: turma.id_treinamento_fk.id,
+                              nome: turma.id_treinamento_fk.treinamento,
+                              tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
+                              sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
+                              treinamento: turma.id_treinamento_fk.treinamento,
+                              url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
+                          }
+                        : undefined,
+                    lider: turma.lider_evento_fk
+                        ? {
+                              id: turma.lider_evento_fk.id,
+                              nome: turma.lider_evento_fk.nome,
+                          }
+                        : undefined,
+                    alunos_count: turma.turmasAlunos?.length || 0,
+                    alunos_confirmados_count:
+                        turma.turmasAlunos?.filter(
+                            (ta) =>
+                                ta.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO &&
+                                ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
+                        ).length || 0,
+                    pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
+                    presentes_count:
+                        turma.turmasAlunos?.filter(
+                            (ta) => ta.presenca_turma === EPresencaTurmas.PRESENTE && ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
+                        ).length || 0,
+                    inadimplentes_count: (() => {
+                        const inadimplentes = turma.turmasAlunos?.filter((ta) => ta.id_aluno_fk?.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE) || [];
+                        console.log(`🔍 [DEBUG] Turma ${turma.id} - Inadimplentes encontrados: ${inadimplentes.length}`);
+                        inadimplentes.forEach((ta, index) => {
+                            console.log(
+                                `  Inadimplente ${index + 1}: ID=${ta.id_aluno}, Status=${ta.id_aluno_fk?.status_aluno_geral}, Nome=${ta.id_aluno_fk?.nome}`,
+                            );
+                        });
+                        return inadimplentes.length;
+                    })(),
+                };
+            });
 
             return {
                 data: turmasResponse,
@@ -216,7 +247,7 @@ export class TurmasService {
         try {
             const turma = await this.uow.turmasRP.findOne({
                 where: { id, deletado_em: null },
-                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos'],
+                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos', 'turmasAlunos.id_aluno_fk'],
             });
 
             if (!turma) {
@@ -264,6 +295,9 @@ export class TurmasService {
                           id: turma.id_treinamento_fk.id,
                           nome: turma.id_treinamento_fk.treinamento,
                           tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
+                          sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
+                          treinamento: turma.id_treinamento_fk.treinamento,
+                          url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
                       }
                     : undefined,
                 lider: turma.lider_evento_fk
@@ -273,9 +307,25 @@ export class TurmasService {
                       }
                     : undefined,
                 alunos_count: turma.turmasAlunos?.length || 0,
-                alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => ta.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO).length || 0,
+                alunos_confirmados_count:
+                    turma.turmasAlunos?.filter(
+                        (ta) =>
+                            ta.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO &&
+                            ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
+                    ).length || 0,
                 pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
-                presentes_count: preCadastrosCount[turma.id]?.presentes || 0,
+                presentes_count:
+                    turma.turmasAlunos?.filter(
+                        (ta) => ta.presenca_turma === EPresencaTurmas.PRESENTE && ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
+                    ).length || 0,
+                inadimplentes_count: (() => {
+                    const inadimplentes = turma.turmasAlunos?.filter((ta) => ta.id_aluno_fk?.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE) || [];
+                    console.log(`🔍 [DEBUG] Turma ${turma.id} - Inadimplentes encontrados: ${inadimplentes.length}`);
+                    inadimplentes.forEach((ta, index) => {
+                        console.log(`  Inadimplente ${index + 1}: ID=${ta.id_aluno}, Status=${ta.id_aluno_fk?.status_aluno_geral}, Nome=${ta.id_aluno_fk?.nome}`);
+                    });
+                    return inadimplentes.length;
+                })(),
             };
         } catch (error) {
             console.error('Erro ao buscar turma por ID:', error);
@@ -394,11 +444,11 @@ export class TurmasService {
     /**
      * Buscar detalhes de um aluno específico em uma turma
      */
-    async getAlunoTurmaByIdDetailed(id: string): Promise<AlunoTurmaResponseDto> {
+    async getAlunoTurmaByIdDetailed(id: string): Promise<any> {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id },
-                relations: ['id_aluno_fk', 'id_turma_fk'],
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
             });
 
             if (!turmaAluno) {
@@ -414,6 +464,7 @@ export class TurmasService {
                 vaga_bonus: turmaAluno.vaga_bonus,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
                 presenca_turma: turmaAluno.presenca_turma,
+                telefone: turmaAluno.id_aluno_fk?.telefone_um || '',
                 created_at: turmaAluno.criado_em,
                 aluno: turmaAluno.id_aluno_fk
                     ? {
@@ -422,6 +473,27 @@ export class TurmasService {
                           email: turmaAluno.id_aluno_fk.email,
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha || turmaAluno.id_aluno_fk.nome,
                           status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
+                      }
+                    : undefined,
+                turma: turmaAluno.id_turma_fk
+                    ? {
+                          id: turmaAluno.id_turma_fk.id,
+                          edicao_turma: turmaAluno.id_turma_fk.edicao_turma,
+                          data_inicio: turmaAluno.id_turma_fk.data_inicio,
+                          data_final: turmaAluno.id_turma_fk.data_final,
+                          treinamento: turmaAluno.id_turma_fk.id_treinamento_fk
+                              ? {
+                                    nome: turmaAluno.id_turma_fk.id_treinamento_fk.treinamento,
+                                    sigla: turmaAluno.id_turma_fk.id_treinamento_fk.sigla_treinamento || turmaAluno.id_turma_fk.id_treinamento_fk.treinamento,
+                                }
+                              : undefined,
+                          polo: turmaAluno.id_turma_fk.id_polo_fk
+                              ? {
+                                    nome: turmaAluno.id_turma_fk.id_polo_fk.polo,
+                                    cidade: turmaAluno.id_turma_fk.id_polo_fk.cidade,
+                                    estado: turmaAluno.id_turma_fk.id_polo_fk.estado,
+                                }
+                              : undefined,
                       }
                     : undefined,
             };
@@ -726,7 +798,10 @@ export class TurmasService {
                           nome: turmaAluno.id_aluno_fk.nome,
                           email: turmaAluno.id_aluno_fk.email,
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
+                          cpf: turmaAluno.id_aluno_fk.cpf,
                           status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
+                          possui_deficiencia: turmaAluno.id_aluno_fk.possui_deficiencia,
+                          desc_deficiencia: turmaAluno.id_aluno_fk.desc_deficiencia,
                       }
                     : undefined,
             }));

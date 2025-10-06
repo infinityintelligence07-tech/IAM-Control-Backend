@@ -668,19 +668,57 @@ export class DocumentosService {
                 });
             }
 
+            // Buscar ou criar uma turma válida para o contrato
+            let turmaIdParaContrato = turma?.id;
+
+            if (!turmaIdParaContrato) {
+                // Buscar uma turma válida existente
+                const turmaExistente = await this.uow.turmasRP.findOne({
+                    where: {
+                        deletado_em: null,
+                        id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                    },
+                    order: {
+                        criado_em: 'DESC',
+                    },
+                });
+
+                if (turmaExistente) {
+                    turmaIdParaContrato = turmaExistente.id;
+                    console.log('Usando turma existente:', turmaIdParaContrato);
+                } else {
+                    // Se não há turma para o treinamento, buscar qualquer turma válida
+                    const turmaQualquer = await this.uow.turmasRP.findOne({
+                        where: {
+                            deletado_em: null,
+                        },
+                        order: {
+                            criado_em: 'DESC',
+                        },
+                    });
+
+                    if (turmaQualquer) {
+                        turmaIdParaContrato = turmaQualquer.id;
+                        console.log('Usando turma genérica:', turmaIdParaContrato);
+                    } else {
+                        throw new Error('Nenhuma turma válida encontrada no sistema');
+                    }
+                }
+            }
+
             // Criar registro de turma_aluno se não existir
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: {
-                    id_aluno: criarContratoDto.id_aluno, // Manter como string
-                    id_turma: turma?.id || 1, // Usar turma padrão se não especificada
+                    id_aluno: criarContratoDto.id_aluno,
+                    id_turma: turmaIdParaContrato,
                 },
             });
 
             if (!turmaAluno) {
                 // Criar registro de turma_aluno
                 turmaAluno = this.uow.turmasAlunosRP.create({
-                    id_turma: turma?.id || 1, // Usar turma padrão se não especificada
-                    id_aluno: criarContratoDto.id_aluno, // Manter como string
+                    id_turma: turmaIdParaContrato,
+                    id_aluno: criarContratoDto.id_aluno,
                     nome_cracha: aluno.nome,
                     numero_cracha: `CR${Date.now()}`, // Número único para o crachá
                     criado_por: userId,

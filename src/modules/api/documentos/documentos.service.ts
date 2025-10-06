@@ -492,16 +492,18 @@ export class DocumentosService {
             // Calcular preço total e processar formas de pagamento
             const precoTotal = treinamento.preco_treinamento;
             console.log('Preço total calculado:', precoTotal, 'Tipo:', typeof precoTotal);
-            const formasPagamento: { forma: EFormasPagamento; valor: number }[] = [];
+            const formasPagamento: { tipo: string; forma: EFormasPagamento; valor: number; descricao?: string }[] = [];
 
             if (criarContratoDto.forma_pagamento === 'A_VISTA') {
                 formasPagamento.push({
+                    tipo: 'A_VISTA',
                     forma: EFormasPagamento.PIX,
                     valor: precoTotal,
                 });
             } else if (criarContratoDto.forma_pagamento === 'PARCELADO' && criarContratoDto.formas_pagamento) {
                 criarContratoDto.formas_pagamento.forEach((fp) => {
                     formasPagamento.push({
+                        tipo: 'PARCELADO',
                         forma: fp.forma as EFormasPagamento,
                         valor: fp.valor,
                     });
@@ -518,6 +520,7 @@ export class DocumentosService {
 
                     // Adicionar entrada
                     formasPagamento.push({
+                        tipo: 'PARCELADO',
                         forma: EFormasPagamento.CARTAO_CREDITO,
                         valor: valorParcela,
                     });
@@ -525,6 +528,7 @@ export class DocumentosService {
                     // Adicionar parcelas restantes (todas no cartão de crédito)
                     for (let i = 1; i < numeroParcelas; i++) {
                         formasPagamento.push({
+                            tipo: 'PARCELADO',
                             forma: EFormasPagamento.CARTAO_CREDITO,
                             valor: valorParcela,
                         });
@@ -532,79 +536,89 @@ export class DocumentosService {
                 }
 
                 // Parcelado - Boleto
-                if (valoresFormas['Parcelado - Boleto: Entrada de  em  +  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .']) {
-                    const dadosBoleto = valoresFormas['Parcelado - Boleto: Entrada de  em  +  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .'];
-                    const valorEntrada = parseInt(dadosBoleto.valor_entrada) / 100;
-                    const valorParcelas = parseInt(dadosBoleto.valor_parcelas) / 100;
+                if (valoresFormas['Parcelado - Boleto:  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .']) {
+                    const dadosBoleto = valoresFormas['Parcelado - Boleto:  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .'];
+                    const valorTotal = parseInt(dadosBoleto.valor_parcelas) / 100; // Valor total em reais
                     const numeroParcelas = parseInt(dadosBoleto.numero_parcelas);
-                    const valorParcela = valorParcelas / numeroParcelas;
+                    const valorParcela = valorTotal / numeroParcelas;
 
-                    // Adicionar entrada (cartão de crédito)
-                    formasPagamento.push({
-                        forma: EFormasPagamento.CARTAO_CREDITO,
-                        valor: valorEntrada,
-                    });
-
-                    // Adicionar parcelas restantes (todas em boleto)
+                    // Adicionar todas as parcelas em boleto
                     for (let i = 0; i < numeroParcelas; i++) {
                         formasPagamento.push({
+                            tipo: 'PARCELADO',
                             forma: EFormasPagamento.BOLETO,
                             valor: valorParcela,
                         });
                     }
                 }
             } else if (criarContratoDto.forma_pagamento === 'AMBOS' && criarContratoDto.valores_formas_pagamento) {
-                // Processar formas de pagamento do novo formato
+                // Processar formas de pagamento do novo formato para AMBOS
                 const valoresFormas = criarContratoDto.valores_formas_pagamento;
 
-                // À Vista
+                // À Vista - Cartão de Crédito
                 if (valoresFormas['À Vista - Cartão de Crédito']) {
                     formasPagamento.push({
+                        tipo: 'A_VISTA',
                         forma: EFormasPagamento.CARTAO_CREDITO,
                         valor: parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100, // Converter centavos para reais
                     });
                 }
 
-                // Parcelado - Cartão de Crédito
-                if (valoresFormas['Parcelado - Cartão de Crédito']) {
-                    const valorParcelado = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
-                    const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas);
-                    const valorParcela = valorParcelado / numeroParcelas;
-
-                    // Adicionar entrada
+                // À Vista - Cartão de Débito
+                if (valoresFormas['À Vista - Cartão de Débito']) {
                     formasPagamento.push({
-                        forma: EFormasPagamento.CARTAO_CREDITO,
-                        valor: valorParcela,
+                        tipo: 'A_VISTA',
+                        forma: EFormasPagamento.CARTAO_DEBITO,
+                        valor: parseInt(valoresFormas['À Vista - Cartão de Débito'].valor) / 100, // Converter centavos para reais
                     });
-
-                    // Adicionar parcelas restantes (todas no cartão de crédito)
-                    for (let i = 1; i < numeroParcelas; i++) {
-                        formasPagamento.push({
-                            forma: EFormasPagamento.CARTAO_CREDITO,
-                            valor: valorParcela,
-                        });
-                    }
                 }
 
-                // Parcelado - Boleto
-                if (valoresFormas['Parcelado - Boleto']) {
-                    const valorParcelado = parseInt(valoresFormas['Parcelado - Boleto'].valor) / 100;
-                    const numeroParcelas = parseInt(valoresFormas['Parcelado - Boleto'].numero_parcelas);
-                    const valorParcela = valorParcelado / numeroParcelas;
-
-                    // Adicionar entrada (cartão de crédito)
+                // À Vista - PIX/Transferência
+                if (valoresFormas['À Vista - PIX/Transferência']) {
                     formasPagamento.push({
-                        forma: EFormasPagamento.CARTAO_CREDITO,
-                        valor: valorParcela,
+                        tipo: 'A_VISTA',
+                        forma: EFormasPagamento.PIX,
+                        valor: parseInt(valoresFormas['À Vista - PIX/Transferência'].valor) / 100, // Converter centavos para reais
                     });
+                }
 
-                    // Adicionar parcelas restantes (todas em boleto)
-                    for (let i = 1; i < numeroParcelas; i++) {
-                        formasPagamento.push({
-                            forma: EFormasPagamento.BOLETO,
-                            valor: valorParcela,
-                        });
-                    }
+                // À Vista - Espécie
+                if (valoresFormas['À Vista - Espécie']) {
+                    formasPagamento.push({
+                        tipo: 'A_VISTA',
+                        forma: EFormasPagamento.DINHEIRO,
+                        valor: parseInt(valoresFormas['À Vista - Espécie'].valor) / 100, // Converter centavos para reais
+                    });
+                }
+
+                // Parcelado - Cartão de Crédito
+                if (valoresFormas['Parcelado - Cartão de Crédito']) {
+                    formasPagamento.push({
+                        tipo: 'PARCELADO',
+                        forma: EFormasPagamento.CARTAO_CREDITO,
+                        valor: parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100, // Converter centavos para reais
+                    });
+                }
+
+                // Parcelado - Boleto (com chave longa)
+                const chaveBoletoLonga = 'Parcelado - Boleto:  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .';
+                if (valoresFormas[chaveBoletoLonga]) {
+                    const valorTotalCentavos = parseInt(valoresFormas[chaveBoletoLonga].valor_parcelas); // Valor total em centavos
+                    formasPagamento.push({
+                        tipo: 'PARCELADO',
+                        forma: EFormasPagamento.BOLETO,
+                        valor: valorTotalCentavos / 100, // Converter para reais
+                    });
+                }
+
+                // Parcelado - Boleto (chave nova)
+                if (valoresFormas['Parcelado - Boleto']) {
+                    const valorTotalCentavos = parseInt(valoresFormas['Parcelado - Boleto'].valor); // Valor total em centavos
+                    formasPagamento.push({
+                        tipo: 'PARCELADO',
+                        forma: EFormasPagamento.BOLETO,
+                        valor: valorTotalCentavos / 100, // Converter para reais
+                    });
                 }
             }
 
@@ -1134,59 +1148,16 @@ export class DocumentosService {
 
     private construirEstruturaContrato(template: any, aluno: any, treinamento: any, turma: any, formasPagamento: any[], dadosContrato: any): string {
         const dataAtual = new Date().toLocaleDateString('pt-BR');
-        const localContrato = aluno.id_polo_fk?.nome || 'Local a definir';
+        const localContrato = dadosContrato.campos_variaveis?.['Local de Assinatura do Contrato'] || aluno.id_polo_fk?.nome || 'Local a definir';
+        const cidadeTreinamento = dadosContrato.campos_variaveis?.['Cidade do Treinamento'] || 'Local a definir';
+        const dataInicioTreinamento = dadosContrato.campos_variaveis?.['Data Prevista do Treinamento'] || 'Data Prevista do Treinamento';
+        const dataFimTreinamento = dadosContrato.campos_variaveis?.['Data Final do Treinamento'] || 'Data Final do Treinamento';
 
-        // Construir informações de pagamento
-        let infoPagamento = '';
-        if (dadosContrato.forma_pagamento === 'A_VISTA') {
-            infoPagamento = 'À VISTA';
-        } else if (dadosContrato.forma_pagamento === 'PARCELADO') {
-            infoPagamento = 'PARCELADO';
-            if (formasPagamento && formasPagamento.length > 0) {
-                const primeiraParcela = formasPagamento[0];
-                infoPagamento += ` - ${primeiraParcela.forma}: R$ ${primeiraParcela.valor.toFixed(2).replace('.', ',')}`;
-                if (formasPagamento.length > 1) {
-                    infoPagamento += ` + ${formasPagamento.length - 1} parcelas`;
-                }
-            }
-        } else if (dadosContrato.forma_pagamento === 'AMBOS') {
-            infoPagamento = 'AMBOS (À VISTA E PARCELADO)';
-            const valoresFormas = dadosContrato.valores_formas_pagamento || {};
+        // Construir informações de pagamento detalhadas
+        const infoPagamento = this.construirInfoPagamentoDetalhada(dadosContrato, formasPagamento);
 
-            if (valoresFormas['À Vista - Cartão de Crédito']) {
-                const valorVista = parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100;
-                infoPagamento += ` - À Vista: R$ ${valorVista.toFixed(2).replace('.', ',')}`;
-            }
-
-            if (valoresFormas['Parcelado - Cartão de Crédito']) {
-                const valorParcelado = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
-                const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas);
-                const valorParcela = valorParcelado / numeroParcelas;
-                infoPagamento += ` - Parcelado: ${numeroParcelas}x R$ ${valorParcela.toFixed(2).replace('.', ',')}`;
-            }
-        }
-
-        // Construir informações de bônus
-        let infoBonus = '';
-        const tiposBonus = dadosContrato.tipos_bonus || [];
-        const valoresBonus = dadosContrato.valores_bonus || {};
-        const camposVariaveis = dadosContrato.campos_variaveis || {};
-
-        if (tiposBonus.includes('100_dias') && tiposBonus.includes('ipr')) {
-            const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || '1';
-            const dataImersao = turma?.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : '___/___/___';
-            infoBonus = `BÔNUS: 100 DIAS + ${quantidadeInscricoes} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${dataImersao}`;
-        } else if (tiposBonus.includes('100_dias')) {
-            infoBonus = 'BÔNUS: 100 DIAS';
-        } else if (tiposBonus.includes('ipr') && dadosContrato.id_turma_bonus && turma) {
-            const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || '1';
-            const dataImersao = new Date(turma.data_inicio).toLocaleDateString('pt-BR');
-            infoBonus = `BÔNUS: ${quantidadeInscricoes} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${dataImersao}`;
-        } else if (valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}']) {
-            infoBonus = 'BÔNUS: OUTROS (conforme especificado)';
-        } else {
-            infoBonus = 'BÔNUS: NÃO SE APLICA';
-        }
+        // Construir informações de bônus detalhadas
+        const infoBonus = this.construirInfoBonusDetalhada(dadosContrato, turma);
 
         // Construir informações de testemunhas
         let infoTestemunhas = '';
@@ -1202,59 +1173,43 @@ export class DocumentosService {
             infoTestemunhas += `Testemunha 2:\nNome: ${testemunhaDois}\nCPF: ${cpfTestemunhaDois}\n\n`;
         }
 
-        // Construir o documento baseado no modelo
+        // Construir o documento no novo formato
         let documento = `
 INSTITUTO ACADEMY MIND
 
 O presente instrumento tem como objetivo realizar a inscrição da pessoa abaixo nominada no seguinte treinamento:
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│ DADOS PESSOAIS                                                                   │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│ NOME COMPLETO: ${aluno.nome}                                                      │
-│ CPF/CNPJ: ${aluno.cpf}                    DATA DE NASCIMENTO: ___/___/___        │
-│ WHATSAPP: ${aluno.telefone_um}              E-MAIL: ${aluno.email}              │
-│ ENDEREÇO: _________________________________________________                     │
-│ CIDADE/ESTADO: ____________________________ CEP: ___________                    │
-└─────────────────────────────────────────────────────────────────────────────────┘
+1. Dados Pessoais
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│ TREINAMENTO E BÔNUS                                                             │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│ TREINAMENTO: ${treinamento.treinamento}                                          │
-│ CIDADE: ${localContrato}                                                         │
-│ DATA PREVISTA: ___/___/___                                                      │
-│ PREÇO DO CONTRATO: R$ ${treinamento.preco_treinamento.toFixed(2).replace('.', ',')}                    │
-│                                                                                 │
-│ BÔNUS:                                                                          │
-│ ${tiposBonus.length === 0 || (!tiposBonus.includes('100_dias') && !tiposBonus.includes('ipr') && !valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}']) ? '☑' : '☐'} NÃO SE APLICA                                                                 │
-│ ${tiposBonus.includes('100_dias') ? '☑' : '☐'} 100 DIAS                                                                      │
-│ ${tiposBonus.includes('ipr') ? '☑' : '☐'} INSCRIÇÕES IMERSÃO PROSPERAR - Data: ${turma?.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : '___/___/___'}            │
-│ ${valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}'] ? '☑' : '☐'} OUTROS: _________________________________________________                     │
-└─────────────────────────────────────────────────────────────────────────────────┘
+Nome completo: ${aluno.nome}
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│ FORMAS DE PAGAMENTO                                                             │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│ À VISTA:                                                                        │
-│ ${dadosContrato.forma_pagamento === 'A_VISTA' || dadosContrato.forma_pagamento === 'AMBOS' ? '☑' : '☐'} CARTÃO DE CRÉDITO     ${dadosContrato.forma_pagamento === 'A_VISTA' || dadosContrato.forma_pagamento === 'AMBOS' ? '☐' : '☐'} CARTÃO DE DÉBITO    │
-│ ☐ PIX/TRANSFERÊNCIA    ☐ ESPÉCIE                                               │
-│                                                                                 │
-│ PARCELADO:                                                                      │
-│ ${dadosContrato.forma_pagamento === 'PARCELADO' || dadosContrato.forma_pagamento === 'AMBOS' ? '☑' : '☐'} CARTÃO DE CRÉDITO                                 │
-│ BOLETO: ENTRADA DE R$ ${dadosContrato.forma_pagamento === 'AMBOS' && dadosContrato.valores_formas_pagamento?.['Parcelado - Cartão de Crédito'] ? (parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].valor) / 100 / parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].numero_parcelas)).toFixed(2).replace('.', ',') : '_____'} EM ___/___/___                                      │
-│ + ${dadosContrato.forma_pagamento === 'AMBOS' && dadosContrato.valores_formas_pagamento?.['Parcelado - Cartão de Crédito'] ? parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].numero_parcelas) - 1 : '____'} PARCELAS DE: R$ ${dadosContrato.forma_pagamento === 'AMBOS' && dadosContrato.valores_formas_pagamento?.['Parcelado - Cartão de Crédito'] ? (parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].valor) / 100 / parseInt(dadosContrato.valores_formas_pagamento['Parcelado - Cartão de Crédito'].numero_parcelas)).toFixed(2).replace('.', ',') : '_____'}                                                   │
-│ MELHOR DIA DE VENCIMENTO: _____                                                 │
-│ 1º BOLETO PARA: ___/___/___                                                     │
-└─────────────────────────────────────────────────────────────────────────────────┘
+CPF: ${aluno.cpf}
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│ OBSERVAÇÕES:                                                                    │
-│ ${dadosContrato.observacoes || '                                                                                 '} │
-│                                                                                 │
-│                                                                                 │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
+WhatsApp: ${aluno.telefone_um}
+
+E-mail: ${aluno.email}
+
+Endereço: ${aluno.logradouro || ''} ${aluno.numero || ''} ${aluno.complemento || ''} ${aluno.bairro || ''}
+
+Cidade/Estado: ${aluno.cidade || ''}/${aluno.estado || ''}
+
+CEP: ${aluno.cep || ''}
+===================
+2. Treinamento e Bônus
+
+Treinamento: ${treinamento.treinamento}
+
+Cidade: ${cidadeTreinamento}
+
+Data prevista: ${dataInicioTreinamento} à ${dataFimTreinamento}
+
+Preço do contrato: ${this.calcularPrecoTotalContrato(dadosContrato)}
+
+Bônus incluídos: ${infoBonus}
+===============
+3. Formas de Pagamento
+
+${infoPagamento}
 
 Local: ${localContrato}                    Data: ${dataAtual}
 
@@ -1275,6 +1230,228 @@ ${infoTestemunhas}
         }
 
         return documento;
+    }
+
+    /**
+     * Constrói informações detalhadas de pagamento no formato solicitado
+     */
+    private construirInfoPagamentoDetalhada(dadosContrato: any, formasPagamento: any[]): string {
+        const valoresFormas = dadosContrato.valores_formas_pagamento || {};
+        let infoPagamento = '';
+
+        if (dadosContrato.forma_pagamento === 'A_VISTA') {
+            // Processar formas à vista
+            const formasVista = [];
+            if (valoresFormas['À Vista - Cartão de Crédito']) {
+                const valor = parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100;
+                formasVista.push(`☑ Cartão de Crédito - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+            if (valoresFormas['À Vista - Cartão de Débito']) {
+                const valor = parseInt(valoresFormas['À Vista - Cartão de Débito'].valor) / 100;
+                formasVista.push(`☑ Cartão de Débito - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+            if (valoresFormas['À Vista - PIX/Transferência']) {
+                const valor = parseInt(valoresFormas['À Vista - PIX/Transferência'].valor) / 100;
+                formasVista.push(`☑ PIX/Transferência - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+            if (valoresFormas['À Vista - Espécie']) {
+                const valor = parseInt(valoresFormas['À Vista - Espécie'].valor) / 100;
+                formasVista.push(`☑ Espécie - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+
+            infoPagamento = `À vista: ${formasVista.join(', ')}`;
+        } else if (dadosContrato.forma_pagamento === 'PARCELADO') {
+            // Processar formas parceladas
+            const formasParceladas = [];
+            if (valoresFormas['Parcelado - Cartão de Crédito']) {
+                const dados = valoresFormas['Parcelado - Cartão de Crédito'];
+                const valor = parseInt(dados.valor || dados.valor_parcelas) / 100; // Valor total - usar valor_parcelas se valor não existir
+                const numeroParcelas = parseInt(dados.numero_parcelas);
+                const valorParcela = valor / numeroParcelas;
+                formasParceladas.push(
+                    `☑ Cartão de Crédito - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} - Em ${numeroParcelas}x de ${valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                );
+            }
+
+            // Processar boleto com chave longa
+            const chaveBoletoLonga = 'Parcelado - Boleto:  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .';
+            if (valoresFormas[chaveBoletoLonga]) {
+                const dados = valoresFormas[chaveBoletoLonga];
+                const valor = parseInt(dados.valor || dados.valor_parcelas) / 100; // Valor total - usar valor_parcelas se valor não existir
+                const numeroParcelas = parseInt(dados.numero_parcelas);
+                const valorParcela = valor / numeroParcelas;
+                const melhorDia = dados.melhor_dia_vencimento || '1';
+                const primeiroBoleto = dados.data_primeiro_boleto || 'data do primeiro boleto';
+                formasParceladas.push(
+                    `☑ Boleto - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${numeroParcelas}x de ${valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) Primeiro boleto: ${primeiroBoleto}, Melhor dia de vencimento: dia ${melhorDia} de cada mês`,
+                );
+            }
+
+            infoPagamento = `Parcelado: ${formasParceladas.join(', ')}`;
+        } else if (dadosContrato.forma_pagamento === 'AMBOS') {
+            // Processar formas mistas
+            const formasVista = [];
+            const formasParceladas = [];
+
+            // À vista
+            if (valoresFormas['À Vista - Cartão de Crédito']) {
+                const valor = parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100;
+                formasVista.push(`☑ Cartão de Crédito - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+            if (valoresFormas['À Vista - Cartão de Débito']) {
+                const valor = parseInt(valoresFormas['À Vista - Cartão de Débito'].valor) / 100;
+                formasVista.push(`☑ Cartão de Débito - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+            if (valoresFormas['À Vista - PIX/Transferência']) {
+                const valor = parseInt(valoresFormas['À Vista - PIX/Transferência'].valor) / 100;
+                formasVista.push(`☑ PIX/Transferência - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+            if (valoresFormas['À Vista - Espécie']) {
+                const valor = parseInt(valoresFormas['À Vista - Espécie'].valor) / 100;
+                formasVista.push(`☑ Espécie - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+            }
+
+            // Parcelado
+            if (valoresFormas['Parcelado - Cartão de Crédito']) {
+                const dados = valoresFormas['Parcelado - Cartão de Crédito'];
+                const valor = parseInt(dados.valor || dados.valor_parcelas) / 100; // Valor total - usar valor_parcelas se valor não existir
+                const numeroParcelas = parseInt(dados.numero_parcelas);
+                const valorParcela = valor / numeroParcelas;
+                formasParceladas.push(
+                    `☑ Cartão de Crédito - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} - Em ${numeroParcelas}x de ${valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                );
+            }
+
+            // Processar boleto com chave longa
+            const chaveBoletoLonga = 'Parcelado - Boleto:  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .';
+            if (valoresFormas[chaveBoletoLonga]) {
+                const dados = valoresFormas[chaveBoletoLonga];
+                const valor = parseInt(dados.valor || dados.valor_parcelas) / 100; // Valor total - usar valor_parcelas se valor não existir
+                const numeroParcelas = parseInt(dados.numero_parcelas);
+                const valorParcela = valor / numeroParcelas;
+                const melhorDia = dados.melhor_dia_vencimento || '1';
+                const primeiroBoleto = dados.data_primeiro_boleto || 'data do primeiro boleto';
+                formasParceladas.push(
+                    `☑ Boleto - ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${numeroParcelas}x de ${valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) Primeiro boleto: ${primeiroBoleto}, Melhor dia de vencimento: dia ${melhorDia} de cada mês`,
+                );
+            }
+
+            const partes = [];
+            if (formasVista.length > 0) {
+                partes.push(`À vista: ${formasVista.join(', ')}`);
+            }
+            if (formasParceladas.length > 0) {
+                partes.push(`Parcelado: ${formasParceladas.join(', ')}`);
+            }
+
+            infoPagamento = partes.join('\n\n');
+        }
+
+        return infoPagamento;
+    }
+
+    /**
+     * Constrói informações detalhadas de bônus no formato solicitado
+     */
+    private construirInfoBonusDetalhada(dadosContrato: any, turma: any): string {
+        const tiposBonus = dadosContrato.tipos_bonus || [];
+        const valoresBonus = dadosContrato.valores_bonus || {};
+        const camposVariaveis = dadosContrato.campos_variaveis || {};
+        const bonusAtivos = [];
+
+        // Verificar quais bônus estão ativos
+        if (tiposBonus.includes('100_dias')) {
+            bonusAtivos.push('☑ 100 Dias');
+        }
+
+        if (tiposBonus.includes('ipr') && dadosContrato.id_turma_bonus && turma) {
+            const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || camposVariaveis['Quantidade de Inscrições do Prosperar'] || '1';
+            const dataImersao = turma.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : '09/10/2025';
+            bonusAtivos.push(`☑ ${quantidadeInscricoes} - Inscrição Imersão Prosperar – Data: ${dataImersao}`);
+        }
+
+        if (valoresBonus['Bônus-Outros: {{Descrição do Outro Bônus}}'] && camposVariaveis['Descrição do Outro Bônus']) {
+            const descricaoOutros = camposVariaveis['Descrição do Outro Bônus'];
+            bonusAtivos.push(`☑ Outros: ${descricaoOutros}`);
+        }
+
+        // Se não há bônus ativos, mostrar "Não se aplica"
+        if (bonusAtivos.length === 0) {
+            return '☑ Não se aplica';
+        }
+
+        return bonusAtivos.join('\n');
+    }
+
+    /**
+     * Calcula o preço total do contrato somando todas as formas de pagamento
+     */
+    private calcularPrecoTotalContrato(dadosContrato: any): string {
+        const valoresFormas = dadosContrato.valores_formas_pagamento || {};
+        let total = 0;
+
+        // Somar todos os valores das formas de pagamento
+        Object.values(valoresFormas).forEach((dados: any) => {
+            if (dados.valor) {
+                const valor = typeof dados.valor === 'string' ? parseInt(dados.valor) : dados.valor;
+                total += valor / 100; // Converter de centavos para reais
+            }
+        });
+
+        return total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    /**
+     * Enriquece os dados de formas de pagamento com campos calculados
+     */
+    private enriquecerValoresFormasPagamento(valoresFormas: Record<string, any>): Record<string, any> {
+        const valoresEnriquecidos = { ...valoresFormas };
+
+        // Processar boleto parcelado
+        if (valoresFormas['Parcelado - Boleto']) {
+            const dadosBoleto = valoresFormas['Parcelado - Boleto'];
+            const valorTotalCentavos = parseInt(dadosBoleto.valor); // Valor total em centavos
+            const valorTotalReais = valorTotalCentavos / 100; // Converter para reais
+            const numeroParcelas = parseInt(dadosBoleto.numero_parcelas);
+            const valorParcelaReais = valorTotalReais / numeroParcelas;
+
+            valoresEnriquecidos['Parcelado - Boleto'] = {
+                ...dadosBoleto,
+                valor_parcelas: valorParcelaReais.toFixed(2), // Valor por parcela em reais com 2 casas decimais
+            };
+        }
+
+        // Processar boleto com chave longa (formato antigo)
+        const chaveBoletoLonga = 'Parcelado - Boleto:  Parcelas de: . Melhor dia de Vencimento: . Data para o 1º Boleto: .';
+        if (valoresFormas[chaveBoletoLonga]) {
+            const dadosBoleto = valoresFormas[chaveBoletoLonga];
+            const valorTotalCentavos = parseInt(dadosBoleto.valor_parcelas); // Valor total em centavos
+            const valorTotalReais = valorTotalCentavos / 100; // Converter para reais
+            const numeroParcelas = parseInt(dadosBoleto.numero_parcelas);
+            const valorParcelaReais = valorTotalReais / numeroParcelas;
+
+            valoresEnriquecidos[chaveBoletoLonga] = {
+                ...dadosBoleto,
+                valor: valorTotalCentavos.toString(), // Valor total em centavos
+                valor_parcelas: valorParcelaReais.toFixed(2), // Valor por parcela em reais com 2 casas decimais
+            };
+        }
+
+        // Processar cartão de crédito parcelado
+        if (valoresFormas['Parcelado - Cartão de Crédito']) {
+            const dadosCartao = valoresFormas['Parcelado - Cartão de Crédito'];
+            const valorTotalCentavos = parseInt(dadosCartao.valor); // Valor total em centavos
+            const valorTotalReais = valorTotalCentavos / 100; // Converter para reais
+            const numeroParcelas = parseInt(dadosCartao.numero_parcelas);
+            const valorParcelaReais = valorTotalReais / numeroParcelas;
+
+            valoresEnriquecidos['Parcelado - Cartão de Crédito'] = {
+                ...dadosCartao,
+                valor_parcelas: valorParcelaReais.toFixed(2), // Valor por parcela em reais com 2 casas decimais
+            };
+        }
+
+        return valoresEnriquecidos;
     }
 
     /**
@@ -1363,16 +1540,13 @@ ${infoTestemunhas}
             // Formas de pagamento
             pagamento: {
                 forma_pagamento: criarContratoDto.forma_pagamento,
-                preco_total: treinamento.preco_treinamento,
                 formas_pagamento: formasPagamento.map((fp) => ({
+                    tipo: fp.tipo,
                     forma: fp.forma,
                     valor: fp.valor,
                     descricao: fp.descricao || null,
                 })),
-                parcelas: formasPagamento.length,
-                valor_entrada: formasPagamento.length > 0 ? formasPagamento[0].valor : treinamento.preco_treinamento,
-                valor_parcelas: formasPagamento.length > 1 ? formasPagamento.slice(1).map((fp) => fp.valor) : [],
-                valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || null,
+                valores_formas_pagamento: this.enriquecerValoresFormasPagamento(criarContratoDto.valores_formas_pagamento || {}),
             },
 
             // Bônus e campos variáveis

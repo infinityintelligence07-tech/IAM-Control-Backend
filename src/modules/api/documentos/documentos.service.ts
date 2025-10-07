@@ -1514,6 +1514,7 @@ ${infoTestemunhas}
                 descricao: treinamento.descricao || null,
                 carga_horaria: treinamento.carga_horaria || null,
                 modalidade: treinamento.modalidade || null,
+                url_logo_treinamento: treinamento.url_logo_treinamento || null,
             },
 
             // Dados da turma bônus (IPR)

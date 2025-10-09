@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ETipoDocumento } from '@/modules/config/entities/enum';
 
@@ -45,6 +45,11 @@ export class CreateDocumentoDto {
     @IsString()
     @IsNotEmpty()
     clausulas: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsNumber({}, { each: true })
+    treinamentos_relacionados?: number[];
 }
 
 export class UpdateDocumentoDto {
@@ -65,6 +70,11 @@ export class UpdateDocumentoDto {
     @IsOptional()
     @IsString()
     clausulas?: string;
+
+    @IsOptional()
+    @IsArray()
+    @IsNumber({}, { each: true })
+    treinamentos_relacionados?: number[];
 }
 
 export class DocumentoResponseDto {
@@ -73,6 +83,7 @@ export class DocumentoResponseDto {
     tipo_documento: ETipoDocumento;
     campos: CampoDocumentoDto[];
     clausulas: string;
+    treinamentos_relacionados?: number[];
     created_at: Date;
     updated_at: Date;
     criado_por?: number;

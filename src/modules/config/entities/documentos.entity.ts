@@ -24,6 +24,9 @@ export class Documentos extends BaseEntity {
     @Column({ type: 'text', name: 'clausulas', nullable: false })
     clausulas: string;
 
+    @Column({ type: 'jsonb', name: 'treinamentos_relacionados', nullable: true })
+    treinamentos_relacionados: number[];
+
     @OneToMany(() => Alunos, (alunos) => alunos.id_polo_fk)
     alunos: Alunos[];
 

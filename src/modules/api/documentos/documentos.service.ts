@@ -26,16 +26,20 @@ export class DocumentosService {
 
     async createDocumento(createDocumentoDto: CreateDocumentoDto, userId?: number): Promise<DocumentoResponseDto> {
         try {
+            console.log('📄 [BACKEND] Criando documento com treinamentos relacionados:', createDocumentoDto.treinamentos_relacionados);
+
             const documento = this.uow.documentosRP.create({
                 documento: createDocumentoDto.documento,
                 tipo_documento: createDocumentoDto.tipo_documento,
                 campos: createDocumentoDto.campos,
                 clausulas: createDocumentoDto.clausulas,
+                treinamentos_relacionados: createDocumentoDto.treinamentos_relacionados || [],
                 criado_por: userId,
                 atualizado_por: userId,
             });
 
             const savedDocumento = await this.uow.documentosRP.save(documento);
+            console.log('✅ [BACKEND] Documento criado com treinamentos:', savedDocumento.treinamentos_relacionados);
             return this.mapToResponseDto(savedDocumento);
         } catch (error) {
             console.error('Erro ao criar documento:', error);
@@ -118,11 +122,16 @@ export class DocumentosService {
             if (updateDocumentoDto.clausulas !== undefined) {
                 documento.clausulas = updateDocumentoDto.clausulas;
             }
+            if (updateDocumentoDto.treinamentos_relacionados !== undefined) {
+                console.log('📝 [BACKEND] Atualizando treinamentos relacionados:', updateDocumentoDto.treinamentos_relacionados);
+                documento.treinamentos_relacionados = updateDocumentoDto.treinamentos_relacionados;
+            }
 
             // Atualizar auditoria
             documento.atualizado_por = userId;
 
             const savedDocumento = await this.uow.documentosRP.save(documento);
+            console.log('✅ [BACKEND] Documento atualizado com treinamentos:', savedDocumento.treinamentos_relacionados);
             return this.mapToResponseDto(savedDocumento);
         } catch (error) {
             if (error instanceof NotFoundException) {
@@ -174,6 +183,7 @@ export class DocumentosService {
                 tipo_documento: documentoOriginal.tipo_documento,
                 campos: documentoOriginal.campos,
                 clausulas: documentoOriginal.clausulas,
+                treinamentos_relacionados: documentoOriginal.treinamentos_relacionados || [],
                 criado_por: userId,
                 atualizado_por: userId,
             });
@@ -230,6 +240,7 @@ export class DocumentosService {
             tipo_documento: documento.tipo_documento,
             campos: documento.campos || [],
             clausulas: documento.clausulas,
+            treinamentos_relacionados: documento.treinamentos_relacionados || [],
             created_at: documento.criado_em,
             updated_at: documento.atualizado_em,
             criado_por: documento.criado_por,

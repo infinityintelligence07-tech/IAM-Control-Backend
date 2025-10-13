@@ -503,14 +503,58 @@ export class DocumentosService {
             // Calcular preço total e processar formas de pagamento
             const precoTotal = treinamento.preco_treinamento;
             console.log('Preço total calculado:', precoTotal, 'Tipo:', typeof precoTotal);
+            console.log('Forma de pagamento selecionada:', criarContratoDto.forma_pagamento);
+            console.log('Valores formas pagamento:', JSON.stringify(criarContratoDto.valores_formas_pagamento, null, 2));
             const formasPagamento: { tipo: string; forma: EFormasPagamento; valor: number; descricao?: string }[] = [];
 
             if (criarContratoDto.forma_pagamento === 'A_VISTA') {
-                formasPagamento.push({
-                    tipo: 'A_VISTA',
-                    forma: EFormasPagamento.PIX,
-                    valor: precoTotal,
-                });
+                // Processar formas de pagamento à vista do novo formato
+                const valoresFormas = criarContratoDto.valores_formas_pagamento;
+
+                if (valoresFormas) {
+                    // À Vista - Cartão de Crédito
+                    if (valoresFormas['À Vista - Cartão de Crédito']) {
+                        formasPagamento.push({
+                            tipo: 'A_VISTA',
+                            forma: EFormasPagamento.CARTAO_CREDITO,
+                            valor: parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100,
+                        });
+                    }
+
+                    // À Vista - Cartão de Débito
+                    if (valoresFormas['À Vista - Cartão de Débito']) {
+                        formasPagamento.push({
+                            tipo: 'A_VISTA',
+                            forma: EFormasPagamento.CARTAO_DEBITO,
+                            valor: parseInt(valoresFormas['À Vista - Cartão de Débito'].valor) / 100,
+                        });
+                    }
+
+                    // À Vista - PIX/Transferência
+                    if (valoresFormas['À Vista - PIX/Transferência']) {
+                        formasPagamento.push({
+                            tipo: 'A_VISTA',
+                            forma: EFormasPagamento.PIX,
+                            valor: parseInt(valoresFormas['À Vista - PIX/Transferência'].valor) / 100,
+                        });
+                    }
+
+                    // À Vista - Espécie
+                    if (valoresFormas['À Vista - Espécie']) {
+                        formasPagamento.push({
+                            tipo: 'A_VISTA',
+                            forma: EFormasPagamento.DINHEIRO,
+                            valor: parseInt(valoresFormas['À Vista - Espécie'].valor) / 100,
+                        });
+                    }
+                } else {
+                    // Fallback: se não houver valores_formas_pagamento, usar PIX com o preço total
+                    formasPagamento.push({
+                        tipo: 'A_VISTA',
+                        forma: EFormasPagamento.PIX,
+                        valor: precoTotal,
+                    });
+                }
             } else if (criarContratoDto.forma_pagamento === 'PARCELADO' && criarContratoDto.formas_pagamento) {
                 criarContratoDto.formas_pagamento.forEach((fp) => {
                     formasPagamento.push({
@@ -632,6 +676,10 @@ export class DocumentosService {
                     });
                 }
             }
+
+            // Log para debug das formas de pagamento processadas
+            console.log('✅ Formas de pagamento processadas:', JSON.stringify(formasPagamento, null, 2));
+            console.log('Total de formas registradas:', formasPagamento.length);
 
             // Buscar template do documento
             const template = await this.uow.documentosRP.findOne({

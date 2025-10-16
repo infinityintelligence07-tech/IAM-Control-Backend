@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
     // Configuração HTTPS
@@ -18,6 +19,10 @@ async function bootstrap() {
     }
 
     const app = await NestFactory.create(AppModule, { httpsOptions });
+
+    // Configuração do body parser para payloads grandes (50MB)
+    app.use(bodyParser.json({ limit: '50mb' }));
+    app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
     // Configuração do CORS
     app.enableCors({

@@ -284,4 +284,95 @@ export class DocumentosController {
         console.log('Enviando lembrete para documento:', id);
         return this.documentosService.enviarLembreteAssinatura(id);
     }
+
+    @Post('salvar-assinatura')
+    async salvarAssinatura(
+        @Body()
+        signatureData: {
+            contratoId: string;
+            signer: 'aluno' | 'testemunha1' | 'testemunha2';
+            signatureType: 'escrita' | 'nome';
+            signatureData?: string | null;
+            signatureName?: string | null;
+            documentPhoto?: string | null;
+            signedAt: string;
+        },
+    ) {
+        console.log('Salvando assinatura:', signatureData);
+        await this.documentosService.salvarAssinatura(signatureData);
+        return { message: 'Assinatura salva com sucesso' };
+    }
+
+    @Post('gerar-assinatura-eletronica/:contratoId')
+    async gerarAssinaturaEletronica(@Param('contratoId') contratoId: string) {
+        const result = await this.documentosService.salvarAssinaturaEletronica(contratoId);
+        return {
+            message: 'Assinatura eletrônica gerada com sucesso',
+            assinaturaEletronica: result.assinaturaEletronica,
+            dataAssinatura: result.dataAssinatura,
+        };
+    }
+
+    @Post('validar-assinatura-eletronica')
+    async validarAssinaturaEletronica(@Body() data: { contratoId: string; assinaturaEletronica: string }) {
+        const isValid = await this.documentosService.validarAssinaturaEletronica(data.contratoId, data.assinaturaEletronica);
+        return {
+            isValid,
+            message: isValid ? 'Assinatura eletrônica válida' : 'Assinatura eletrônica inválida',
+        };
+    }
+
+    @Post('autenticar-zapsign')
+    async autenticarZapSign() {
+        const result = await this.documentosService.autenticarZapSign();
+        return result;
+    }
+
+    @Post('enviar-zapsign')
+    async enviarDocumentoZapSign(@Body() data: { contratoId: string; accessToken: string; dadosContrato: any }) {
+        const result = await this.documentosService.enviarDocumentoZapSign(data.contratoId, data.accessToken, data.dadosContrato);
+        return result;
+    }
+
+    @Get('consultar-status-zapsign/:contratoId')
+    async consultarStatusZapSign(@Param('contratoId') contratoId: string) {
+        const result = await this.documentosService.consultarStatusZapSign(contratoId);
+        return {
+            message: 'Status consultado com sucesso',
+            data: result,
+        };
+    }
+
+    @Delete('excluir-zapsign/:contratoId')
+    async excluirDocumentoZapSign(@Param('contratoId') contratoId: string) {
+        await this.documentosService.excluirDocumentoZapSign(contratoId);
+        return {
+            message: 'Documento excluído do ZapSign com sucesso',
+        };
+    }
+
+    @Post('sincronizar-zapsign')
+    async sincronizarTodosContratosZapSign() {
+        await this.documentosService.sincronizarTodosContratosZapSign();
+        return {
+            message: 'Sincronização com ZapSign concluída',
+        };
+    }
+
+    @Get('verificar-zapsign/:contratoId')
+    async verificarDadosZapSign(@Param('contratoId') contratoId: string) {
+        const dados = await this.documentosService.verificarDadosZapSign(contratoId);
+        return {
+            message: 'Dados do ZapSign consultados',
+            data: dados,
+        };
+    }
+
+    @Post('atualizar-dados-zapsign-contratos-existentes')
+    async atualizarDadosZapSignContratosExistentes() {
+        await this.documentosService.atualizarDadosZapSignContratosExistentes();
+        return {
+            message: 'Dados do ZapSign atualizados para contratos existentes',
+        };
+    }
 }

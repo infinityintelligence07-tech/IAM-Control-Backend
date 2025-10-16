@@ -28,7 +28,7 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     })
     status_ass_aluno: EStatusAssinaturasContratos;
 
-    @Column({ type: 'timestamp', name: 'data_ass_aluno', nullable: false })
+    @Column({ type: 'timestamp', name: 'data_ass_aluno', nullable: true })
     data_ass_aluno: Date;
 
     @Column({ type: 'int', name: 'testemunha_um', nullable: true })
@@ -65,6 +65,55 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
 
     @Column({ type: 'jsonb', name: 'dados_contrato', nullable: true })
     dados_contrato: any;
+
+    // Campos para assinatura do aluno
+    @Column({ type: 'text', name: 'assinatura_aluno_base64', nullable: true })
+    assinatura_aluno_base64: string;
+
+    @Column({ type: 'varchar', name: 'tipo_assinatura_aluno', nullable: true })
+    tipo_assinatura_aluno: string; // 'escrita' ou 'nome'
+
+    @Column({ type: 'text', name: 'foto_documento_aluno_base64', nullable: true })
+    foto_documento_aluno_base64: string;
+
+    // Campos para assinatura da testemunha 1
+    @Column({ type: 'text', name: 'assinatura_testemunha_um_base64', nullable: true })
+    assinatura_testemunha_um_base64: string;
+
+    @Column({ type: 'varchar', name: 'tipo_assinatura_testemunha_um', nullable: true })
+    tipo_assinatura_testemunha_um: string;
+
+    // Campos para assinatura da testemunha 2
+    @Column({ type: 'text', name: 'assinatura_testemunha_dois_base64', nullable: true })
+    assinatura_testemunha_dois_base64: string;
+
+    @Column({ type: 'varchar', name: 'tipo_assinatura_testemunha_dois', nullable: true })
+    tipo_assinatura_testemunha_dois: string;
+
+    // Campo para assinatura eletrônica (usa data_ass_aluno e status_ass_aluno existentes)
+    @Column({ type: 'varchar', name: 'assinatura_eletronica', nullable: true })
+    assinatura_eletronica: string;
+
+    // Campos para integração com ZapSign
+    @Column({ type: 'varchar', name: 'zapsign_document_id', nullable: true })
+    zapsign_document_id: string;
+
+    @Column({ type: 'jsonb', name: 'zapsign_signers_data', nullable: true })
+    zapsign_signers_data: Array<{
+        name: string;
+        email: string;
+        status: string;
+        signing_url?: string;
+    }>; // Links e dados dos signatários
+
+    @Column({ type: 'jsonb', name: 'zapsign_document_status', nullable: true })
+    zapsign_document_status: {
+        status?: string;
+        created_at?: string;
+        documentId?: string;
+        signingUrl?: string;
+        [key: string]: unknown;
+    }; // Status completo do documento
 
     @ManyToOne(() => TurmasAlunosTreinamentos, (turmasAlunosTreinamentos) => turmasAlunosTreinamentos.turmasAlunosTreinamentosContratos)
     @JoinColumn([{ name: 'id_turma_aluno_treinamento', referencedColumnName: 'id' }])

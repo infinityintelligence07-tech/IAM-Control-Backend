@@ -1938,7 +1938,7 @@ ${infoTestemunhas}
                     updateData.data_ass_aluno = new Date(signatureData.signedAt);
                     updateData.tipo_assinatura_aluno = signatureData.signatureType;
 
-                    if (signatureData.signatureType === 'escrita' && signatureData.signatureData) {
+                    if (signatureData.signatureData) {
                         updateData.assinatura_aluno_base64 = signatureData.signatureData;
                     }
 
@@ -1952,7 +1952,7 @@ ${infoTestemunhas}
                     updateData.data_ass_test_um = new Date(signatureData.signedAt);
                     updateData.tipo_assinatura_testemunha_um = signatureData.signatureType;
 
-                    if (signatureData.signatureType === 'escrita' && signatureData.signatureData) {
+                    if (signatureData.signatureData) {
                         updateData.assinatura_testemunha_um_base64 = signatureData.signatureData;
                     }
                     break;
@@ -1962,7 +1962,7 @@ ${infoTestemunhas}
                     updateData.data_ass_test_dois = new Date(signatureData.signedAt);
                     updateData.tipo_assinatura_testemunha_dois = signatureData.signatureType;
 
-                    if (signatureData.signatureType === 'escrita' && signatureData.signatureData) {
+                    if (signatureData.signatureData) {
                         updateData.assinatura_testemunha_dois_base64 = signatureData.signatureData;
                     }
                     break;

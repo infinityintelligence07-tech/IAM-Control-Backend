@@ -31,18 +31,21 @@ export interface ZapSignDocument {
 }
 
 export interface ZapSignResponse {
-    id: string;
+    token: string; // ID único do documento na ZapSign
+    open_id: number; // ID numérico do documento
     name: string;
     status: string;
     created_at: string;
     signers: Array<{
-        id: string;
+        token: string;
         name: string;
         email: string;
         status: string;
         signed_at?: string;
+        sign_url?: string;
     }>;
-    file_url?: string;
+    original_file?: string;
+    signed_file?: string | null;
 }
 
 @Injectable()
@@ -119,32 +122,49 @@ export class ZapSignService {
         }
     }
 
-    async createDocumentFromTemplate(templateId: string, documentData: ZapSignDocument): Promise<ZapSignResponse> {
+    /**
+     * Cria um documento no ZapSign a partir de um arquivo PDF
+     */
+    async createDocumentFromFile(documentData: any): Promise<ZapSignResponse> {
         try {
-            console.log('Criando documento no ZapSign usando template:', templateId);
+            console.log('Criando documento no ZapSign a partir de arquivo PDF');
+            console.log('Dados recebidos:', {
+                name: documentData.name,
+                signers: documentData.signers?.length || 0,
+                message: documentData.message,
+                sandbox: documentData.sandbox,
+                fileType: typeof documentData.file,
+                fileIsBuffer: Buffer.isBuffer(documentData.file),
+                fileSize: documentData.file?.length || 0,
+            });
+
+            // Converter o buffer para base64
+            const base64File = documentData.file.toString('base64');
+            console.log('Base64 gerado. Tamanho:', base64File.length, 'caracteres');
+            console.log('Primeiros 100 caracteres do base64:', base64File.substring(0, 100));
 
             const response = await axios.post(
                 `${this.apiUrl}/docs/`,
                 {
-                    template_id: templateId,
                     name: documentData.name,
                     signers: documentData.signers,
                     message: documentData.message || 'Por favor, assine este documento.',
                     sandbox: documentData.sandbox || false,
+                    base64_pdf: base64File, // Corrigido: usar base64_pdf em vez de file
                 },
                 {
                     headers: this.getHeaders(),
                 },
             );
 
-            console.log('Documento criado com sucesso no ZapSign usando template:', response.data);
+            console.log('Documento criado com sucesso no ZapSign a partir de arquivo:', response.data);
             return response.data as ZapSignResponse;
         } catch (error: any) {
-            console.error('Erro ao criar documento no ZapSign usando template - detalhes completos:');
+            console.error('Erro ao criar documento no ZapSign a partir de arquivo - detalhes completos:');
             console.error('Status:', error.response?.status);
             console.error('Data:', JSON.stringify(error.response?.data, null, 2));
             console.error('Headers:', error.response?.headers);
-            throw new BadRequestException(`Erro ao criar documento no ZapSign usando template: ${JSON.stringify(error.response?.data || error.message)}`);
+            throw new BadRequestException(`Erro ao criar documento no ZapSign a partir de arquivo: ${JSON.stringify(error.response?.data || error.message)}`);
         }
     }
 
@@ -216,7 +236,7 @@ export class ZapSignService {
         }
     }
 
-    async createDocumentFromContent(data: { name: string; content: string; signers: ZapSignSigner[]; message?: string }): Promise<ZapSignDocument> {
+    async createDocumentFromContent(data: { name: string; content: string; signers: ZapSignSigner[]; message?: string }): Promise<ZapSignResponse> {
         try {
             console.log('createDocumentFromContent - Recebendo content (primeiros 100 caracteres):', data.content.substring(0, 100));
             console.log('createDocumentFromContent - É base64?:', /^[A-Za-z0-9+/]+=*$/.test(data.content.substring(0, 100)));
@@ -235,8 +255,20 @@ export class ZapSignService {
                 },
             );
 
-            console.log('Documento criado com sucesso!', response.data);
-            return response.data as ZapSignDocument;
+            const responseData = response.data as ZapSignResponse;
+
+            console.log('✅ Documento criado com sucesso no ZapSign!');
+            console.log('📋 Token do documento:', responseData.token);
+            console.log('📋 Open ID:', responseData.open_id);
+            console.log('📋 Status:', responseData.status);
+            console.log('📋 Data completa:', JSON.stringify(responseData, null, 2));
+
+            if (!responseData.token) {
+                console.error('❌ ERRO: ZapSign não retornou um token para o documento!');
+                throw new BadRequestException('ZapSign não retornou um token para o documento');
+            }
+
+            return responseData;
         } catch (error: any) {
             console.error('Erro ao criar documento com conteúdo:', error.response?.data || error.message);
             console.error('Status:', error.response?.status);

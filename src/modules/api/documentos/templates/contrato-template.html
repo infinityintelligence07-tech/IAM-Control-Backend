@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contrato de Treinamento</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #000;
+            background-color: white;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .logo {
+            font-weight: bold;
+            font-size: 24px;
+            color: #1e3a8a;
+            margin-right: 15px;
+        }
+        
+        .logo-line {
+            width: 2px;
+            height: 35px;
+            background-color: #9ca3af;
+            margin-right: 15px;
+        }
+        
+        .company-name {
+            font-weight: bold;
+            font-size: 16px;
+            color: #1e3a8a;
+        }
+        
+        .intro-text {
+            margin-bottom: 20px;
+            font-size: 12px;
+        }
+        
+        .section {
+            border: 1px solid #9ca3af;
+            padding: 15px;
+            margin-bottom: 15px;
+            background-color: white;
+        }
+        
+        .section-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .field-row {
+            display: flex;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        
+        .field-label {
+            font-weight: bold;
+            margin-right: 8px;
+            min-width: 140px;
+        }
+        
+        .field-value {
+            flex: 1;
+        }
+        
+        .two-columns {
+            display: flex;
+            gap: 30px;
+        }
+        
+        .column {
+            flex: 1;
+        }
+        
+        .bonus-section {
+            margin-top: 10px;
+        }
+        
+        .bonus-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .checkbox {
+            width: 12px;
+            height: 12px;
+            border: 1px solid #000;
+            margin-right: 8px;
+            display: inline-block;
+            background-color: white;
+        }
+        
+        .checkbox.checked {
+            background-color: #000;
+        }
+        
+        .payment-section {
+            margin-top: 10px;
+        }
+        
+        .payment-column {
+            flex: 1;
+        }
+        
+        .payment-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+        
+        .observations-box {
+            min-height: 80px;
+            border: 1px solid #9ca3af;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .declaration {
+            margin: 20px 0;
+            text-align: justify;
+            font-size: 12px;
+        }
+        
+        .signature-section {
+            margin-top: 20px;
+        }
+        
+        .signature-line {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .signature-field {
+            flex: 1;
+        }
+        
+        .signature-line-field {
+            border-bottom: 1px solid #000;
+            height: 20px;
+            margin-top: 5px;
+        }
+        
+        .signature-label {
+            text-align: center;
+            font-size: 10px;
+            margin-top: 5px;
+        }
+        
+        .witness-section {
+            margin-top: 20px;
+            border-top: 1px solid #000;
+            padding-top: 15px;
+        }
+        
+        .witnesses {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .witness {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .witness-line {
+            border-bottom: 1px solid #000;
+            height: 15px;
+            margin: 5px 0;
+        }
+        
+        .footer-logo {
+            text-align: center;
+            margin-top: 30px;
+        }
+        
+        .footer-title {
+            font-weight: bold;
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .footer-subtitle {
+            font-size: 12px;
+        }
+        
+        .clauses-section {
+            margin-top: 20px;
+        }
+        
+        .clause {
+            margin-bottom: 15px;
+        }
+        
+        .clause-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .clause-content {
+            text-align: justify;
+            margin-bottom: 8px;
+        }
+        
+        .paragraph {
+            margin-left: 20px;
+            margin-bottom: 5px;
+        }
+        
+        .unique-paragraph {
+            margin-left: 20px;
+            margin-bottom: 5px;
+        }
+        
+        .agreement-text {
+            margin: 20px 0;
+            text-align: center;
+            font-style: italic;
+        }
+        
+        .student-data-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .full-width-field {
+            grid-column: 1 / -1;
+        }
+        
+        .address-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .address-field {
+            display: flex;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">IAM</div>
+        <div class="logo-line"></div>
+        <div class="company-name">INSTITUTO ACADEMY MIND</div>
+    </div>
+    
+    <!-- Intro Text -->
+    <div class="intro-text">
+        O presente instrumento tem como objetivo realizar a inscrição da pessoa abaixo nominada no seguinte treinamento:
+    </div>
+    
+    <!-- Personal Information Section -->
+    <div class="section">
+        <div class="student-data-grid">
+            <div class="field-row">
+                <div class="field-label">NOME COMPLETO:</div>
+                <div class="field-value">{{ALUNO_NOME}}</div>
+            </div>
+            <div class="field-row">
+                <div class="field-label">DATA DE NASCIMENTO:</div>
+                <div class="field-value">{{ALUNO_DATA_NASCIMENTO}}</div>
+            </div>
+            <div class="field-row">
+                <div class="field-label">CPF/CNPJ:</div>
+                <div class="field-value">{{ALUNO_CPF}}</div>
+            </div>
+            <div class="field-row">
+                <div class="field-label">E-MAIL:</div>
+                <div class="field-value">{{ALUNO_EMAIL}}</div>
+            </div>
+            <div class="field-row">
+                <div class="field-label">WHATSAPP:</div>
+                <div class="field-value">{{ALUNO_WHATSAPP}}</div>
+            </div>
+            <div class="field-row full-width-field">
+                <div class="field-label">ENDEREÇO:</div>
+                <div class="field-value">{{ALUNO_ENDERECO}}</div>
+            </div>
+            <div class="field-row full-width-field">
+                <div class="address-row">
+                    <div class="address-field">
+                        <div class="field-label">CIDADE/ESTADO:</div>
+                        <div class="field-value">{{ALUNO_CIDADE_ESTADO}}</div>
+                    </div>
+                    <div class="address-field">
+                        <div class="field-label">CEP:</div>
+                        <div class="field-value">{{ALUNO_CEP}}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Training and Contract Details Section -->
+    <div class="section">
+        <div class="two-columns">
+            <div class="column">
+                <div class="field-row">
+                    <div class="field-label">TREINAMENTO:</div>
+                    <div class="field-value">{{TREINAMENTO_NOME}}</div>
+                </div>
+                <div class="field-row">
+                    <div class="field-label">CIDADE:</div>
+                    <div class="field-value">{{TREINAMENTO_CIDADE}}</div>
+                </div>
+                <div class="field-row">
+                    <div class="field-label">DATA PREVISTA:</div>
+                    <div class="field-value">{{TREINAMENTO_DATA_INICIO}} à {{TREINAMENTO_DATA_FIM}}</div>
+                </div>
+                <div class="field-row">
+                    <div class="field-label">PREÇO DO CONTRATO:</div>
+                    <div class="field-value">{{TREINAMENTO_PRECO}}</div>
+                </div>
+            </div>
+            <div class="column">
+                <div class="field-row" style="margin-bottom: 10px;">
+                    <div class="field-label" style="font-weight: bold;">BÔNUS:</div>
+                </div>
+                <div class="bonus-section">
+                    <div class="bonus-item">
+                        <div class="checkbox {{BONUS_NAO_APLICA}}"></div>
+                        <span>NÃO SE APLICA</span>
+                    </div>
+                    <div class="bonus-item">
+                        <div class="checkbox {{BONUS_100_DIAS}}"></div>
+                        <span>100 DIAS</span>
+                    </div>
+                    <div class="bonus-item">
+                        <div class="checkbox {{BONUS_IPR}}"></div>
+                        <span>1 Inscrições do Imersão Prosperar</span>
+                    </div>
+                    <div class="bonus-item">
+                        <span style="margin-left: 20px;">Data: {{BONUS_IPR_DATA}}</span>
+                    </div>
+                    <div class="bonus-item">
+                        <div class="checkbox {{BONUS_OUTROS}}"></div>
+                        <span>OUTROS:</span>
+                    </div>
+                    <div class="bonus-item">
+                        <span style="margin-left: 20px;">{{BONUS_OUTROS_DESCRICAO}}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Payment Summary Section -->
+    <div class="section" style="background-color: #f8f9fa; border-radius: 8px; padding: 20px;">
+        <div style="margin-bottom: 20px;">
+            <div style="margin-bottom: 15px;">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #333;">Valor do Treinamento:</div>
+                <div style="font-size: 18px; font-weight: bold; color: #333;">{{TREINAMENTO_PRECO}}</div>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #333;">Valor Real Pago:</div>
+                <div style="font-size: 18px; font-weight: bold; color: #28a745;">{{VALOR_REAL_PAGO}}</div>
+            </div>
+            <div>
+                <div style="font-weight: bold; margin-bottom: 8px; color: #333;">Forma de Pagamento:</div>
+                <div style="margin-left: 0;">
+                    {{DETALHES_FORMAS_PAGAMENTO}}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Payment Method Section -->
+    <div class="section">
+        <div class="section-title">FORMA DE PAGAMENTO</div>
+        <div class="two-columns">
+            <div class="payment-column">
+                <div class="payment-title">À VISTA:</div>
+                <div class="bonus-item">
+                    <div class="checkbox {{PAGAMENTO_CARTAO_CREDITO_AVISTA}}"></div>
+                    <span>CARTÃO DE CRÉDITO</span>
+                </div>
+                <div class="bonus-item">
+                    <div class="checkbox {{PAGAMENTO_CARTAO_DEBITO_AVISTA}}"></div>
+                    <span>CARTÃO DE DÉBITO</span>
+                </div>
+                <div class="bonus-item">
+                    <div class="checkbox {{PAGAMENTO_PIX_AVISTA}}"></div>
+                    <span>PIX/TRANSFERÊNCIA</span>
+                </div>
+                <div class="bonus-item">
+                    <div class="checkbox {{PAGAMENTO_ESPECIE_AVISTA}}"></div>
+                    <span>ESPÉCIE</span>
+                </div>
+            </div>
+            <div class="payment-column">
+                <div class="payment-title">PARCELADO:</div>
+                <div class="bonus-item">
+                    <div class="checkbox {{PAGAMENTO_CARTAO_CREDITO_PARCELADO}}"></div>
+                    <span>CARTÃO DE CRÉDITO</span>
+                </div>
+                <div class="bonus-item">
+                    <div class="checkbox {{PAGAMENTO_BOLETO_PARCELADO}}"></div>
+                    <span>BOLETO</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Observations Section -->
+    <div class="section">
+        <div class="field-row" style="margin-bottom: 10px;">
+            <div class="field-label" style="font-weight: bold;">OBSERVAÇÕES:</div>
+        </div>
+        <div class="observations-box">{{OBSERVACOES}}</div>
+    </div>
+    
+    <!-- Declaration -->
+    <div class="declaration">
+        Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+    </div>
+    
+    <!-- Signature Section -->
+    <div class="signature-section">
+        <div class="signature-line">
+            <div class="signature-field">
+                <span>Local: {{CONTRATO_LOCAL}}</span>
+            </div>
+            <div class="signature-field">
+                <span>Data: {{CONTRATO_DATA}}</span>
+            </div>
+        </div>
+        <div class="signature-line-field"></div>
+        <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
+    </div>
+    
+    <!-- Witness Section -->
+    <div class="witness-section">
+        <div class="witnesses">
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div>Testemunha 1</div>
+                <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+            </div>
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div>Testemunha 2</div>
+                <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer Logo -->
+    <div class="footer-logo">
+        <div class="footer-title">{{TREINAMENTO_NOME}}</div>
+        <div class="footer-subtitle">A GRANDE TRANSFORMAÇÃO</div>
+    </div>
+    
+    <!-- Clauses Section -->
+    <div class="clauses-section">
+        <div class="clause">
+            <div class="clause-title">Cláusula Primeira.</div>
+            <div class="clause-content">
+                O presente contrato tem por objeto a prestação de serviços educacionais, sendo as partes contratantes: de um lado, o(a) ALUNO(A) {{ALUNO_NOME}}, inscrito(a) no CPF sob nº {{ALUNO_CPF}}, residente e domiciliado(a) em {{ALUNO_ENDERECO}}, {{ALUNO_CIDADE_ESTADO}}, CEP {{ALUNO_CEP}}; e de outro lado, o Instituto Academy Mind Treinamentos LTDA, inscrito no CNPJ sob nº 00.000.000/0001-00, com sede na Rua Major Rehder, nº 248, Vila Rehder, Americana/SP, CEP 13465-390, doravante denominado ACADEMY.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Segunda.</div>
+            <div class="clause-content">
+                O treinamento {{TREINAMENTO_NOME}} será realizado na cidade de {{TREINAMENTO_CIDADE}}, nas datas de {{TREINAMENTO_DATA_INICIO}} à {{TREINAMENTO_DATA_FIM}}, sendo que a ACADEMY se reserva o direito de comunicar ao ALUNO, via e-mail ou WhatsApp, alterações nas datas e/ou local do treinamento, quando necessário, em virtude do número de participantes ou questões estruturais, sem que isso gere direito a qualquer tipo de indenização ou compensação ao ALUNO.
+            </div>
+            <div class="paragraph">
+                §1°. O ALUNO é responsável por manter seus dados atualizados junto à ACADEMY, sendo que qualquer comunicação enviada aos dados cadastrados será considerada recebida pelo ALUNO.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Terceira.</div>
+            <div class="clause-content">
+                Não haverá devolução, transferência ou reagendamento em caso de ausência do ALUNO, sendo considerada ausência a não participação, parcial ou total, do treinamento, o que implicará na rescisão contratual sem devolução de valores e sem emissão de certificado.
+            </div>
+            <div class="paragraph">
+                §1°. Em caso de solicitação de alteração de data e/ou local pelo ALUNO, será cobrada taxa de 10% (dez por cento) sobre o valor total do contrato.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Quarta.</div>
+            <div class="clause-content">
+                O presente treinamento é classificado como curso livre, sendo que o custo de emissão de qualquer certificado, quando possível e solicitado, será por conta do ALUNO.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Quinta.</div>
+            <div class="clause-content">
+                Em caso de inadimplência, o ALUNO fica ciente de que seus dados serão protestados e inscritos em órgãos de proteção ao crédito. Em caso de atraso superior a 30 (trinta) dias, o ALUNO deverá quitar antecipadamente todas as parcelas pendentes, com multa de 10% (dez por cento) sobre o valor em aberto, mais juros de 1% (um por cento) ao mês e multa de 10% (dez por cento) por atraso.
+            </div>
+            <div class="paragraph">
+                §1°. A ACADEMY se reserva o direito de impedir a inscrição do ALUNO inadimplente em novos treinamentos.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Quinta.</div>
+            <div class="clause-content">
+                Em caso de cancelamento solicitado pelo ALUNO com MAIS DE 30 (TRINTA) DIAS de antecedência, será cobrada multa de 30% (trinta por cento) sobre o valor total do contrato, para cobrir os custos operacionais da ACADEMY.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Sexta.</div>
+            <div class="clause-content">
+                Em caso de cancelamento solicitado pelo ALUNO com MENOS DE 30 (TRINTA) DIAS de antecedência, será cobrada multa de 40% (quarenta por cento) sobre o valor total do contrato, para cobrir os custos operacionais já incorridos pela ACADEMY desde a assinatura do contrato até a preparação do treinamento.
+            </div>
+            <div class="unique-paragraph">
+                Parágrafo único: A multa de 40% (quarenta por cento) será aplicada mesmo que o contrato tenha sido assinado há menos de 30 (trinta) dias da data do treinamento.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Sétima.</div>
+            <div class="clause-content">
+                Qualquer saldo a favor do ALUNO será devolvido em até 3 (três) parcelas via transferência bancária, mediante apresentação de comprovante bancário atualizado.
+            </div>
+            <div class="paragraph">
+                §1°. Caso o ALUNO não responda aos contatos da ACADEMY por 3 (três) meses, o valor devido será considerado renunciado e não haverá devolução posterior.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Oitava.</div>
+            <div class="clause-content">
+                A ACADEMY poderá cobrar qualquer valor em aberto como título executivo extrajudicial.
+            </div>
+            <div class="unique-paragraph">
+                Parágrafo único: Caso o treinamento/curso contratado tenha sido utilizado, total ou parcialmente, não haverá devolução, pois o pagamento será utilizado para quitação das obrigações contratuais.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Nona.</div>
+            <div class="clause-content">
+                Qualquer saldo pendente deverá ser pago via transferência bancária (à vista) ou em até 3 (três) parcelas no cartão de crédito.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Décima.</div>
+            <div class="clause-content">
+                O uso de créditos no presente contrato é considerado consumido e não poderá ser convertido ou devolvido, mesmo em casos de alterações ou cancelamentos.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Décima Primeira.</div>
+            <div class="clause-content">
+                Os bônus são acessórios e não podem ser utilizados separadamente. Em caso de cancelamento do treinamento, os bônus também serão cancelados.
+            </div>
+            <div class="paragraph">
+                §1°. Caso algum bônus tenha sido utilizado, será cobrada taxa de: R$ 2.997,00 (dois mil, novecentos e noventa e sete reais) para curso online completo ou mentoria coletiva online ao vivo de 1 hora, e R$ 648,50 (seiscentos e quarenta e oito reais e cinquenta centavos) para cada IPR (Imersão Prosperar).
+            </div>
+            <div class="paragraph">
+                §2°. Os valores mencionados no parágrafo anterior estarão sujeitos às penalidades contratuais previstas nas cláusulas quinta e sexta.
+            </div>
+            <div class="paragraph">
+                §3°. A partir do momento em que o acesso for fornecido ao ALUNO, o curso online ou mentoria será considerado utilizado.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Décima Segunda.</div>
+            <div class="clause-content">
+                As tolerâncias ou deliberações não constituem novação ou alteração contratual.
+            </div>
+        </div>
+        
+        <div class="clause">
+            <div class="clause-title">Cláusula Décima Terceira.</div>
+            <div class="clause-content">
+                As partes elegem o foro da comarca de Americana-SP para dirimir quaisquer questões oriundas do presente contrato, renunciando a qualquer outro, por mais privilegiado que seja.
+            </div>
+        </div>
+    </div>
+    
+    <!-- Agreement Text -->
+    <div class="agreement-text">
+        E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.
+    </div>
+    
+    <!-- Declaration -->
+    <div class="declaration">
+        Declaração. Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+    </div>
+    
+    <!-- Agreement Text Again -->
+    <div class="agreement-text">
+        E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.
+    </div>
+    
+    <!-- Signature Section -->
+    <div class="signature-section">
+        <div class="signature-line">
+            <div class="signature-field">
+                <span>Local: {{CONTRATO_LOCAL}}</span>
+            </div>
+            <div class="signature-field">
+                <span>Data: {{CONTRATO_DATA}}</span>
+            </div>
+        </div>
+        <div class="signature-line-field"></div>
+        <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
+    </div>
+    
+    <!-- Witness Section -->
+    <div class="witness-section">
+        <div class="witnesses">
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div>Testemunha 1</div>
+                <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+            </div>
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div>Testemunha 2</div>
+                <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer Logo -->
+    <div class="footer-logo">
+        <div class="footer-title">{{TREINAMENTO_NOME}}</div>
+        <div class="footer-subtitle">A GRANDE TRANSFORMAÇÃO</div>
+    </div>
+</body>
+</html>

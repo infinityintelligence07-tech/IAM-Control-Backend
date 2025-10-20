@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
 import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/turmasAlunosTreinamentosContratos.entity';
-import { EStatusAssinaturasContratos } from '@/modules/config/entities/enum';
+import { EStatusAssinaturasContratos, EOrigemAlunos, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import * as crypto from 'crypto';
 import axios from 'axios';
 import { Not, IsNull } from 'typeorm';
@@ -213,6 +213,48 @@ export class DocumentosService {
                 });
             }
 
+            // Buscar ou criar registro de TurmasAlunos primeiro
+            let turmaAluno = await this.uow.turmasAlunosRP.findOne({
+                where: {
+                    id_aluno: criarContratoDto.id_aluno,
+                    deletado_em: null,
+                },
+            });
+
+            // Se não existir, criar um registro temporário
+            if (!turmaAluno) {
+                turmaAluno = this.uow.turmasAlunosRP.create({
+                    id_aluno: criarContratoDto.id_aluno,
+                    id_turma: 1, // Turma padrão temporária
+                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO, // Origem padrão
+                    status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN, // Status padrão
+                    nome_cracha: aluno.nome_cracha || aluno.nome,
+                    numero_cracha: 'TEMP001', // Número temporário
+                });
+                turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
+            }
+
+            // Buscar ou criar registro de TurmasAlunosTreinamentos
+            let turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                where: {
+                    id_turma_aluno: turmaAluno.id,
+                    id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                    deletado_em: null,
+                },
+            });
+
+            // Se não existir, criar um registro temporário
+            if (!turmaAlunoTreinamento) {
+                turmaAlunoTreinamento = this.uow.turmasAlunosTreinamentosRP.create({
+                    id_turma_aluno: turmaAluno.id,
+                    id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                    preco_treinamento: treinamento.preco_treinamento || 0,
+                    forma_pgto: [],
+                    preco_total_pago: 0,
+                });
+                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
+            }
+
             // Preparar dados para o template
             const templateData = this.prepareTemplateData(aluno, treinamento, turma, criarContratoDto);
 
@@ -285,16 +327,6 @@ export class DocumentosService {
             };
 
             const zapSignResponse = await this.zapSignService.createDocumentFromFile(documentData);
-
-            // Log para debug das testemunhas
-            console.log('=== DEBUG TESTEMUNHAS ===');
-            console.log('testemunha_um_nome:', criarContratoDto.testemunha_um_nome);
-            console.log('testemunha_um_cpf:', criarContratoDto.testemunha_um_cpf);
-            console.log('testemunha_um_id:', criarContratoDto.testemunha_um_id);
-            console.log('testemunha_dois_nome:', criarContratoDto.testemunha_dois_nome);
-            console.log('testemunha_dois_cpf:', criarContratoDto.testemunha_dois_cpf);
-            console.log('testemunha_dois_id:', criarContratoDto.testemunha_dois_id);
-
             // Processar dados de bônus completos
             const bonusData = this.processBonusData(criarContratoDto, turma);
 
@@ -302,14 +334,53 @@ export class DocumentosService {
             const boletoData = this.processBoletoData(criarContratoDto);
             bonusData.campos_variaveis = { ...bonusData.campos_variaveis, ...boletoData };
 
+            // Log para debug dos dados do treinamento
+            console.log('=== DEBUG DADOS DO TREINAMENTO ===');
+            console.log('Treinamento encontrado:', {
+                id: treinamento.id,
+                nome: treinamento.treinamento,
+                preco: treinamento.preco_treinamento,
+                logo: treinamento.url_logo_treinamento,
+                sigla: treinamento.sigla_treinamento,
+            });
+
             // Salvar informações do contrato no banco de dados
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
-                id_turma_aluno_treinamento: '1', // Será necessário buscar ou criar o registro correto
+                id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
                 status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
                 dados_contrato: {
                     zapsign_document_id: zapSignResponse.token,
                     zapsign_document_url: zapSignResponse.signers[0]?.sign_url || '',
+                    treinamento: {
+                        id: treinamento.id,
+                        treinamento: treinamento.treinamento,
+                        sigla_treinamento: treinamento.sigla_treinamento,
+                        preco_treinamento: treinamento.preco_treinamento,
+                        url_logo_treinamento: treinamento.url_logo_treinamento,
+                        tipo_treinamento: treinamento.tipo_treinamento,
+                        tipo_palestra: treinamento.tipo_palestra,
+                        tipo_online: treinamento.tipo_online,
+                    },
+                    aluno: {
+                        id: aluno.id,
+                        nome: aluno.nome,
+                        cpf: aluno.cpf,
+                        email: aluno.email,
+                        telefone_um: aluno.telefone_um,
+                        logradouro: aluno.logradouro,
+                        numero: aluno.numero,
+                        bairro: aluno.bairro,
+                        cidade: aluno.cidade,
+                        estado: aluno.estado,
+                        cep: aluno.cep,
+                        polo: {
+                            id: aluno.id_polo_fk?.id,
+                            nome: aluno.id_polo_fk?.polo,
+                            cidade: aluno.id_polo_fk?.cidade,
+                            estado: aluno.id_polo_fk?.estado,
+                        },
+                    },
                     pagamento: {
                         forma_pagamento: criarContratoDto.forma_pagamento,
                         formas_pagamento: this.processPaymentMethods(criarContratoDto),
@@ -339,6 +410,12 @@ export class DocumentosService {
             });
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+
+            // Log para debug dos dados salvos
+            console.log('=== DEBUG CONTRATO SALVO ===');
+            console.log('ID do contrato salvo:', savedContrato.id);
+            console.log('Dados do treinamento salvos:', savedContrato.dados_contrato?.treinamento);
+            console.log('Dados completos salvos:', JSON.stringify(savedContrato.dados_contrato, null, 2));
 
             return {
                 id: zapSignResponse.token,
@@ -1420,21 +1497,10 @@ export class DocumentosService {
     }
 
     async buscarContratoBasico(contratoId: string): Promise<any> {
-        console.log('=== BUSCANDO CONTRATO BÁSICO ===');
-        console.log('ID do contrato:', contratoId);
         try {
             const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
                 where: { id: contratoId },
             });
-
-            console.log('Contrato básico encontrado:', contratoBasico ? 'SIM' : 'NÃO');
-            if (contratoBasico) {
-                console.log('ID:', contratoBasico.id);
-                console.log('ID TurmaAlunoTreinamento:', contratoBasico.id_turma_aluno_treinamento);
-                console.log('ID Documento:', contratoBasico.id_documento);
-                console.log('Status:', contratoBasico.status_ass_aluno);
-                console.log('Dados do contrato:', contratoBasico.dados_contrato);
-            }
 
             return contratoBasico;
         } catch (error) {
@@ -1444,8 +1510,6 @@ export class DocumentosService {
     }
 
     async buscarContratoCompleto(contratoId: string): Promise<any> {
-        console.log('=== BUSCANDO CONTRATO COMPLETO ===');
-        console.log('ID do contrato:', contratoId);
         try {
             // Primeiro, vamos buscar o contrato básico
             const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
@@ -1456,7 +1520,6 @@ export class DocumentosService {
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
                     'id_turma_aluno_treinamento_fk.id_treinamento_fk',
                     'id_documento_fk',
-                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.id_polo_fk',
                 ],
                 select: {
                     id: true,
@@ -1486,103 +1549,27 @@ export class DocumentosService {
                 },
             });
 
-            console.log('Contrato básico encontrado:', contratoBasico ? 'SIM' : 'NÃO');
-            if (contratoBasico) {
-                console.log('ID do contrato:', contratoBasico.id);
-                console.log('ID turma_aluno_treinamento:', contratoBasico.id_turma_aluno_treinamento);
-                console.log('Relacionamentos carregados:', {
-                    turma_aluno_treinamento: !!contratoBasico.id_turma_aluno_treinamento_fk,
-                    turma_aluno: !!contratoBasico.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk,
-                    aluno: !!contratoBasico.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_aluno_fk,
-                    treinamento: !!contratoBasico.id_turma_aluno_treinamento_fk?.id_treinamento_fk,
-                    documento: !!contratoBasico.id_documento_fk,
-                });
-            }
-
             const contrato = contratoBasico;
 
             if (!contrato) {
                 throw new NotFoundException('Contrato não encontrado');
             }
 
-            console.log('=== DADOS DO CONTRATO ===');
-            console.log('ID do contrato:', contrato.id);
-            console.log('Dados do contrato (JSON):', JSON.stringify(contrato.dados_contrato, null, 2));
-            console.log('Tipo do dados_contrato:', typeof contrato.dados_contrato);
-            console.log('É null?', contrato.dados_contrato === null);
-            console.log('É undefined?', contrato.dados_contrato === undefined);
-
-            // Verificar cada nível dos relacionamentos
-            console.log('=== VERIFICANDO RELACIONAMENTOS ===');
-            console.log('1. TurmaAlunoTreinamento:', contrato.id_turma_aluno_treinamento_fk ? 'CARREGADO' : 'NULL');
-            if (contrato.id_turma_aluno_treinamento_fk) {
-                console.log('   - ID:', contrato.id_turma_aluno_treinamento_fk.id);
-                console.log('   - TurmaAluno:', contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk ? 'CARREGADO' : 'NULL');
-                if (contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk) {
-                    console.log('     - ID TurmaAluno:', contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id);
-                    console.log('     - Aluno:', contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk ? 'CARREGADO' : 'NULL');
-                    if (contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk) {
-                        console.log('       - ID Aluno:', contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.id);
-                        console.log('       - Nome Aluno:', contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.nome);
-                        console.log('       - CPF Aluno:', contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.cpf);
-                    }
-                }
-                console.log('   - Treinamento:', contrato.id_turma_aluno_treinamento_fk.id_treinamento_fk ? 'CARREGADO' : 'NULL');
-                if (contrato.id_turma_aluno_treinamento_fk.id_treinamento_fk) {
-                    console.log('     - ID Treinamento:', contrato.id_turma_aluno_treinamento_fk.id_treinamento_fk.id);
-                    console.log('     - Nome Treinamento:', contrato.id_turma_aluno_treinamento_fk.id_treinamento_fk.treinamento);
-                    console.log('     - Preço Treinamento:', contrato.id_turma_aluno_treinamento_fk.id_treinamento_fk.preco_treinamento);
-                }
-            }
-            console.log('2. Documento:', contrato.id_documento_fk ? 'CARREGADO' : 'NULL');
-            if (contrato.id_documento_fk) {
-                console.log('   - ID Documento:', contrato.id_documento_fk.id);
-                console.log('   - Nome Documento:', contrato.id_documento_fk.documento);
-                console.log('   - Cláusulas:', contrato.id_documento_fk.clausulas ? 'CARREGADAS' : 'VAZIAS');
-                if (contrato.id_documento_fk.clausulas) {
-                    console.log('   - Tamanho das cláusulas:', contrato.id_documento_fk.clausulas.length, 'caracteres');
-                    console.log('   - Primeiros 200 caracteres:', contrato.id_documento_fk.clausulas.substring(0, 200));
-                }
-            }
-
             // Mapear dados para o formato esperado pelo frontend
             const dadosContrato = contrato.dados_contrato || {};
-            const aluno = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_aluno_fk;
-            const treinamento = contrato.id_turma_aluno_treinamento_fk?.id_treinamento_fk;
+            const turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
+            const turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
+            const aluno = turmaAluno?.id_aluno_fk;
             const documento = contrato.id_documento_fk;
             const polo = aluno?.id_polo_fk;
+            // Buscar treinamento dos dados do contrato ou das relations
+            const treinamento = dadosContrato.treinamento || turmaAlunoTreinamento?.id_treinamento_fk || null;
 
-            console.log('=== DADOS EXTRAÍDOS ===');
-            console.log('Aluno:', {
-                existe: !!aluno,
-                id: aluno?.id,
-                nome: aluno?.nome,
-                cpf: aluno?.cpf,
-                email: aluno?.email,
-                logradouro: aluno?.logradouro,
-                numero: aluno?.numero,
-                bairro: aluno?.bairro,
-                cidade: aluno?.cidade,
-                estado: aluno?.estado,
-                cep: aluno?.cep,
-            });
-            console.log('Treinamento:', {
-                existe: !!treinamento,
-                id: treinamento?.id,
-                nome: treinamento?.treinamento,
-                preco: treinamento?.preco_treinamento,
-            });
-            console.log('Bônus:', {
-                bonus_selecionados: dadosContrato.bonus_selecionados,
-                valores_bonus: dadosContrato.valores_bonus,
-                tem_100_dias: dadosContrato.bonus_selecionados?.includes('100_dias'),
-                tem_ipr: dadosContrato.bonus_selecionados?.includes('ipr'),
-            });
-            console.log('Documento:', {
-                existe: !!documento,
-                id: documento?.id,
-                nome: documento?.documento,
-            });
+            // Log para debug do treinamento
+            console.log('=== DEBUG BUSCAR CONTRATO COMPLETO ===');
+            console.log('Treinamento dos dados_contrato:', dadosContrato.treinamento);
+            console.log('Treinamento das relations:', turmaAlunoTreinamento?.id_treinamento_fk);
+            console.log('Treinamento final usado:', treinamento);
 
             const contratoMapeado = {
                 id: contrato.id,
@@ -1695,9 +1682,9 @@ export class DocumentosService {
                     'id_turma_aluno_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.id_polo_fk',
                     'id_turma_aluno_treinamento_fk.id_treinamento_fk',
                     'id_documento_fk',
-                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.id_polo_fk',
                 ],
                 order: { criado_em: 'DESC' },
                 skip: offset,
@@ -1707,24 +1694,17 @@ export class DocumentosService {
             // Contar total (simplificado para teste)
             const total = await this.uow.turmasAlunosTreinamentosContratosRP.count();
 
-            console.log('=== LISTAGEM DE CONTRATOS ===');
-            console.log('Contratos encontrados:', contratos.length);
-            if (contratos.length > 0) {
-                console.log('Primeiro contrato:', {
-                    id: contratos[0].id,
-                    aluno_nome: contratos[0].id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_aluno_fk?.nome,
-                    treinamento_nome: contratos[0].id_turma_aluno_treinamento_fk?.id_treinamento_fk?.treinamento,
-                    criado_em: contratos[0].criado_em,
-                });
-            }
-
             // Mapear dados para o formato esperado pelo frontend
             const contratosMapeados = contratos.map((contrato) => {
                 const dadosContrato = contrato.dados_contrato || {};
-                const aluno = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_aluno_fk;
-                const treinamento = contrato.id_turma_aluno_treinamento_fk?.id_treinamento_fk;
+                const turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
+                const turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
+                const aluno = turmaAluno?.id_aluno_fk;
                 const documento = contrato.id_documento_fk;
                 const polo = aluno?.id_polo_fk;
+
+                // Usar treinamento das relations ou dos dados do contrato
+                const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
 
                 return {
                     id: contrato.id,

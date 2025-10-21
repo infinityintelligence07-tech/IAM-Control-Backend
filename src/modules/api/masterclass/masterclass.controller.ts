@@ -93,6 +93,22 @@ export class MasterclassController {
     }
 
     /**
+     * Debug: Verificar dados brutos no banco
+     */
+    @Get('debug')
+    async debugDados(): Promise<any> {
+        console.log('🔍 Debug: Verificando dados brutos no banco...');
+        try {
+            const preCadastros = await this.masterclassService.debugDados();
+            console.log('📊 Dados encontrados:', preCadastros);
+            return preCadastros;
+        } catch (error) {
+            console.error('❌ Erro no debug:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Listar todos os eventos de masterclass
      */
     @Get('eventos')

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { In } from 'typeorm';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EStatusAlunosGeral } from '../../config/entities/enum';
 import { MasterclassPreCadastros } from '../../config/entities/masterclassPreCadastros.entity';
@@ -325,26 +326,110 @@ export class MasterclassService {
     }
 
     /**
+     * Debug: Verificar dados brutos no banco
+     */
+    async debugDados(): Promise<any> {
+        try {
+            console.log('🔍 Verificando dados brutos na tabela masterclass_pre_cadastros...');
+
+            // Buscar todos os pré-cadastros sem filtros
+            const preCadastros = await this.uow.masterclassPreCadastrosRP.find({
+                order: { criado_em: 'DESC' },
+                take: 10, // Limitar a 10 para debug
+            });
+
+            console.log('📊 Total de pré-cadastros encontrados:', preCadastros.length);
+            console.log('📋 Primeiros 5 registros:', preCadastros.slice(0, 5));
+
+            // Verificar se há turmas relacionadas
+            const turmasComMasterclass = await this.uow.turmasRP.find({
+                relations: ['id_treinamento_fk'],
+                where: {
+                    id_treinamento_fk: {
+                        tipo_treinamento: false, // Palestras
+                    },
+                },
+                take: 5,
+            });
+
+            console.log('🏫 Turmas de palestra encontradas:', turmasComMasterclass.length);
+            console.log(
+                '📋 Turmas:',
+                turmasComMasterclass.map((t) => ({
+                    id: t.id,
+                    cidade: t.cidade,
+                    treinamento: t.id_treinamento_fk?.treinamento,
+                    tipo: t.id_treinamento_fk?.tipo_treinamento,
+                })),
+            );
+
+            return {
+                total_pre_cadastros: preCadastros.length,
+                pre_cadastros: preCadastros.slice(0, 5),
+                total_turmas_palestra: turmasComMasterclass.length,
+                turmas_palestra: turmasComMasterclass.map((t) => ({
+                    id: t.id,
+                    cidade: t.cidade,
+                    treinamento: t.id_treinamento_fk?.treinamento,
+                    tipo: t.id_treinamento_fk?.tipo_treinamento,
+                })),
+            };
+        } catch (error) {
+            console.error('❌ Erro no debug de dados:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Listar todos os eventos de masterclass com estatísticas
      */
     async listarEventos(page: number = 1, limit: number = 10): Promise<MasterclassListResponseDto> {
         try {
-            const [preCadastros, total] = await this.uow.masterclassPreCadastrosRP.findAndCount({
-                order: { data_evento: 'DESC', criado_em: 'DESC' },
-                skip: (page - 1) * limit,
-                take: limit,
+            console.log('🔍 Iniciando listagem de eventos de masterclass...');
+
+            // NOVA ABORDAGEM: Buscar primeiro as turmas de palestra/masterclass
+            const turmasMasterclass = await this.uow.turmasRP.find({
+                relations: ['id_treinamento_fk'],
+                where: {
+                    id_treinamento_fk: {
+                        tipo_treinamento: false, // Palestras/Masterclass
+                    },
+                },
+                order: { criado_em: 'DESC' },
             });
 
-            // Agrupar por evento
+            console.log('🏫 Turmas de masterclass encontradas:', turmasMasterclass.length);
+
+            // Agrupar por evento (nome + data)
             const eventosMap = new Map<string, MasterclassEventoResponseDto>();
 
-            for (const pc of preCadastros) {
-                const key = `${pc.evento_nome}_${pc.data_evento.toISOString().split('T')[0]}`;
+            // Primeiro, adicionar todas as turmas como eventos
+            for (const turma of turmasMasterclass) {
+                const eventoNome = turma.id_treinamento_fk?.treinamento || 'Evento sem nome';
+
+                // Usar a data de início da turma como data do evento
+                const dataInicioTurma = turma.data_inicio;
+
+                // Criar data sem deslocamento de timezone
+                let dataEvento: Date;
+                if (dataInicioTurma) {
+                    if (typeof dataInicioTurma === 'string') {
+                        // Para strings "YYYY-MM-DD", criar data local
+                        const [year, month, day] = dataInicioTurma.split('-').map(Number);
+                        dataEvento = new Date(year, month - 1, day); // month é 0-indexado
+                    } else {
+                        dataEvento = dataInicioTurma;
+                    }
+                } else {
+                    dataEvento = new Date();
+                }
+
+                const key = `${eventoNome}_${dataEvento.toISOString().split('T')[0]}`;
 
                 if (!eventosMap.has(key)) {
                     eventosMap.set(key, {
-                        evento_nome: pc.evento_nome,
-                        data_evento: pc.data_evento,
+                        evento_nome: eventoNome,
+                        data_evento: dataEvento,
                         total_inscritos: 0,
                         total_presentes: 0,
                         total_ausentes: 0,
@@ -353,21 +438,64 @@ export class MasterclassService {
                         pre_cadastros: [],
                     });
                 }
+            }
+
+            console.log('📊 Eventos agrupados:', eventosMap.size);
+
+            // Agora buscar pré-cadastros APENAS para as turmas que já temos
+            const turmasIds = turmasMasterclass.map((t) => t.id);
+            const [preCadastros, total] = await this.uow.masterclassPreCadastrosRP.findAndCount({
+                where: {
+                    id_turma: In(turmasIds), // Só buscar pré-cadastros das turmas existentes
+                },
+                order: { data_evento: 'DESC', criado_em: 'DESC' },
+            });
+
+            console.log('📋 Pré-cadastros encontrados para turmas existentes:', preCadastros.length);
+
+            // Adicionar pré-cadastros aos eventos existentes (apenas turmas reais)
+            for (const pc of preCadastros) {
+                // Converter data_evento para Date se vier como string
+                const dataEventoPC = typeof pc.data_evento === 'string' ? new Date(pc.data_evento) : pc.data_evento;
+
+                // Buscar a turma correspondente ao pré-cadastro
+                const turmaCorrespondente = turmasMasterclass.find((t) => t.id === pc.id_turma);
+                if (!turmaCorrespondente) continue; // Pular se não encontrar a turma
+
+                // Usar o nome da turma, não do pré-cadastro
+                const eventoNome = turmaCorrespondente.id_treinamento_fk?.treinamento || 'Evento sem nome';
+                const dataInicioTurma = turmaCorrespondente.data_inicio;
+
+                // Criar data sem deslocamento de timezone
+                let dataEventoTurma: Date;
+                if (dataInicioTurma) {
+                    if (typeof dataInicioTurma === 'string') {
+                        // Para strings "YYYY-MM-DD", criar data local
+                        const [year, month, day] = dataInicioTurma.split('-').map(Number);
+                        dataEventoTurma = new Date(year, month - 1, day); // month é 0-indexado
+                    } else {
+                        dataEventoTurma = dataInicioTurma;
+                    }
+                } else {
+                    dataEventoTurma = new Date();
+                }
+
+                const key = `${eventoNome}_${dataEventoTurma.toISOString().split('T')[0]}`;
 
                 const evento = eventosMap.get(key);
                 if (evento) {
                     evento.pre_cadastros.push(this.mapToResponseDto(pc));
                     evento.total_inscritos++;
-                }
 
-                if (pc.presente) {
-                    evento.total_presentes++;
-                } else {
-                    evento.total_ausentes++;
-                }
+                    if (pc.presente) {
+                        evento.total_presentes++;
+                    } else {
+                        evento.total_ausentes++;
+                    }
 
-                if (pc.id_aluno_vinculado) {
-                    evento.total_vinculados++;
+                    if (pc.id_aluno_vinculado) {
+                        evento.total_vinculados++;
+                    }
                 }
             }
 
@@ -377,6 +505,7 @@ export class MasterclassService {
             });
 
             const eventos = Array.from(eventosMap.values());
+            console.log('✅ Total de eventos retornados:', eventos.length);
 
             const totalPages = Math.ceil(total / limit);
 

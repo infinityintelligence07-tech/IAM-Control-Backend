@@ -96,24 +96,25 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
 
     // Campos para integração com ZapSign
     @Column({ type: 'varchar', name: 'zapsign_document_id', nullable: true })
-    zapsign_document_id: string;
+    zapsign_document_id: string; // ID com hash do código do documento da URL + ID numérico
 
     @Column({ type: 'jsonb', name: 'zapsign_signers_data', nullable: true })
     zapsign_signers_data: Array<{
-        name: string;
-        email: string;
-        status: string;
-        signing_url?: string;
-    }>; // Links e dados dos signatários
+        name: string; // nome do assinante
+        email?: string; // email do assinante (opcional)
+        telefone?: string; // telefone do assinante (opcional)
+        cpf: string; // cpf do assinante
+        status: string; // status da assinatura
+        signing_url: string; // url para assinatura do usuário
+    }>; // Array de objetos com dados de todos os assinantes (aluno e testemunhas)
 
     @Column({ type: 'jsonb', name: 'zapsign_document_status', nullable: true })
     zapsign_document_status: {
-        status?: string;
-        created_at?: string;
-        documentId?: string;
-        signingUrl?: string;
-        [key: string]: unknown;
-    }; // Status completo do documento
+        status: string; // status do documento
+        created_at: string; // data de criação do documento
+        document_id: string; // id e token do documento
+        signing_url: string; // url de assinatura do documento
+    }; // Objeto com status completo do documento
 
     @ManyToOne(() => TurmasAlunosTreinamentos, (turmasAlunosTreinamentos) => turmasAlunosTreinamentos.turmasAlunosTreinamentosContratos)
     @JoinColumn([{ name: 'id_turma_aluno_treinamento', referencedColumnName: 'id' }])

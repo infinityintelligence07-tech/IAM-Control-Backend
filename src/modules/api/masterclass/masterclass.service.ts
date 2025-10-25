@@ -389,7 +389,7 @@ export class MasterclassService {
 
             // NOVA ABORDAGEM: Buscar primeiro as turmas de palestra/masterclass
             const turmasMasterclass = await this.uow.turmasRP.find({
-                relations: ['id_treinamento_fk'],
+                relations: ['id_treinamento_fk', 'id_polo_fk'],
                 where: {
                     id_treinamento_fk: {
                         tipo_treinamento: false, // Palestras/Masterclass
@@ -430,6 +430,7 @@ export class MasterclassService {
                     eventosMap.set(key, {
                         evento_nome: eventoNome,
                         data_evento: dataEvento,
+                        cidade: turma.cidade || turma.id_polo_fk?.cidade || 'Não informado',
                         total_inscritos: 0,
                         total_presentes: 0,
                         total_ausentes: 0,

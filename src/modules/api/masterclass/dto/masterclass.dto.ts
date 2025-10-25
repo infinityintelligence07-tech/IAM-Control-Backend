@@ -135,6 +135,7 @@ export class MasterclassPreCadastroResponseDto {
 export class MasterclassEventoResponseDto {
     evento_nome: string;
     data_evento: Date;
+    cidade?: string;
     total_inscritos: number;
     total_presentes: number;
     total_ausentes: number;

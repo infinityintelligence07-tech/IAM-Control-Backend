@@ -158,7 +158,14 @@ export class ZapSignService {
             );
 
             console.log('Documento criado com sucesso no ZapSign a partir de arquivo:', response.data);
-            return response.data as ZapSignResponse;
+            console.log('=== DEBUG ZAPSIGN API RESPONSE ===');
+            console.log('response.data completo:', JSON.stringify(response.data, null, 2));
+
+            const responseData = response.data as ZapSignResponse;
+            console.log('response.data.original_file:', responseData.original_file);
+            console.log('response.data.signed_file:', responseData.signed_file);
+            console.log('response.data.token:', responseData.token);
+            return responseData;
         } catch (error: any) {
             console.error('Erro ao criar documento no ZapSign a partir de arquivo - detalhes completos:');
             console.error('Status:', error.response?.status);
@@ -197,22 +204,6 @@ export class ZapSignService {
         } catch (error: any) {
             console.error('Erro ao listar documentos do ZapSign:', error.response?.data || error.message);
             throw new BadRequestException('Erro ao listar documentos do ZapSign');
-        }
-    }
-
-    /**
-     * Cancela um documento
-     */
-    async cancelDocument(documentId: string): Promise<{ message: string }> {
-        try {
-            await axios.delete(`${this.apiUrl}/docs/${documentId}/`, {
-                headers: this.getHeaders(),
-            });
-
-            return { message: 'Documento cancelado com sucesso' };
-        } catch (error: any) {
-            console.error('Erro ao cancelar documento do ZapSign:', error.response?.data || error.message);
-            throw new BadRequestException('Erro ao cancelar documento do ZapSign');
         }
     }
 
@@ -274,6 +265,48 @@ export class ZapSignService {
             console.error('Status:', error.response?.status);
             console.error('Data completa:', JSON.stringify(error.response?.data, null, 2));
             throw new BadRequestException('Erro ao criar documento no ZapSign');
+        }
+    }
+
+    /**
+     * Cancela um documento no ZapSign
+     */
+    async cancelDocument(documentId: string): Promise<void> {
+        try {
+            console.log('Cancelando documento no ZapSign:', documentId);
+
+            const response = await axios.post(
+                `${this.apiUrl}/docs/${documentId}/cancel/`,
+                {},
+                {
+                    headers: this.getHeaders(),
+                },
+            );
+
+            console.log('✅ Documento cancelado com sucesso no ZapSign');
+            console.log('📋 Resposta:', response.data);
+        } catch (error: any) {
+            console.error('Erro ao cancelar documento no ZapSign:', error.response?.data || error.message);
+            throw new BadRequestException('Erro ao cancelar documento no ZapSign');
+        }
+    }
+
+    /**
+     * Exclui um documento no ZapSign
+     */
+    async excluirDocumento(documentId: string): Promise<void> {
+        try {
+            console.log('Excluindo documento no ZapSign:', documentId);
+
+            const response = await axios.delete(`${this.apiUrl}/docs/${documentId}/`, {
+                headers: this.getHeaders(),
+            });
+
+            console.log('✅ Documento excluído com sucesso no ZapSign');
+            console.log('📋 Resposta:', response.data);
+        } catch (error: any) {
+            console.error('Erro ao excluir documento no ZapSign:', error.response?.data || error.message);
+            throw new BadRequestException('Erro ao excluir documento no ZapSign');
         }
     }
 }

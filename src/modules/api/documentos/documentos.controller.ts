@@ -178,7 +178,9 @@ export class DocumentosController {
         @Query('data_inicio') data_inicio?: string,
         @Query('data_fim') data_fim?: string,
     ) {
-        console.log('Endpoint público para listar contratos do banco chamado');
+        console.log('=== ENDPOINT PÚBLICO CHAMADO ===');
+        console.log('Query params:', { page, limit, id_aluno, id_treinamento, status, data_inicio, data_fim });
+
         const filtros = {
             page: page ? parseInt(page) : 1,
             limit: limit ? parseInt(limit) : 10,
@@ -188,7 +190,17 @@ export class DocumentosController {
             data_inicio,
             data_fim,
         };
-        return this.documentosService.listarContratosBanco(filtros);
+
+        console.log('Filtros processados:', filtros);
+
+        try {
+            const resultado = await this.documentosService.listarContratosBanco(filtros);
+            console.log('Resultado do serviço:', resultado);
+            return resultado;
+        } catch (error) {
+            console.error('Erro no controller:', error);
+            throw error;
+        }
     }
 
     // Endpoint para buscar contrato completo (para compatibilidade com frontend)
@@ -291,6 +303,22 @@ export class DocumentosController {
             return await this.documentosService.cancelarDocumentoZapSign(documentoId, userId);
         } catch (error) {
             console.error('Erro ao cancelar documento:', error);
+            throw error;
+        }
+    }
+
+    // Endpoint para excluir contrato (soft delete + remoção na Zapsign)
+    @Delete('excluir-zapsign/:contratoId')
+    @UseGuards(JwtAuthGuard)
+    async excluirDocumentoZapSign(@Param('contratoId') contratoId: string, @Req() req: Request): Promise<{ message: string }> {
+        try {
+            console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
+            console.log('ID do contrato:', contratoId);
+
+            const userId = (req.user as any)?.sub;
+            return await this.documentosService.excluirDocumentoZapSign(contratoId, userId);
+        } catch (error) {
+            console.error('Erro ao excluir contrato:', error);
             throw error;
         }
     }

@@ -185,6 +185,9 @@ export class DocumentosService {
 
     async criarContratoZapSign(criarContratoDto: CriarContratoZapSignDto, userId?: number): Promise<RespostaContratoZapSignDto> {
         try {
+            console.log('=== CRIAR CONTRATO ZAPSIGN - INÍCIO ===');
+            console.log('criarContratoDto:', JSON.stringify(criarContratoDto, null, 2));
+
             // Buscar dados do aluno
             const aluno = await this.uow.alunosRP.findOne({
                 where: { id: parseInt(criarContratoDto.id_aluno), deletado_em: null },
@@ -255,14 +258,10 @@ export class DocumentosService {
                 turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
             }
 
-            // Preparar dados para o template
-            const templateData = this.prepareTemplateData(aluno, treinamento, turma, criarContratoDto);
+            // Preparar dados para o template usando os dados do DTO
+            const templateData = await this.prepareTemplateDataFromDto(aluno, treinamento, turma, criarContratoDto);
 
-            // Gerar PDF usando o novo template
-            console.log('=== GERANDO PDF DO CONTRATO ===');
             const pdfBuffer = await this.contractTemplateService.generateContractPDF(templateData);
-            console.log('PDF gerado com sucesso. Tamanho:', pdfBuffer.length, 'bytes');
-            console.log('PDF é um Buffer:', Buffer.isBuffer(pdfBuffer));
 
             // Preparar signers (aluno + testemunhas)
             const signers = [
@@ -327,6 +326,7 @@ export class DocumentosService {
             };
 
             const zapSignResponse = await this.zapSignService.createDocumentFromFile(documentData);
+
             // Processar dados de bônus completos
             const bonusData = this.processBonusData(criarContratoDto, turma);
 
@@ -334,24 +334,40 @@ export class DocumentosService {
             const boletoData = this.processBoletoData(criarContratoDto);
             bonusData.campos_variaveis = { ...bonusData.campos_variaveis, ...boletoData };
 
-            // Log para debug dos dados do treinamento
-            console.log('=== DEBUG DADOS DO TREINAMENTO ===');
-            console.log('Treinamento encontrado:', {
-                id: treinamento.id,
-                nome: treinamento.treinamento,
-                preco: treinamento.preco_treinamento,
-                logo: treinamento.url_logo_treinamento,
-                sigla: treinamento.sigla_treinamento,
-            });
+            // Preparar dados dos signers para o campo zapsign_signers_data
+            const signersData = signers.map((signer) => ({
+                name: signer.name,
+                email: signer.email || undefined,
+                telefone: signer.phone || undefined,
+                cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
+                status: 'pending',
+                signing_url: zapSignResponse.signers.find((s) => s.name === signer.name)?.sign_url || '',
+            }));
+
+            // Preparar status do documento para o campo zapsign_document_status
+            const documentStatus = {
+                status: zapSignResponse.status,
+                created_at: zapSignResponse.created_at,
+                document_id: zapSignResponse.token,
+                signing_url: zapSignResponse.signers[0]?.sign_url || '',
+            };
 
             // Salvar informações do contrato no banco de dados
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
                 status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                // Campos ZapSign específicos
+                zapsign_document_id: zapSignResponse.token,
+                zapsign_signers_data: signersData,
+                zapsign_document_status: documentStatus,
                 dados_contrato: {
                     zapsign_document_id: zapSignResponse.token,
                     zapsign_document_url: zapSignResponse.signers[0]?.sign_url || '',
+                    contrato: {
+                        file_url: zapSignResponse.original_file,
+                        id_documento_zapsign: zapSignResponse.token,
+                    },
                     treinamento: {
                         id: treinamento.id,
                         treinamento: treinamento.treinamento,
@@ -411,12 +427,6 @@ export class DocumentosService {
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
 
-            // Log para debug dos dados salvos
-            console.log('=== DEBUG CONTRATO SALVO ===');
-            console.log('ID do contrato salvo:', savedContrato.id);
-            console.log('Dados do treinamento salvos:', savedContrato.dados_contrato?.treinamento);
-            console.log('Dados completos salvos:', JSON.stringify(savedContrato.dados_contrato, null, 2));
-
             return {
                 id: zapSignResponse.token,
                 nome_documento: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
@@ -438,74 +448,104 @@ export class DocumentosService {
     }
 
     /**
-     * Prepara os dados para o template do contrato
+     * Obtém o CPF do signatário baseado no nome
      */
-    private prepareTemplateData(aluno: any, treinamento: any, turma: any, criarContratoDto: CriarContratoZapSignDto) {
-        // Log para debug dos bônus
-        console.log('=== DEBUG BÔNUS ===');
-        console.log('tipos_bonus:', criarContratoDto.tipos_bonus);
-        console.log('100_dias incluído:', criarContratoDto.tipos_bonus?.includes('100_dias'));
-        console.log('ipr incluído:', criarContratoDto.tipos_bonus?.includes('ipr'));
-
-        // Preparar endereço completo do aluno
-        let enderecoCompleto = '';
-        if (aluno.endereco) {
-            const partesEndereco = [aluno.endereco.logradouro, aluno.endereco.numero, aluno.endereco.bairro].filter((parte) => parte && parte.trim() !== '');
-            enderecoCompleto = partesEndereco.join(', ');
+    private getSignerCPF(signer: any, aluno: any, criarContratoDto: CriarContratoZapSignDto): string {
+        // Se for o aluno principal
+        if (signer.name === aluno.nome) {
+            return aluno.cpf || '';
         }
+
+        // Se for a testemunha 1
+        if (signer.name === criarContratoDto.testemunha_um_nome) {
+            return criarContratoDto.testemunha_um_cpf || '';
+        }
+
+        // Se for a testemunha 2
+        if (signer.name === criarContratoDto.testemunha_dois_nome) {
+            return criarContratoDto.testemunha_dois_cpf || '';
+        }
+
+        return '';
+    }
+
+    /**
+     * Prepara os dados para o template do contrato usando dados do DTO
+     */
+    private async prepareTemplateDataFromDto(aluno: any, treinamento: any, turma: any, criarContratoDto: CriarContratoZapSignDto) {
+        console.log('=== PREPARANDO DADOS DO DTO PARA TEMPLATE ===');
+        console.log('criarContratoDto:', JSON.stringify(criarContratoDto, null, 2));
+
+        // Buscar documento para obter as cláusulas
+        let clausulas = '';
+        if (criarContratoDto.template_id) {
+            const documento = await this.uow.documentosRP.findOne({
+                where: { id: parseInt(criarContratoDto.template_id), deletado_em: null },
+            });
+            clausulas = documento?.clausulas || '';
+        }
+
+        // Processar dados de bônus completos
+        const bonusData = this.processBonusData(criarContratoDto, turma);
+
+        // Processar dados específicos do boleto
+        const boletoData = this.processBoletoData(criarContratoDto);
+        bonusData.campos_variaveis = { ...bonusData.campos_variaveis, ...boletoData };
 
         return {
             aluno: {
                 nome: aluno.nome,
-                cpf: this.contractTemplateService.formatCPF(aluno.cpf),
-                data_nascimento: this.contractTemplateService.formatDate(aluno.data_nascimento),
+                cpf: aluno.cpf,
+                data_nascimento: aluno.data_nascimento || '',
                 telefone_um: aluno.telefone_um,
                 email: aluno.email,
-                endereco: enderecoCompleto,
-                cidade_estado: `${aluno.cidade || ''}/${aluno.estado || ''}`,
-                cep: this.contractTemplateService.formatCEP(aluno.cep),
+                logradouro: aluno.logradouro,
+                numero: aluno.numero,
+                bairro: aluno.bairro,
+                cidade: aluno.cidade,
+                estado: aluno.estado,
+                cep: aluno.cep,
+                polo: {
+                    id: aluno.id_polo_fk?.id,
+                    nome: aluno.id_polo_fk?.polo,
+                    cidade: aluno.id_polo_fk?.cidade,
+                    estado: aluno.id_polo_fk?.estado,
+                },
             },
             treinamento: {
-                nome: treinamento.treinamento || treinamento.nome,
-                cidade: this.getTreinamentoCidade(criarContratoDto, treinamento),
-                data_inicio: this.getTreinamentoDataInicio(criarContratoDto, treinamento),
-                data_fim: this.getTreinamentoDataFim(criarContratoDto, treinamento),
-                preco_formatado: this.calculateContractPrice(criarContratoDto),
-            },
-            valor_real_pago: this.calculateRealPaidValue(criarContratoDto),
-            forma_pagamento_selecionada: this.getSelectedPaymentMethod(criarContratoDto),
-            detalhes_formas_pagamento: this.generatePaymentDetails(criarContratoDto),
-            bonus: {
-                nao_aplica: this.shouldShowNaoAplica(criarContratoDto),
-                cem_dias: this.isBonusSelected(criarContratoDto, ['cem_dias', '100_dias']),
-                ipr: this.isBonusSelected(criarContratoDto, ['ipr']),
-                ipr_data: this.getIprData(criarContratoDto, turma),
-                outros: this.isBonusSelected(criarContratoDto, ['outros']),
-                outros_descricao: this.getOutrosDescricao(criarContratoDto),
+                id: treinamento.id,
+                treinamento: treinamento.treinamento,
+                sigla_treinamento: treinamento.sigla_treinamento,
+                preco_treinamento: treinamento.preco_treinamento,
+                url_logo_treinamento: treinamento.url_logo_treinamento,
+                tipo_treinamento: treinamento.tipo_treinamento,
+                tipo_palestra: treinamento.tipo_palestra,
+                tipo_online: treinamento.tipo_online,
             },
             pagamento: {
-                cartao_credito_avista: this.isPaymentMethodSelected(criarContratoDto, 'À Vista - Cartão de Crédito'),
-                cartao_debito_avista: this.isPaymentMethodSelected(criarContratoDto, 'À Vista - Cartão de Débito'),
-                pix_avista: this.isPaymentMethodSelected(criarContratoDto, 'À Vista - PIX/Transferência'),
-                especie_avista: this.isPaymentMethodSelected(criarContratoDto, 'À Vista - Espécie'),
-                cartao_credito_parcelado: this.isPaymentMethodSelected(criarContratoDto, 'Parcelado - Cartão de Crédito'),
-                boleto_parcelado: this.isPaymentMethodSelected(criarContratoDto, 'Parcelado - Boleto'),
+                forma_pagamento: criarContratoDto.forma_pagamento,
+                formas_pagamento: this.processPaymentMethods(criarContratoDto),
+                valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
+            },
+            formas_pagamento: this.processPaymentMethods(criarContratoDto),
+            valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
+            bonus_selecionados: criarContratoDto.tipos_bonus || [],
+            valores_bonus: bonusData.valores_bonus,
+            campos_variaveis: bonusData.campos_variaveis,
+            testemunhas: {
+                testemunha_um: {
+                    nome: criarContratoDto.testemunha_um_nome || '',
+                    cpf: criarContratoDto.testemunha_um_cpf || '',
+                    id: criarContratoDto.testemunha_um_id || null,
+                },
+                testemunha_dois: {
+                    nome: criarContratoDto.testemunha_dois_nome || '',
+                    cpf: criarContratoDto.testemunha_dois_cpf || '',
+                    id: criarContratoDto.testemunha_dois_id || null,
+                },
             },
             observacoes: criarContratoDto.observacoes || '',
-            contrato: {
-                local: 'Americana/SP',
-                data: this.contractTemplateService.formatDate(new Date()),
-            },
-            testemunhas: {
-                testemunha_1: {
-                    nome: criarContratoDto.testemunha_um_nome || '',
-                    cpf: this.contractTemplateService.formatCPF(criarContratoDto.testemunha_um_cpf || ''),
-                },
-                testemunha_2: {
-                    nome: criarContratoDto.testemunha_dois_nome || '',
-                    cpf: this.contractTemplateService.formatCPF(criarContratoDto.testemunha_dois_cpf || ''),
-                },
-            },
+            clausulas: clausulas,
         };
     }
 
@@ -513,42 +553,67 @@ export class DocumentosService {
      * Calcula o preço total do contrato baseado nas formas de pagamento
      */
     private calculateContractPrice(criarContratoDto: CriarContratoZapSignDto): string {
-        console.log('=== CALCULANDO PREÇO DO CONTRATO ===');
-        console.log('valores_formas_pagamento:', criarContratoDto.valores_formas_pagamento);
-
-        if (!criarContratoDto.valores_formas_pagamento) {
-            console.log('valores_formas_pagamento é null/undefined');
-            return 'R$ 0,00';
-        }
-
         let total = 0;
-        const valoresFormas = criarContratoDto.valores_formas_pagamento;
 
-        // Se for um objeto com chaves de formas de pagamento
-        if (typeof valoresFormas === 'object' && !Array.isArray(valoresFormas)) {
-            Object.keys(valoresFormas).forEach((key) => {
-                const forma = valoresFormas[key];
-                console.log(`Processando forma ${key}:`, forma);
+        // Primeiro, tentar usar formas_pagamento se disponível
+        if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento)) {
+            // Agrupar por forma e tipo para somar corretamente
+            const groupedPayments: { [key: string]: number } = {};
 
-                if (forma && typeof forma === 'object' && forma.valor) {
-                    const valor = typeof forma.valor === 'string' ? parseInt(forma.valor) : forma.valor;
-                    const valorEmReais = valor / 100; // Converter de centavos para reais
-                    total += valorEmReais;
-                    console.log(`Adicionando ${valorEmReais} ao total. Total atual: ${total}`);
+            criarContratoDto.formas_pagamento.forEach((forma: any) => {
+                if (forma.valor && typeof forma.valor === 'number') {
+                    const key = `${forma.forma}_${forma.tipo}`;
+                    if (!groupedPayments[key]) {
+                        groupedPayments[key] = 0;
+                    }
+                    groupedPayments[key] += forma.valor;
+                    console.log(`Adicionando ${forma.valor} (${forma.forma} - ${forma.tipo}). Total grupo: ${groupedPayments[key]}`);
                 }
+            });
+
+            // Somar todos os grupos
+            Object.values(groupedPayments).forEach((valorGrupo) => {
+                total += valorGrupo;
+                console.log(`Adicionando grupo ${valorGrupo} ao total. Total atual: ${total}`);
             });
         }
-        // Se for um array de formas de pagamento
-        else if (Array.isArray(valoresFormas)) {
-            valoresFormas.forEach((forma, index) => {
-                console.log(`Processando forma ${index}:`, forma);
+        // Fallback: usar valores_formas_pagamento
+        else if (criarContratoDto.valores_formas_pagamento) {
+            const valoresFormas = criarContratoDto.valores_formas_pagamento;
+            console.log('Usando valores_formas_pagamento para calcular total');
 
-                if (forma && typeof forma === 'object' && forma.valor) {
-                    const valor = typeof forma.valor === 'string' ? parseFloat(forma.valor) : forma.valor;
+            // Processar pagamentos à vista
+            const formasAVista = ['À Vista - Cartão de Crédito', 'À Vista - Cartão de Débito', 'À Vista - PIX/Transferência', 'À Vista - Espécie'];
+
+            formasAVista.forEach((chave) => {
+                if (valoresFormas[chave] && valoresFormas[chave].valor) {
+                    const valor = parseInt(valoresFormas[chave].valor) / 100;
                     total += valor;
-                    console.log(`Adicionando ${valor} ao total. Total atual: ${total}`);
+                    console.log(`Adicionando ${valor} (${chave}). Total: ${total}`);
                 }
             });
+
+            // Processar pagamentos parcelados
+            if (valoresFormas['Parcelado - Cartão de Crédito'] && valoresFormas['Parcelado - Cartão de Crédito'].valor) {
+                const valor = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
+                total += valor;
+                console.log(`Adicionando ${valor} (Parcelado - Cartão de Crédito). Total: ${total}`);
+            }
+
+            // Processar boleto parcelado
+            const chavesBoleto = ['Parcelado - Boleto', 'Boleto Parcelado', 'Boleto'];
+
+            for (const chave of chavesBoleto) {
+                if (valoresFormas[chave]) {
+                    const dadosBoleto = valoresFormas[chave];
+                    const valorTotal = parseInt(dadosBoleto.valor_parcelas || dadosBoleto.valor || '0') / 100;
+                    if (valorTotal > 0) {
+                        total += valorTotal;
+                        console.log(`Adicionando ${valorTotal} (${chave}). Total: ${total}`);
+                        break; // Só processar uma vez
+                    }
+                }
+            }
         }
 
         console.log('Total final calculado:', total);
@@ -559,10 +624,6 @@ export class DocumentosService {
      * Verifica se uma forma de pagamento foi selecionada
      */
     private isPaymentMethodSelected(criarContratoDto: CriarContratoZapSignDto, methodName: string): boolean {
-        console.log('=== VERIFICANDO FORMA DE PAGAMENTO ===');
-        console.log('Método procurado:', methodName);
-        console.log('valores_formas_pagamento:', criarContratoDto.valores_formas_pagamento);
-
         if (!criarContratoDto.valores_formas_pagamento) {
             console.log('valores_formas_pagamento é null/undefined');
             return false;
@@ -709,27 +770,43 @@ export class DocumentosService {
      * Processa todos os dados de bônus de forma completa
      */
     private processBonusData(criarContratoDto: CriarContratoZapSignDto, turma: any): { valores_bonus: any; campos_variaveis: any } {
-        console.log('=== PROCESSANDO DADOS DE BÔNUS ===');
-
         const valoresBonus: any = {};
         const camposVariaveis: any = { ...criarContratoDto.campos_variaveis };
+
+        console.log('=== PROCESSANDO DADOS DE BÔNUS ===');
+        console.log('Tipos bônus:', criarContratoDto.tipos_bonus);
+        console.log('Valores bônus:', criarContratoDto.valores_bonus);
+        console.log('Campos variáveis:', camposVariaveis);
 
         // Processar bônus dos 100 dias
         if (this.isBonusSelected(criarContratoDto, ['100_dias', 'cem_dias'])) {
             valoresBonus['Bônus-100 Dias'] = true;
+            console.log('Bônus 100 dias selecionado');
         }
 
         // Processar bônus do IPR (Imersão Prosperar)
         if (this.isBonusSelected(criarContratoDto, ['ipr'])) {
             valoresBonus['Bônus-IPR'] = true;
+            console.log('Bônus IPR selecionado');
 
             // Adicionar quantidade de inscrições do Prosperar
             const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || '1';
-            valoresBonus[`Bônus-${quantidadeInscricoes} Inscrições do Prosperar`] = true;
+            valoresBonus[`Bônus-${quantidadeInscricoes} Inscrições do Imersão Prosperar`] = true;
+            console.log(`Quantidade de inscrições: ${quantidadeInscricoes}`);
 
-            // Adicionar data da turma de IPR
-            if (turma && turma.data_inicio) {
+            // Adicionar data da turma de IPR - usar a data dos campos variáveis se disponível
+            if (camposVariaveis['Data do Imersão Prosperar']) {
+                console.log('Data do IPR dos campos variáveis:', camposVariaveis['Data do Imersão Prosperar']);
+            } else if (turma && turma.data_inicio) {
                 camposVariaveis['Data do Imersão Prosperar'] = this.contractTemplateService.formatDate(turma.data_inicio);
+                console.log('Data do IPR adicionada:', camposVariaveis['Data do Imersão Prosperar']);
+            }
+
+            // Adicionar sigla e edição do IPR
+            const siglaEdicao = camposVariaveis['IPR - Sigla e Edição'] || camposVariaveis['Turma IPR'];
+            if (siglaEdicao) {
+                camposVariaveis['Sigla e Edição IPR'] = siglaEdicao;
+                console.log('Sigla e edição IPR:', siglaEdicao);
             }
         }
 
@@ -738,6 +815,7 @@ export class DocumentosService {
             const descricaoOutros = this.getOutrosDescricao(criarContratoDto);
             if (descricaoOutros) {
                 valoresBonus[`Bônus-Outros: ${descricaoOutros}`] = true;
+                console.log('Bônus outros selecionado:', descricaoOutros);
 
                 // Adicionar valor do bônus outros se disponível
                 const valorOutros = camposVariaveis['Valor do Bônus (R$)'] || camposVariaveis['Valor do Outro Bônus'];
@@ -871,17 +949,51 @@ export class DocumentosService {
     private processPaymentMethods(criarContratoDto: CriarContratoZapSignDto): any[] {
         const formasPagamento: any[] = [];
 
+        console.log('=== PROCESSANDO FORMAS DE PAGAMENTO ===');
+        console.log('Valores formas pagamento:', JSON.stringify(criarContratoDto.valores_formas_pagamento, null, 2));
+        console.log('Formas pagamento:', JSON.stringify(criarContratoDto.formas_pagamento, null, 2));
+
         // Primeiro, verificar se há dados diretamente no campo formas_pagamento
         if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento)) {
-            console.log('=== PROCESSANDO FORMAS DE PAGAMENTO DIRETAS ===');
-            console.log('Formas pagamento recebidas:', criarContratoDto.formas_pagamento);
+            console.log('Usando formas_pagamento diretas');
+
+            // Agrupar por forma e tipo para calcular valores corretos
+            const groupedPayments: { [key: string]: { valor: number; parcelas: number } } = {};
 
             criarContratoDto.formas_pagamento.forEach((forma: any) => {
-                formasPagamento.push({
-                    tipo: forma.tipo || 'PARCELADO',
-                    forma: forma.forma || 'CARTAO_CREDITO',
-                    valor: forma.valor || 0,
-                });
+                if (forma.valor && typeof forma.valor === 'number') {
+                    const key = `${forma.forma}_${forma.tipo}`;
+                    if (!groupedPayments[key]) {
+                        groupedPayments[key] = { valor: 0, parcelas: 0 };
+                    }
+                    groupedPayments[key].valor += forma.valor;
+                    groupedPayments[key].parcelas += 1;
+                }
+            });
+
+            // Converter grupos em formas de pagamento individuais
+            Object.entries(groupedPayments).forEach(([key, dados]) => {
+                const [forma, tipo] = key.split('_');
+                const valorTotal = dados.valor;
+                const numeroParcelas = dados.parcelas;
+
+                if (tipo === 'A_VISTA') {
+                    formasPagamento.push({
+                        tipo: 'A_VISTA',
+                        forma: forma,
+                        valor: valorTotal,
+                    });
+                    console.log(`Adicionado: ${forma} à vista - R$ ${valorTotal}`);
+                } else {
+                    // Para parcelados, criar uma entrada com o valor total
+                    formasPagamento.push({
+                        tipo: 'PARCELADO',
+                        forma: forma,
+                        valor: valorTotal,
+                        parcelas: numeroParcelas,
+                    });
+                    console.log(`Adicionado: ${forma} parcelado - R$ ${valorTotal} em ${numeroParcelas}x`);
+                }
             });
 
             console.log('Formas processadas:', formasPagamento);
@@ -891,48 +1003,35 @@ export class DocumentosService {
         // Processar formas de pagamento baseado nos valores_formas_pagamento
         if (criarContratoDto.valores_formas_pagamento) {
             const valoresFormas = criarContratoDto.valores_formas_pagamento;
-            console.log('=== PROCESSANDO VALORES FORMAS PAGAMENTO ===');
-            console.log('Valores formas pagamento:', JSON.stringify(valoresFormas, null, 2));
-            console.log('Chaves disponíveis:', Object.keys(valoresFormas));
+            console.log('Processando valores_formas_pagamento');
 
             // Processar pagamentos à vista
-            if (valoresFormas['À Vista - Cartão de Crédito']) {
-                formasPagamento.push({
-                    tipo: 'A_VISTA',
-                    forma: 'CARTAO_CREDITO',
-                    valor: parseInt(valoresFormas['À Vista - Cartão de Crédito'].valor) / 100,
-                });
-            }
+            const formasAVista = [
+                { chave: 'À Vista - Cartão de Crédito', forma: 'CARTAO_CREDITO' },
+                { chave: 'À Vista - Cartão de Débito', forma: 'CARTAO_DEBITO' },
+                { chave: 'À Vista - PIX/Transferência', forma: 'PIX' },
+                { chave: 'À Vista - Espécie', forma: 'DINHEIRO' },
+            ];
 
-            if (valoresFormas['À Vista - Cartão de Débito']) {
-                formasPagamento.push({
-                    tipo: 'A_VISTA',
-                    forma: 'CARTAO_DEBITO',
-                    valor: parseInt(valoresFormas['À Vista - Cartão de Débito'].valor) / 100,
-                });
-            }
+            formasAVista.forEach(({ chave, forma }) => {
+                if (valoresFormas[chave] && valoresFormas[chave].valor) {
+                    const valor = parseInt(valoresFormas[chave].valor) / 100;
+                    if (valor > 0) {
+                        formasPagamento.push({
+                            tipo: 'A_VISTA',
+                            forma: forma,
+                            valor: valor,
+                        });
+                        console.log(`Adicionado: ${forma} à vista - R$ ${valor}`);
+                    }
+                }
+            });
 
-            if (valoresFormas['À Vista - PIX/Transferência']) {
-                formasPagamento.push({
-                    tipo: 'A_VISTA',
-                    forma: 'PIX',
-                    valor: parseInt(valoresFormas['À Vista - PIX/Transferência'].valor) / 100,
-                });
-            }
-
-            if (valoresFormas['À Vista - Espécie']) {
-                formasPagamento.push({
-                    tipo: 'A_VISTA',
-                    forma: 'DINHEIRO',
-                    valor: parseInt(valoresFormas['À Vista - Espécie'].valor) / 100,
-                });
-            }
-
-            // Processar pagamentos parcelados
-            if (valoresFormas['Parcelado - Cartão de Crédito']) {
-                const valorParcelado = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
-                const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas);
-                const valorParcela = valorParcelado / numeroParcelas;
+            // Processar pagamentos parcelados - Cartão de Crédito
+            if (valoresFormas['Parcelado - Cartão de Crédito'] && valoresFormas['Parcelado - Cartão de Crédito'].valor) {
+                const valorTotal = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
+                const numeroParcelas = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].numero_parcelas) || 1;
+                const valorParcela = valorTotal / numeroParcelas;
 
                 for (let i = 0; i < numeroParcelas; i++) {
                     formasPagamento.push({
@@ -941,6 +1040,7 @@ export class DocumentosService {
                         valor: valorParcela,
                     });
                 }
+                console.log(`Adicionado: Cartão de Crédito parcelado - ${numeroParcelas}x de R$ ${valorParcela}`);
             }
 
             // Processar boleto parcelado usando a função específica
@@ -1087,46 +1187,59 @@ export class DocumentosService {
      * Gera os detalhes das formas de pagamento no formato de lista
      */
     private generatePaymentDetails(criarContratoDto: CriarContratoZapSignDto): string {
-        if (!criarContratoDto.formas_pagamento || !Array.isArray(criarContratoDto.formas_pagamento) || criarContratoDto.formas_pagamento.length === 0) {
-            return '• Não informado';
+        console.log('=== GERANDO DETALHES DE PAGAMENTO ===');
+        console.log('Formas pagamento:', JSON.stringify(criarContratoDto.formas_pagamento, null, 2));
+        console.log('Valores formas pagamento:', JSON.stringify(criarContratoDto.valores_formas_pagamento, null, 2));
+
+        // Primeiro, tentar usar formas_pagamento se disponível
+        if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento) && criarContratoDto.formas_pagamento.length > 0) {
+            console.log('Usando formas_pagamento para gerar detalhes');
+            const formasPagamento = criarContratoDto.formas_pagamento;
+
+            // Agrupar formas de pagamento por tipo e forma
+            const groupedPayments: { [key: string]: { valor: number; count: number; tipo: string; forma: string } } = {};
+
+            formasPagamento.forEach((pagamento: any) => {
+                const key = `${pagamento.forma}_${pagamento.tipo}`;
+                if (!groupedPayments[key]) {
+                    groupedPayments[key] = {
+                        valor: 0,
+                        count: 0,
+                        tipo: pagamento.tipo,
+                        forma: pagamento.forma,
+                    };
+                }
+                groupedPayments[key].valor += pagamento.valor;
+                groupedPayments[key].count += 1;
+            });
+
+            // Gerar lista de detalhes
+            const details: string[] = [];
+
+            Object.values(groupedPayments).forEach((group) => {
+                const valorFormatado = this.contractTemplateService.formatPrice(group.valor);
+                const formaNome = this.getFormaPagamentoNome(group.forma);
+
+                if (group.tipo === 'PARCELADO') {
+                    const valorParcela = this.contractTemplateService.formatPrice(group.valor / group.count);
+                    details.push(`• ${valorFormatado} no ${formaNome} em ${group.count}x de ${valorParcela}`);
+                } else {
+                    details.push(`• ${valorFormatado} no ${formaNome}`);
+                }
+            });
+
+            console.log('Detalhes gerados:', details);
+            return details.join('<br>');
         }
 
-        const formasPagamento = criarContratoDto.formas_pagamento;
+        // Fallback: usar valores_formas_pagamento
+        if (criarContratoDto.valores_formas_pagamento) {
+            console.log('Usando valores_formas_pagamento para gerar detalhes');
+            return this.generatePaymentDetailsFromValoresFormas(criarContratoDto.valores_formas_pagamento, criarContratoDto.campos_variaveis || {});
+        }
 
-        // Agrupar formas de pagamento por tipo e forma
-        const groupedPayments: { [key: string]: { valor: number; count: number; tipo: string; forma: string } } = {};
-
-        formasPagamento.forEach((pagamento: any) => {
-            const key = `${pagamento.forma}_${pagamento.tipo}`;
-            if (!groupedPayments[key]) {
-                groupedPayments[key] = {
-                    valor: 0,
-                    count: 0,
-                    tipo: pagamento.tipo,
-                    forma: pagamento.forma,
-                };
-            }
-            groupedPayments[key].valor += pagamento.valor;
-            groupedPayments[key].count += 1;
-        });
-
-        // Gerar lista de detalhes
-        const details: string[] = [];
-
-        Object.values(groupedPayments).forEach((group) => {
-            const valorFormatado = this.contractTemplateService.formatPrice(group.valor);
-            const formaNome = this.getFormaPagamentoNome(group.forma);
-            const tipoNome = this.getTipoPagamentoNome(group.tipo);
-
-            if (group.tipo === 'PARCELADO') {
-                const valorParcela = this.contractTemplateService.formatPrice(group.valor / group.count);
-                details.push(`• ${valorFormatado} no ${formaNome} em ${group.count}x de ${valorParcela}`);
-            } else {
-                details.push(`• ${valorFormatado} no ${formaNome}`);
-            }
-        });
-
-        return details.join('<br>');
+        console.log('Nenhuma forma de pagamento encontrada');
+        return '• Não informado';
     }
 
     /**
@@ -1136,7 +1249,8 @@ export class DocumentosService {
         const mapping: Record<string, string> = {
             CARTAO_CREDITO: 'Cartão de Crédito',
             CARTAO_DEBITO: 'Cartão de Débito',
-            PIX: 'PIX',
+            PIX: 'PIX/Transferência',
+            DINHEIRO: 'Espécie',
             ESPECIE: 'Espécie',
             BOLETO: 'Boleto',
         };
@@ -1210,12 +1324,12 @@ export class DocumentosService {
                 });
             });
 
-            // Usar query builder para buscar contrato pelo document_id no JSON
+            // Usar query builder para buscar contrato pelo zapsign_document_id específico
             const contrato = await this.uow.turmasAlunosTreinamentosContratosRP
                 .createQueryBuilder('contrato')
                 .where('contrato.deletado_em IS NULL')
-                .andWhere("contrato.dados_contrato->>'zapsign_document_id' = :documentoId", { documentoId })
-                .select(['contrato.id', 'contrato.dados_contrato'])
+                .andWhere('contrato.zapsign_document_id = :documentoId', { documentoId })
+                .select(['contrato.id', 'contrato.zapsign_document_id', 'contrato.dados_contrato'])
                 .getOne();
 
             if (!contrato) {
@@ -1235,8 +1349,8 @@ export class DocumentosService {
                     // Usar o contrato encontrado por ID
                     const contratoEncontrado = contratoPorId;
 
-                    // Cancelar documento no ZapSign usando o document_id do banco
-                    const documentIdZapSign = contratoEncontrado.dados_contrato?.zapsign_document_id;
+                    // Cancelar documento no ZapSign usando o zapsign_document_id específico
+                    const documentIdZapSign = contratoEncontrado.zapsign_document_id || contratoEncontrado.dados_contrato?.zapsign_document_id;
                     if (documentIdZapSign) {
                         await this.zapSignService.cancelDocument(documentIdZapSign);
                         console.log('Documento cancelado no ZapSign com sucesso');
@@ -1277,72 +1391,76 @@ export class DocumentosService {
     }
 
     /**
+     * Exclui um contrato do ZapSign e faz soft delete no banco
+     */
+    async excluirDocumentoZapSign(contratoId: string, userId?: number): Promise<{ message: string }> {
+        try {
+            console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
+            console.log('ID do contrato:', contratoId);
+
+            // Buscar o contrato no banco de dados
+            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP
+                .createQueryBuilder('contrato')
+                .where('contrato.deletado_em IS NULL')
+                .andWhere('contrato.id = :contratoId', { contratoId: parseInt(contratoId) })
+                .select(['contrato.id', 'contrato.zapsign_document_id', 'contrato.dados_contrato'])
+                .getOne();
+
+            if (!contrato) {
+                throw new NotFoundException('Contrato não encontrado');
+            }
+
+            console.log('Contrato encontrado no banco:', contrato.id);
+
+            // Remover documento da Zapsign se existir
+            const documentIdZapSign = contrato.zapsign_document_id || contrato.dados_contrato?.zapsign_document_id;
+            if (documentIdZapSign) {
+                try {
+                    await this.zapSignService.excluirDocumento(documentIdZapSign);
+                    console.log('Documento removido da Zapsign:', documentIdZapSign);
+                } catch (zapSignError) {
+                    console.error('Erro ao remover da Zapsign:', zapSignError);
+                    // Continuar mesmo se falhar na Zapsign
+                }
+            }
+
+            // Fazer soft delete do contrato
+            await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
+                deletado_em: new Date(),
+                atualizado_por: userId,
+            });
+
+            console.log('Contrato excluído com sucesso');
+            return { message: 'Contrato excluído com sucesso' };
+        } catch (error) {
+            console.error('Erro ao excluir contrato:', error);
+            throw new BadRequestException(`Erro ao excluir contrato: ${(error as Error).message}`);
+        }
+    }
+
+    /**
      * Prepara dados para o template usando dados salvos no banco
      */
     private prepareTemplateDataFromSavedContract(contrato: any) {
-        const dadosContrato = contrato.dados_contrato || {};
-        const aluno = contrato.dados_contrato?.aluno || {};
-        const treinamento = contrato.dados_contrato?.treinamento || {};
+        console.log('=== PREPARANDO DADOS DO CONTRATO SALVO ===');
+        console.log('Dados do contrato:', JSON.stringify(contrato, null, 2));
 
-        // Preparar endereço completo do aluno
-        let enderecoCompleto = '';
-        if (aluno.endereco) {
-            const partesEndereco = [aluno.endereco.logradouro, aluno.endereco.numero, aluno.endereco.bairro].filter((parte) => parte && parte.trim() !== '');
-            enderecoCompleto = partesEndereco.join(', ');
-        }
-
+        // Usar diretamente os dados salvos no banco
         return {
-            aluno: {
-                nome: aluno.nome || '',
-                cpf: this.contractTemplateService.formatCPF(aluno.cpf || ''),
-                data_nascimento: this.contractTemplateService.formatDate(aluno.data_nascimento),
-                telefone_um: aluno.telefone_um || '',
-                email: aluno.email || '',
-                endereco: enderecoCompleto,
-                cidade_estado: `${aluno.polo?.cidade || ''}/${aluno.polo?.estado || ''}`,
-                cep: this.contractTemplateService.formatCEP(aluno.cep || ''),
-            },
-            treinamento: {
-                nome: treinamento.nome || '',
-                cidade: this.getTreinamentoCidadeFromSaved(dadosContrato),
-                data_inicio: this.getTreinamentoDataInicioFromSaved(dadosContrato),
-                data_fim: this.getTreinamentoDataFimFromSaved(dadosContrato),
-                preco_formatado: this.calculateContractPriceFromSaved(dadosContrato),
-            },
-            valor_real_pago: this.calculateRealPaidValueFromSaved(dadosContrato),
-            forma_pagamento_selecionada: this.getSelectedPaymentMethodFromSaved(dadosContrato),
-            detalhes_formas_pagamento: this.generatePaymentDetailsFromSaved(dadosContrato),
-            bonus: {
-                nao_aplica: this.shouldShowNaoAplicaFromSaved(dadosContrato),
-                cem_dias: this.isBonusSelectedFromSaved(dadosContrato, ['cem_dias', '100_dias']),
-                ipr: this.isBonusSelectedFromSaved(dadosContrato, ['ipr']),
-                ipr_data: this.getIprDataFromSaved(dadosContrato),
-                outros: this.isBonusSelectedFromSaved(dadosContrato, ['outros']),
-                outros_descricao: this.getOutrosDescricaoFromSaved(dadosContrato),
-            },
-            pagamento: {
-                cartao_credito_avista: this.isPaymentMethodSelectedFromSaved(dadosContrato, 'À Vista - Cartão de Crédito'),
-                cartao_debito_avista: this.isPaymentMethodSelectedFromSaved(dadosContrato, 'À Vista - Cartão de Débito'),
-                pix_avista: this.isPaymentMethodSelectedFromSaved(dadosContrato, 'À Vista - PIX/Transferência'),
-                especie_avista: this.isPaymentMethodSelectedFromSaved(dadosContrato, 'À Vista - Espécie'),
-                cartao_credito_parcelado: this.isPaymentMethodSelectedFromSaved(dadosContrato, 'Parcelado - Cartão de Crédito'),
-                boleto_parcelado: this.isPaymentMethodSelectedFromSaved(dadosContrato, 'Parcelado - Boleto'),
-            },
-            observacoes: dadosContrato.observacoes || '',
-            contrato: {
-                local: dadosContrato.campos_variaveis?.['Local de Assinatura do Contrato'] || 'Americana/SP',
-                data: this.contractTemplateService.formatDate(new Date()),
-            },
-            testemunhas: {
-                testemunha_1: {
-                    nome: dadosContrato.testemunhas?.testemunha_um?.nome || '',
-                    cpf: this.contractTemplateService.formatCPF(dadosContrato.testemunhas?.testemunha_um?.cpf || ''),
-                },
-                testemunha_2: {
-                    nome: dadosContrato.testemunhas?.testemunha_dois?.nome || '',
-                    cpf: this.contractTemplateService.formatCPF(dadosContrato.testemunhas?.testemunha_dois?.cpf || ''),
-                },
-            },
+            aluno: contrato.aluno || {},
+            treinamento: contrato.treinamento || {},
+            pagamento: contrato.pagamento || {},
+            formas_pagamento: contrato.formas_pagamento || [],
+            valores_formas_pagamento: contrato.valores_formas_pagamento || {},
+            bonus_selecionados: contrato.bonus_selecionados || [],
+            valores_bonus: contrato.valores_bonus || {},
+            campos_variaveis: contrato.campos_variaveis || {},
+            testemunhas: contrato.testemunhas || {},
+            observacoes: contrato.observacoes || '',
+            clausulas: contrato.clausulas || '',
+            assinatura_aluno_base64: contrato.assinatura_aluno_base64 || '',
+            assinatura_testemunha_um_base64: contrato.assinatura_testemunha_um_base64 || '',
+            assinatura_testemunha_dois_base64: contrato.assinatura_testemunha_dois_base64 || '',
         };
     }
 
@@ -1397,15 +1515,113 @@ export class DocumentosService {
         return `${forma} ${tipo}`;
     }
 
+    /**
+     * Gera detalhes de pagamento a partir de valores_formas_pagamento (fallback)
+     */
+    private generatePaymentDetailsFromValoresFormas(valoresFormas: any, camposVariaveis: any): string {
+        console.log('=== GERANDO DETALHES PAGAMENTO A PARTIR DE VALORES_FORMAS_PAGAMENTO ===');
+        console.log('Valores formas:', JSON.stringify(valoresFormas, null, 2));
+
+        const details: string[] = [];
+
+        // Processar pagamentos à vista
+        Object.keys(valoresFormas).forEach((key) => {
+            if (key.includes('À Vista') && valoresFormas[key] && valoresFormas[key].valor) {
+                const valor = this.contractTemplateService.formatPrice(valoresFormas[key].valor / 100);
+                let formaNome = '';
+
+                if (key.includes('Cartão de Crédito')) formaNome = 'Cartão de Crédito';
+                else if (key.includes('Cartão de Débito')) formaNome = 'Cartão de Débito';
+                else if (key.includes('PIX')) formaNome = 'PIX/Transferência';
+                else if (key.includes('Espécie')) formaNome = 'Espécie';
+
+                if (formaNome) {
+                    details.push(`• ${valor} no ${formaNome} à vista`);
+                }
+            }
+        });
+
+        // Processar pagamentos parcelados
+        Object.keys(valoresFormas).forEach((key) => {
+            if (key.includes('Parcelado') && valoresFormas[key]) {
+                let valor,
+                    numeroParcelas,
+                    valorParcela,
+                    formaNome = '';
+
+                // Processar Cartão de Crédito parcelado
+                if (key.includes('Cartão de Crédito') && valoresFormas[key].valor) {
+                    valor = this.contractTemplateService.formatPrice(valoresFormas[key].valor / 100);
+                    numeroParcelas = valoresFormas[key].numero_parcelas || 1;
+                    valorParcela = this.contractTemplateService.formatPrice(valoresFormas[key].valor / 100 / numeroParcelas);
+                    formaNome = 'Cartão de Crédito';
+                }
+                // Processar Boleto parcelado
+                else if (key.includes('Boleto') && valoresFormas[key].valor_parcelas) {
+                    valor = this.contractTemplateService.formatPrice(valoresFormas[key].valor_parcelas / 100);
+                    numeroParcelas = valoresFormas[key].numero_parcelas || 1;
+                    valorParcela = this.contractTemplateService.formatPrice(valoresFormas[key].valor_parcelas / 100 / numeroParcelas);
+                    formaNome = 'Boleto';
+                }
+
+                if (formaNome) {
+                    let infoParcela = `• ${valor} no ${formaNome} em ${numeroParcelas}x de ${valorParcela}`;
+
+                    // Adicionar informações específicas do boleto
+                    if (key.includes('Boleto')) {
+                        const diaVencimento = valoresFormas[key].melhor_dia_vencimento || camposVariaveis?.['Dia de Vencimento do Boleto'];
+                        const dataPrimeiroBoleto = valoresFormas[key].data_primeiro_boleto || camposVariaveis?.['Data do Primeiro Boleto'];
+
+                        if (diaVencimento) {
+                            infoParcela += ` (vencimento dia ${diaVencimento})`;
+                        }
+
+                        if (dataPrimeiroBoleto) {
+                            infoParcela += ` - 1° boleto: ${dataPrimeiroBoleto}`;
+                        }
+                    }
+
+                    details.push(infoParcela);
+                }
+            }
+        });
+
+        console.log('Detalhes gerados:', details);
+        return details.length > 0 ? details.join('\n') : '• Não informado';
+    }
+
     private generatePaymentDetailsFromSaved(dadosContrato: any): string {
-        if (!dadosContrato.formas_pagamento || !Array.isArray(dadosContrato.formas_pagamento) || dadosContrato.formas_pagamento.length === 0) {
+        console.log('=== DEBUG GERAR DETALHES PAGAMENTO SALVO ===');
+        console.log('Dados contrato recebidos:', JSON.stringify(dadosContrato, null, 2));
+
+        // Tentar acessar formas_pagamento de diferentes locais possíveis
+        const formasPagamento = dadosContrato.formas_pagamento || dadosContrato.pagamento?.formas_pagamento || [];
+        const valoresFormasPagamento = dadosContrato.valores_formas_pagamento || dadosContrato.pagamento?.valores_formas_pagamento || {};
+        const camposVariaveis = dadosContrato.campos_variaveis || {};
+
+        console.log('Formas pagamento encontradas:', formasPagamento);
+        console.log('Valores formas pagamento:', valoresFormasPagamento);
+        console.log('Campos variáveis:', camposVariaveis);
+        console.log('Total de formas pagamento encontradas:', formasPagamento.length);
+        console.log('Chaves dos valores formas pagamento:', Object.keys(valoresFormasPagamento));
+
+        if (!formasPagamento || !Array.isArray(formasPagamento) || formasPagamento.length === 0) {
+            console.log('Nenhuma forma de pagamento encontrada, tentando usar valores_formas_pagamento');
+
+            // Fallback: tentar usar valores_formas_pagamento se formas_pagamento não estiver disponível
+            if (valoresFormasPagamento && typeof valoresFormasPagamento === 'object' && Object.keys(valoresFormasPagamento).length > 0) {
+                console.log('Usando valores_formas_pagamento como fallback');
+                return this.generatePaymentDetailsFromValoresFormas(valoresFormasPagamento, camposVariaveis);
+            }
+
+            console.log('Nenhuma forma de pagamento encontrada, retornando "Não informado"');
             return '• Não informado';
         }
 
         // Agrupar formas de pagamento por tipo e forma
         const groupedPayments: { [key: string]: { valor: number; count: number; tipo: string; forma: string } } = {};
 
-        dadosContrato.formas_pagamento.forEach((pagamento: any) => {
+        formasPagamento.forEach((pagamento: any) => {
             const key = `${pagamento.forma}_${pagamento.tipo}`;
             if (!groupedPayments[key]) {
                 groupedPayments[key] = {
@@ -1431,8 +1647,8 @@ export class DocumentosService {
 
                 // Adicionar informações específicas do boleto
                 if (group.forma === 'BOLETO') {
-                    const diaVencimento = dadosContrato.campos_variaveis?.['Dia de Vencimento do Boleto'];
-                    const dataPrimeiroBoleto = dadosContrato.campos_variaveis?.['Data do Primeiro Boleto'];
+                    const diaVencimento = camposVariaveis?.['Dia de Vencimento do Boleto'];
+                    const dataPrimeiroBoleto = camposVariaveis?.['Data do Primeiro Boleto'];
 
                     let infoBoleto = `• ${valorFormatado} no ${formaNome} em ${group.count}x de ${valorParcela}`;
 
@@ -1499,7 +1715,10 @@ export class DocumentosService {
     async buscarContratoBasico(contratoId: string): Promise<any> {
         try {
             const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-                where: { id: contratoId },
+                where: {
+                    id: contratoId,
+                    deletado_em: null,
+                },
             });
 
             return contratoBasico;
@@ -1513,7 +1732,10 @@ export class DocumentosService {
         try {
             // Primeiro, vamos buscar o contrato básico
             const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-                where: { id: contratoId },
+                where: {
+                    id: contratoId,
+                    deletado_em: null,
+                },
                 relations: [
                     'id_turma_aluno_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
@@ -1534,6 +1756,9 @@ export class DocumentosService {
                     status_ass_test_dois: true,
                     data_ass_test_dois: true,
                     dados_contrato: true, // Garantir que o campo JSON seja carregado
+                    zapsign_document_id: true, // ✅ Campo ZapSign adicionado
+                    zapsign_signers_data: true, // ✅ Campo ZapSign adicionado
+                    zapsign_document_status: true, // ✅ Campo ZapSign adicionado
                     assinatura_aluno_base64: true,
                     tipo_assinatura_aluno: true,
                     foto_documento_aluno_base64: true,
@@ -1570,6 +1795,8 @@ export class DocumentosService {
             console.log('Treinamento dos dados_contrato:', dadosContrato.treinamento);
             console.log('Treinamento das relations:', turmaAlunoTreinamento?.id_treinamento_fk);
             console.log('Treinamento final usado:', treinamento);
+            console.log('Dados contrato completos:', JSON.stringify(dadosContrato, null, 2));
+            console.log('Pagamento nos dados contrato:', dadosContrato.pagamento);
 
             const contratoMapeado = {
                 id: contrato.id,
@@ -1629,10 +1856,12 @@ export class DocumentosService {
                         formas_pagamento: dadosContrato.pagamento?.formas_pagamento || dadosContrato.formas_pagamento || [],
                         valores_formas_pagamento: dadosContrato.pagamento?.valores_formas_pagamento || dadosContrato.valores_formas_pagamento || {},
                     },
+                    // Garantir que os dados de pagamento estejam disponíveis no nível raiz também
+                    forma_pagamento: dadosContrato.pagamento?.forma_pagamento || dadosContrato.forma_pagamento || 'A_VISTA',
+                    formas_pagamento: dadosContrato.pagamento?.formas_pagamento || dadosContrato.formas_pagamento || [],
+                    valores_formas_pagamento: dadosContrato.pagamento?.valores_formas_pagamento || dadosContrato.valores_formas_pagamento || {},
                     testemunhas: dadosContrato.testemunhas || {},
                     campos_variaveis: dadosContrato.campos_variaveis || {},
-                    formas_pagamento: dadosContrato.formas_pagamento || [],
-                    valores_formas_pagamento: dadosContrato.valores_formas_pagamento || {},
                     bonus_selecionados: dadosContrato.bonus_selecionados || [],
                     valores_bonus: dadosContrato.valores_bonus || {},
                     bonus: {
@@ -1670,14 +1899,24 @@ export class DocumentosService {
         limit: number;
         totalPages: number;
     }> {
-        console.log('Listando contratos do banco de dados:', filtros);
+        console.log('=== LISTANDO CONTRATOS DO BANCO DE DADOS ===');
+        console.log('Filtros recebidos:', filtros);
         try {
             const page = filtros?.page || 1;
             const limit = filtros?.limit || 10;
             const offset = (page - 1) * limit;
 
+            console.log('Parâmetros da query:', { page, limit, offset });
+
+            // Primeiro, vamos verificar quantos contratos existem no total
+            const totalContratos = await this.uow.turmasAlunosTreinamentosContratosRP.count({
+                where: { deletado_em: null },
+            });
+            console.log('Total de contratos no banco:', totalContratos);
+
             // Usar find com relations para garantir que os relacionamentos sejam carregados
             const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+                where: { deletado_em: null },
                 relations: [
                     'id_turma_aluno_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
@@ -1691,8 +1930,12 @@ export class DocumentosService {
                 take: limit,
             });
 
+            console.log('Contratos encontrados:', contratos.length);
+
             // Contar total (simplificado para teste)
-            const total = await this.uow.turmasAlunosTreinamentosContratosRP.count();
+            const total = await this.uow.turmasAlunosTreinamentosContratosRP.count({
+                where: { deletado_em: null },
+            });
 
             // Mapear dados para o formato esperado pelo frontend
             const contratosMapeados = contratos.map((contrato) => {
@@ -1796,13 +2039,23 @@ export class DocumentosService {
 
             const totalPages = Math.ceil(total / limit);
 
-            return {
+            console.log('=== RESULTADO FINAL ===');
+            console.log('Total de contratos mapeados:', contratosMapeados.length);
+            console.log('Total geral:', total);
+            console.log('Página:', page);
+            console.log('Limite:', limit);
+            console.log('Total de páginas:', totalPages);
+
+            const resultado = {
                 data: contratosMapeados,
                 total,
                 page,
                 limit,
                 totalPages,
             };
+
+            console.log('Retornando resultado:', JSON.stringify(resultado, null, 2));
+            return resultado;
         } catch (error) {
             console.error('Erro ao listar contratos do banco:', error);
             throw new Error('Erro ao listar contratos do banco de dados');

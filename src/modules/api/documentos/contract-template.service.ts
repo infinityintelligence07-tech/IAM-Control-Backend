@@ -17,14 +17,36 @@ export class ContractTemplateService {
         const template = contrato.dados_contrato?.template;
 
         // Obter a URL absoluta da logo
-        const logoUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/images/logo/logo-escuro.png`;
+        const logoUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/images/logo/logo-escuro.png`;
+
+        // Função para converter URLs do Google Drive para formato de visualização
+        const convertGoogleDriveUrl = (url: string): string => {
+            if (!url) return '';
+
+            // Se já é data URI, retorna como está
+            if (url.startsWith('data:')) return url;
+
+            // Se já é URL direta (lh3.googleusercontent.com), retorna como está
+            if (url.includes('lh3.googleusercontent.com')) return url;
+
+            // Converter URL do Google Drive para formato de visualização
+            const fileIdMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (fileIdMatch) {
+                const fileId = fileIdMatch[1];
+                // Usar formato que não tem problemas de CORS
+                return `https://lh3.googleusercontent.com/d/${fileId}`;
+            }
+
+            // Se não é URL do Google Drive, verifica se é URL absoluta
+            if (url.startsWith('http')) return url;
+
+            // Caso contrário, adiciona a URL base do frontend
+            return `${process.env.FRONTEND_URL || 'http://localhost:3001'}${url}`;
+        };
 
         // Função para converter URLs relativas em absolutas
         const getAbsoluteImageUrl = (url: string): string => {
-            if (!url) return '';
-            if (url.startsWith('http')) return url;
-            if (url.startsWith('data:')) return url;
-            return `${process.env.FRONTEND_URL || 'http://localhost:3000'}${url}`;
+            return convertGoogleDriveUrl(url);
         };
 
         // Função para gerar footer com logo
@@ -753,7 +775,7 @@ export class ContractTemplateService {
               <div class="page">
               <div class="header">
                 <div class="logo-container">
-                  <img src="${logoUrl}" alt="Instituto Academy Mind" class="logo-image" crossorigin="anonymous">
+                  <img src="${logoUrl}" alt="Instituto Academy Mind" class="logo-image" onerror="this.style.display='none';">
                   <hr class="logo-divider">
                   <div class="logo-text">
                     <div class="logo">INSTITUTO ACADEMY MIND</div>
@@ -1245,7 +1267,7 @@ export class ContractTemplateService {
               <div class="footer">
                 ${
                     treinamento?.url_logo_treinamento
-                        ? `<img src="${treinamento.url_logo_treinamento}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 10px;" onerror="this.style.display='none';">`
+                        ? `<img src="${getAbsoluteImageUrl(treinamento.url_logo_treinamento)}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 10px;" onerror="this.style.display='none';">`
                         : ``
                 }
               </div>

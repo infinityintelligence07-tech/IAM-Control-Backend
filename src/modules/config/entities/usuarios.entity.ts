@@ -21,6 +21,9 @@ export class Usuarios extends BaseEntity {
     @Column({ type: 'varchar', name: 'sobrenome', nullable: false })
     sobrenome: string;
 
+    @Column({ type: 'varchar', name: 'cpf', nullable: true })
+    cpf: string;
+
     @Column({ type: 'varchar', name: 'email', nullable: false, unique: true })
     email: string;
 
@@ -30,8 +33,8 @@ export class Usuarios extends BaseEntity {
     @Column({ type: 'enum', enum: ESetores, enumName: 'ESetores', name: 'setor', default: ESetores.CUIDADO_DE_ALUNOS, nullable: false })
     setor: ESetores;
 
-    @Column({ type: 'enum', enum: EFuncoes, enumName: 'EFuncoes', name: 'funcao', default: EFuncoes.COLABORADOR, nullable: false })
-    funcao: EFuncoes;
+    @Column({ type: 'enum', enum: EFuncoes, enumName: 'EFuncoes', name: 'funcao', array: true, nullable: false, default: [EFuncoes.COLABORADOR] })
+    funcao: EFuncoes[];
 
     @Column({ type: 'varchar', name: 'telefone', nullable: false })
     telefone: string;

@@ -29,7 +29,7 @@ export class AuthService {
         senha: string,
         telefone: string,
         setor: ESetores,
-        funcao?: EFuncoes,
+        funcao?: EFuncoes[],
         provider: 'google' | 'credentials' = 'credentials',
         providerId?: string,
         picture?: string,
@@ -62,7 +62,7 @@ export class AuthService {
             senha: hash,
             telefone,
             setor,
-            funcao,
+            funcao: funcao || [EFuncoes.COLABORADOR],
             url_foto: picture,
         });
         await this.uow.usuariosRP.save(user);
@@ -194,7 +194,7 @@ export class AuthService {
         return { ok: true };
     }
 
-    async updateProfile(userId: number, primeiro_nome: string, sobrenome: string, email: string, telefone: string, setor: ESetores, funcao: EFuncoes) {
+    async updateProfile(userId: number, primeiro_nome: string, sobrenome: string, email: string, telefone: string, setor: ESetores, funcao: EFuncoes[]) {
         console.log('updateProfile chamado com:', { userId, primeiro_nome, sobrenome, email, telefone, setor, funcao });
 
         try {

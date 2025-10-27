@@ -274,44 +274,20 @@ export class DocumentosService {
             ];
 
             // Adicionar testemunhas se fornecidas
-            if (criarContratoDto.testemunha_um_id) {
-                const testemunhaUm = await this.uow.alunosRP.findOne({
-                    where: { id: parseInt(criarContratoDto.testemunha_um_id), deletado_em: null },
-                });
-                if (testemunhaUm) {
-                    signers.push({
-                        name: testemunhaUm.nome,
-                        email: testemunhaUm.email,
-                        phone: testemunhaUm.telefone_um,
-                        action: 'sign' as const,
-                    });
-                }
-            } else if (criarContratoDto.testemunha_um_nome && criarContratoDto.testemunha_um_cpf) {
+            if (criarContratoDto.testemunha_um_nome && criarContratoDto.testemunha_um_cpf) {
                 signers.push({
                     name: criarContratoDto.testemunha_um_nome,
-                    email: '', // Deixar email vazio quando apenas CPF é preenchido
-                    phone: '',
+                    email: criarContratoDto.testemunha_um_email || '',
+                    phone: criarContratoDto.testemunha_um_telefone || '',
                     action: 'sign' as const,
                 });
             }
 
-            if (criarContratoDto.testemunha_dois_id) {
-                const testemunhaDois = await this.uow.alunosRP.findOne({
-                    where: { id: parseInt(criarContratoDto.testemunha_dois_id), deletado_em: null },
-                });
-                if (testemunhaDois) {
-                    signers.push({
-                        name: testemunhaDois.nome,
-                        email: testemunhaDois.email,
-                        phone: testemunhaDois.telefone_um,
-                        action: 'sign' as const,
-                    });
-                }
-            } else if (criarContratoDto.testemunha_dois_nome && criarContratoDto.testemunha_dois_cpf) {
+            if (criarContratoDto.testemunha_dois_nome && criarContratoDto.testemunha_dois_cpf) {
                 signers.push({
                     name: criarContratoDto.testemunha_dois_nome,
-                    email: '', // Deixar email vazio quando apenas CPF é preenchido
-                    phone: '',
+                    email: criarContratoDto.testemunha_dois_email || '',
+                    phone: criarContratoDto.testemunha_dois_telefone || '',
                     action: 'sign' as const,
                 });
             }
@@ -412,11 +388,15 @@ export class DocumentosService {
                         testemunha_um: {
                             nome: criarContratoDto.testemunha_um_nome || '',
                             cpf: criarContratoDto.testemunha_um_cpf || '',
+                            email: criarContratoDto.testemunha_um_email || '',
+                            telefone: criarContratoDto.testemunha_um_telefone || '',
                             id: criarContratoDto.testemunha_um_id || null,
                         },
                         testemunha_dois: {
                             nome: criarContratoDto.testemunha_dois_nome || '',
                             cpf: criarContratoDto.testemunha_dois_cpf || '',
+                            email: criarContratoDto.testemunha_dois_email || '',
+                            telefone: criarContratoDto.testemunha_dois_telefone || '',
                             id: criarContratoDto.testemunha_dois_id || null,
                         },
                     },
@@ -536,11 +516,15 @@ export class DocumentosService {
                 testemunha_um: {
                     nome: criarContratoDto.testemunha_um_nome || '',
                     cpf: criarContratoDto.testemunha_um_cpf || '',
+                    email: criarContratoDto.testemunha_um_email || '',
+                    telefone: criarContratoDto.testemunha_um_telefone || '',
                     id: criarContratoDto.testemunha_um_id || null,
                 },
                 testemunha_dois: {
                     nome: criarContratoDto.testemunha_dois_nome || '',
                     cpf: criarContratoDto.testemunha_dois_cpf || '',
+                    email: criarContratoDto.testemunha_dois_email || '',
+                    telefone: criarContratoDto.testemunha_dois_telefone || '',
                     id: criarContratoDto.testemunha_dois_id || null,
                 },
             },

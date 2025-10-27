@@ -27,6 +27,7 @@ export class AuthController {
                     decryptedData.senha,
                     decryptedData.telefone,
                     decryptedData.setor,
+                    decryptedData.funcao,
                     decryptedData.provider || 'credentials',
                     decryptedData.providerId,
                     decryptedData.picture,

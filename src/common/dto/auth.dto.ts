@@ -31,8 +31,8 @@ export class SignupDto {
     setor: ESetores;
 
     @IsOptional()
-    @IsEnum(EFuncoes, { message: 'Função inválida' })
-    funcao?: EFuncoes;
+    @IsEnum(EFuncoes, { each: true, message: 'Função inválida' })
+    funcao?: EFuncoes[];
 
     @IsOptional()
     @IsString()

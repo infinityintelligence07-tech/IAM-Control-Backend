@@ -59,20 +59,22 @@ export class TurmasService {
     /**
      * Buscar usuários líderes para seleção em turmas
      */
-    async getUsuariosLideres(): Promise<{ id: number; nome: string; email: string; funcao: string }[]> {
+    async getUsuariosLideres(): Promise<{ id: number; nome: string; email: string; cpf: string | null; telefone: string; funcao: string[] }[]> {
         try {
-            const usuarios = await this.uow.usuariosRP.find({
-                where: {
-                    funcao: In([EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.ADMINISTRADOR]),
-                    deletado_em: null,
-                },
-                select: ['id', 'nome', 'email', 'funcao'],
-            });
+            // Usando query builder para trabalhar com arrays do PostgreSQL
+            const usuarios = await this.uow.usuariosRP
+                .createQueryBuilder('usuario')
+                .where('usuario.funcao && :funcoes', { funcoes: [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.ADMINISTRADOR] })
+                .andWhere('usuario.deletado_em IS NULL')
+                .select(['usuario.id', 'usuario.nome', 'usuario.email', 'usuario.cpf', 'usuario.telefone', 'usuario.funcao'])
+                .getMany();
 
             return usuarios.map((usuario) => ({
                 id: usuario.id,
                 nome: usuario.nome,
                 email: usuario.email,
+                cpf: usuario.cpf,
+                telefone: usuario.telefone,
                 funcao: usuario.funcao,
             }));
         } catch (error) {

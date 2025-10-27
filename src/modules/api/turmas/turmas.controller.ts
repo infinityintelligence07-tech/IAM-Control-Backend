@@ -23,7 +23,7 @@ export class TurmasController {
     // Rotas específicas (devem vir antes das rotas com parâmetros)
 
     @Get('usuarios-lideres')
-    async getUsuariosLideres(): Promise<{ id: number; nome: string; email: string; funcao: string }[]> {
+    async getUsuariosLideres(): Promise<{ id: number; nome: string; email: string; cpf: string | null; telefone: string; funcao: string[] }[]> {
         console.log('Buscando usuários líderes');
         try {
             const result = await this.turmasService.getUsuariosLideres();

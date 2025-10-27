@@ -136,6 +136,18 @@ export class CriarContratoZapSignDto {
     @IsNotEmpty()
     id_treinamento: string;
 
+    @IsOptional()
+    @IsString()
+    cidade_treinamento?: string;
+
+    @IsOptional()
+    @IsString()
+    data_inicio_treinamento?: string;
+
+    @IsOptional()
+    @IsString()
+    data_final_treinamento?: string;
+
     @IsString()
     @IsNotEmpty()
     forma_pagamento: string; // 'A_VISTA' | 'PARCELADO' | 'AMBOS'
@@ -165,6 +177,13 @@ export class CriarContratoZapSignDto {
 
     @IsOptional()
     @IsString()
+    texto_bonus_simples?: string;
+
+    @IsOptional()
+    possui_bonus_simples?: boolean;
+
+    @IsOptional()
+    @IsString()
     testemunha_um_id?: string; // ID do aluno se for do banco
 
     @IsOptional()
@@ -177,6 +196,14 @@ export class CriarContratoZapSignDto {
 
     @IsOptional()
     @IsString()
+    testemunha_um_email?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_telefone?: string;
+
+    @IsOptional()
+    @IsString()
     testemunha_dois_id?: string; // ID do aluno se for do banco
 
     @IsOptional()
@@ -186,6 +213,14 @@ export class CriarContratoZapSignDto {
     @IsOptional()
     @IsString()
     testemunha_dois_cpf?: string; // CPF manual se não for do banco
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_email?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_telefone?: string;
 
     @IsOptional()
     @IsString()

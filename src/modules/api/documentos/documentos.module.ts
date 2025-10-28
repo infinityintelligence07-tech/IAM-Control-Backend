@@ -6,9 +6,10 @@ import { ContractTemplateService } from './contract-template.service';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { UnitOfWorkModule } from '@/modules/config/unit_of_work/uow.module';
 import { ConfigModule } from '@nestjs/config';
+import { MailModule } from '@/modules/mail/mail.module';
 
 @Module({
-    imports: [UnitOfWorkModule, ConfigModule],
+    imports: [UnitOfWorkModule, ConfigModule, MailModule],
     controllers: [DocumentosController],
     providers: [DocumentosService, ZapSignService, ContractTemplateService],
     exports: [DocumentosService, ZapSignService, ContractTemplateService],

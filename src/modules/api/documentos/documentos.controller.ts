@@ -322,4 +322,17 @@ export class DocumentosController {
             throw error;
         }
     }
+
+    // Endpoint para enviar contrato por email
+    @Post('enviar-email')
+    @UseGuards(JwtAuthGuard)
+    async enviarContratoPorEmail(@Body() body: { email: string; nomeSignatario: string; signingUrl: string }): Promise<{ message: string }> {
+        try {
+            await this.documentosService.enviarContratoPorEmail(body.email, body.nomeSignatario, body.signingUrl);
+            return { message: 'Email enviado com sucesso' };
+        } catch (error) {
+            console.error('Erro ao enviar email:', error);
+            throw error;
+        }
+    }
 }

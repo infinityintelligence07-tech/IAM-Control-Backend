@@ -22,6 +22,7 @@ import { ETipoDocumento, EFormasPagamento } from '@/modules/config/entities/enum
 import { ZapSignService } from './zapsign.service';
 import { ContractTemplateService } from './contract-template.service';
 import * as PDFDocument from 'pdfkit';
+import { MailService } from '@/modules/mail/mail.service';
 
 @Injectable()
 export class DocumentosService {
@@ -29,6 +30,7 @@ export class DocumentosService {
         private readonly uow: UnitOfWorkService,
         private readonly zapSignService: ZapSignService,
         private readonly contractTemplateService: ContractTemplateService,
+        private readonly mailService: MailService,
     ) {}
 
     async createDocumento(createDocumentoDto: CreateDocumentoDto, userId?: number): Promise<DocumentoResponseDto> {
@@ -1883,20 +1885,15 @@ export class DocumentosService {
         limit: number;
         totalPages: number;
     }> {
-        console.log('=== LISTANDO CONTRATOS DO BANCO DE DADOS ===');
-        console.log('Filtros recebidos:', filtros);
         try {
             const page = filtros?.page || 1;
             const limit = filtros?.limit || 10;
             const offset = (page - 1) * limit;
 
-            console.log('Parâmetros da query:', { page, limit, offset });
-
             // Primeiro, vamos verificar quantos contratos existem no total
             const totalContratos = await this.uow.turmasAlunosTreinamentosContratosRP.count({
                 where: { deletado_em: null },
             });
-            console.log('Total de contratos no banco:', totalContratos);
 
             // Usar find com relations para garantir que os relacionamentos sejam carregados
             const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
@@ -1913,8 +1910,6 @@ export class DocumentosService {
                 skip: offset,
                 take: limit,
             });
-
-            console.log('Contratos encontrados:', contratos.length);
 
             // Contar total (simplificado para teste)
             const total = await this.uow.turmasAlunosTreinamentosContratosRP.count({
@@ -2011,24 +2006,7 @@ export class DocumentosService {
                 };
             });
 
-            console.log('=== CONTRATOS MAPEADOS ===');
-            if (contratosMapeados.length > 0) {
-                console.log('Primeiro contrato mapeado:', {
-                    id: contratosMapeados[0].id,
-                    aluno_nome: contratosMapeados[0].aluno_nome,
-                    treinamento_nome: contratosMapeados[0].treinamento_nome,
-                    criado_em: contratosMapeados[0].criado_em,
-                });
-            }
-
             const totalPages = Math.ceil(total / limit);
-
-            console.log('=== RESULTADO FINAL ===');
-            console.log('Total de contratos mapeados:', contratosMapeados.length);
-            console.log('Total geral:', total);
-            console.log('Página:', page);
-            console.log('Limite:', limit);
-            console.log('Total de páginas:', totalPages);
 
             const resultado = {
                 data: contratosMapeados,
@@ -2043,6 +2021,33 @@ export class DocumentosService {
         } catch (error) {
             console.error('Erro ao listar contratos do banco:', error);
             throw new Error('Erro ao listar contratos do banco de dados');
+        }
+    }
+
+    async enviarContratoPorEmail(email: string, nomeSignatario: string, signingUrl: string): Promise<void> {
+        try {
+            await this.mailService.sendContractEmail(email, nomeSignatario, signingUrl);
+        } catch (error) {
+            console.error('Erro ao enviar email de contrato:', error);
+
+            // Verificar se é erro de configuração SMTP
+            if (error instanceof Error && error.message && error.message.includes('SMTP não configurado')) {
+                throw new BadRequestException('Serviço de email não configurado. Configure as variáveis MAIL_HOST, MAIL_PORT, MAIL_USER e MAIL_PASS');
+            }
+
+            // Verificar se é erro de autenticação (credenciais inválidas)
+            // O nodemailer retorna o código EAUTH em error.code
+            const errorObj = error as any;
+            if (
+                errorObj?.code === 'EAUTH' ||
+                (error instanceof Error &&
+                    error.message &&
+                    (error.message.includes('EAUTH') || error.message.includes('Bad Credentials') || error.message.includes('Username and Password not accepted')))
+            ) {
+                throw new BadRequestException('Credenciais de email inválidas. Verifique MAIL_USER e MAIL_PASS. Para Gmail, use uma App Password.');
+            }
+
+            throw new BadRequestException('Erro ao enviar email de contrato. Verifique as configurações MAIL_* no servidor.');
         }
     }
 

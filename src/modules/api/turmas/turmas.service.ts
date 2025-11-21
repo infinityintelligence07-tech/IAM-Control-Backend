@@ -26,6 +26,77 @@ export class TurmasService {
     ) {}
 
     /**
+     * Verificar e atualizar automaticamente o status da turma para ENCERRADA
+     * quando necessário (data atual > data_final OU (data atual >= data_inicio E expectativa_real >= capacidade_sala))
+     */
+    private async verificarEAtualizarStatusTurma(turma: any): Promise<void> {
+        try {
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
+
+            const dataInicio = new Date(turma.data_inicio);
+            dataInicio.setHours(0, 0, 0, 0);
+
+            const dataFinal = new Date(turma.data_final);
+            dataFinal.setHours(23, 59, 59, 999);
+
+            // Verificar se a data atual é maior ou igual à data de início (evento já começou)
+            const eventoJaComecou = hoje >= dataInicio;
+
+            // Verificar se a data atual é maior que a data final (evento já terminou)
+            const eventoJaTerminou = hoje > dataFinal;
+
+            // Se o evento ainda não começou, não encerrar (e se estiver encerrada, reabrir)
+            if (!eventoJaComecou && !eventoJaTerminou) {
+                if (turma.status_turma === EStatusTurmas.ENCERRADA) {
+                    // Reabrir turma se foi encerrada incorretamente antes do evento começar
+                    turma.status_turma = EStatusTurmas.INSCRICOES_ABERTAS;
+                    turma.atualizado_em = new Date();
+                    await this.uow.turmasRP.save(turma);
+                    console.log(`✅ Turma ${turma.id} reaberta automaticamente. Evento ainda não começou (data_inicio: ${turma.data_inicio})`);
+                }
+                return;
+            }
+
+            // Se já está encerrada e o evento já começou/terminou, não precisa verificar mais
+            if (turma.status_turma === EStatusTurmas.ENCERRADA) {
+                return;
+            }
+
+            // Calcular expectativa real
+            const inscritos = turma.turmasAlunos?.length || 0;
+            const alunosBonus = turma.detalhamento_bonus?.length || 0;
+            const isIPR = turma.id_treinamento_fk?.sigla_treinamento === 'IPR';
+            const expectativaReal = isIPR ? Math.round(inscritos + (alunosBonus - alunosBonus * 0.5) - inscritos * 0.1) : inscritos;
+
+            // Verificar se expectativa real é maior ou igual à capacidade (turma cheia)
+            const turmaCheia = expectativaReal >= turma.capacidade_turma;
+
+            // Encerrar a turma se:
+            // 1. O evento já terminou (data atual > data_final), OU
+            // 2. O evento já começou (data atual >= data_inicio) E a turma está cheia (expectativa real >= capacidade)
+            if (eventoJaTerminou || (eventoJaComecou && turmaCheia)) {
+                turma.status_turma = EStatusTurmas.ENCERRADA;
+                turma.turma_aberta = false; // Desmarcar credenciamento quando encerrar
+                turma.atualizado_em = new Date();
+                await this.uow.turmasRP.save(turma);
+
+                let motivo = '';
+                if (eventoJaTerminou) {
+                    motivo = 'Evento já terminou';
+                } else if (turmaCheia && eventoJaComecou) {
+                    motivo = 'Turma cheia (expectativa real >= capacidade) e evento já começou';
+                }
+
+                console.log(`✅ Turma ${turma.id} atualizada automaticamente para ENCERRADA. Motivo: ${motivo}`);
+            }
+        } catch (error) {
+            console.error(`Erro ao verificar status da turma ${turma.id}:`, error);
+            // Não lançar erro para não interromper o fluxo principal
+        }
+    }
+
+    /**
      * Buscar contadores de pré-cadastrados por turmas
      */
     private async getPreCadastrosCountByTurmas(turmasIds: number[]): Promise<Record<number, { total: number; presentes: number }>> {
@@ -143,6 +214,11 @@ export class TurmasService {
                     }
                     return false;
                 });
+            }
+
+            // Verificar e atualizar status das turmas automaticamente
+            for (const turma of turmasFiltradas) {
+                await this.verificarEAtualizarStatusTurma(turma);
             }
 
             // Buscar contadores de pré-cadastrados para turmas de masterclass
@@ -955,12 +1031,27 @@ export class TurmasService {
             // Remover campos que não existem na entidade antes de atualizar
             const { bonus_treinamentos, ...updateData } = updateTurmaDto;
 
+            // Verificar se o status está sendo alterado manualmente
+            const statusFoiAlteradoManualmente = updateTurmaDto.status_turma !== undefined && updateTurmaDto.status_turma !== turma.status_turma;
+
             // Atualizar turma
             await this.uow.turmasRP.update(id, {
                 ...updateData,
                 detalhamento_bonus,
                 atualizado_por: updateTurmaDto.atualizado_por,
             });
+
+            // Buscar turma atualizada com relações para verificar status
+            const turmaAtualizada = await this.uow.turmasRP.findOne({
+                where: { id, deletado_em: null },
+                relations: ['id_treinamento_fk', 'turmasAlunos'],
+            });
+
+            // Só verificar e atualizar status automaticamente se o status NÃO foi alterado manualmente
+            // Se o usuário alterou o status explicitamente, respeitar a escolha manual
+            if (turmaAtualizada && !statusFoiAlteradoManualmente) {
+                await this.verificarEAtualizarStatusTurma(turmaAtualizada);
+            }
 
             // Retornar turma atualizada
             return this.findById(id);
@@ -1097,6 +1188,15 @@ export class TurmasService {
                 throw new NotFoundException('Turma não encontrada');
             }
 
+            // Verificar se a turma permite inserção de alunos
+            if (turma.status_turma === EStatusTurmas.ENCERRADA) {
+                throw new BadRequestException('Não é possível adicionar alunos em turmas encerradas');
+            }
+
+            if (turma.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
+                throw new BadRequestException('Não é possível adicionar alunos em turmas com inscrições pausadas');
+            }
+
             const aluno = await this.uow.alunosRP.findOne({ where: { id: addAlunoDto.id_aluno } });
 
             if (!aluno) {
@@ -1150,6 +1250,16 @@ export class TurmasService {
 
             console.log('=== ENTIDADE SALVA ===');
             console.log('turmaAlunoSalva:', turmaAlunoSalva);
+
+            // Verificar e atualizar status da turma após adicionar aluno
+            const turmaAtualizada = await this.uow.turmasRP.findOne({
+                where: { id: id_turma },
+                relations: ['id_treinamento_fk', 'turmasAlunos'],
+            });
+
+            if (turmaAtualizada) {
+                await this.verificarEAtualizarStatusTurma(turmaAtualizada);
+            }
 
             // Retornar com as relações
             const turmaAlunoCompleta = await this.uow.turmasAlunosRP.findOne({

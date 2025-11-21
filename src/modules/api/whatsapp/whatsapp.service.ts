@@ -193,8 +193,8 @@ export class WhatsAppService {
                     { expiresIn: '7d' }, // Link expira em 7 dias
                 );
 
-                // Gerar URL de check-in
-                const checkInUrl = `${this.frontendUrl}/api/whatsapp/checkin/${checkInToken}?student=${student.alunoTurmaId}`;
+                // Gerar URL de check-in - link para formulário de preenchimento de dados
+                const checkInUrl = `${this.frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
                 // Gerar mensagem
                 const message = this.generateCheckInMessage(student.alunoNome, student.treinamentoNome, checkInUrl);
@@ -262,19 +262,12 @@ export class WhatsAppService {
                 };
             }
 
-            // Atualizar status para CHECKIN_REALIZADO
-            await this.uow.turmasAlunosRP.update(
-                { id: decoded.alunoTurmaId },
-                {
-                    status_aluno_turma: EStatusAlunosTurmas.CHECKIN_REALIZADO,
-                    atualizado_em: new Date(),
-                },
-            );
-
+            // Redirecionar para página de preencher dados primeiro
+            // O check-in será realizado após o preenchimento dos dados
             return {
                 success: true,
-                message: `Check-in realizado com sucesso para ${alunoTurma.id_aluno_fk?.nome}!`,
-                redirect: `${this.frontendUrl}/checkin-success?name=${encodeURIComponent(alunoTurma.id_aluno_fk?.nome || '')}`,
+                message: 'Redirecionando para preencher dados...',
+                redirect: `${this.frontendUrl}/preencherdadosaluno?token=${token}`,
             };
         } catch (error: unknown) {
             console.error('Erro ao processar check-in:', error);
@@ -302,6 +295,267 @@ export class WhatsAppService {
                 message: 'Erro interno ao processar check-in',
                 redirect: `${this.frontendUrl}/checkin-error?reason=internal`,
             };
+        }
+    }
+
+    /**
+     * Busca dados do aluno por token de check-in
+     */
+    async getDadosAlunoPorToken(token: string): Promise<any> {
+        try {
+            // Verificar e decodificar token
+            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+
+            if (!decoded.alunoTurmaId || !decoded.turmaId) {
+                throw new BadRequestException('Token inválido');
+            }
+
+            // Buscar aluno na turma
+            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
+                where: { id: decoded.alunoTurmaId },
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
+            });
+
+            if (!alunoTurma || !alunoTurma.id_aluno_fk) {
+                throw new NotFoundException('Aluno não encontrado na turma');
+            }
+
+            const aluno = alunoTurma.id_aluno_fk;
+
+            // Retornar dados do aluno
+            return {
+                id: aluno.id,
+                nome: aluno.nome,
+                nome_cracha: aluno.nome_cracha,
+                email: aluno.email,
+                cpf: aluno.cpf,
+                telefone_um: aluno.telefone_um,
+                telefone_dois: aluno.telefone_dois,
+                cep: aluno.cep,
+                logradouro: aluno.logradouro,
+                complemento: aluno.complemento,
+                numero: aluno.numero,
+                bairro: aluno.bairro,
+                cidade: aluno.cidade,
+                estado: aluno.estado,
+                profissao: aluno.profissao,
+                genero: aluno.genero,
+                data_nascimento: aluno.data_nascimento,
+                desc_deficiencia: aluno.desc_deficiencia,
+                url_foto_aluno: aluno.url_foto_aluno,
+                possui_deficiencia: aluno.possui_deficiencia,
+                turma: {
+                    id: alunoTurma.id_turma_fk.id,
+                    nome: alunoTurma.id_turma_fk.id_treinamento_fk?.treinamento || '',
+                },
+            };
+        } catch (error: unknown) {
+            console.error('Erro ao buscar dados do aluno:', error);
+
+            if (error instanceof Error) {
+                if (error.name === 'JsonWebTokenError') {
+                    throw new BadRequestException('Token inválido');
+                }
+
+                if (error.name === 'TokenExpiredError') {
+                    throw new BadRequestException('Token expirado');
+                }
+            }
+
+            if (error instanceof BadRequestException || error instanceof NotFoundException) {
+                throw error;
+            }
+
+            throw new BadRequestException('Erro ao buscar dados do aluno');
+        }
+    }
+
+    /**
+     * Preenche dados do aluno e realiza check-in
+     */
+    async preencherDadosAluno(token: string, dados: any): Promise<{ success: boolean; message: string }> {
+        try {
+            // Verificar e decodificar token
+            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+
+            if (!decoded.alunoTurmaId || !decoded.turmaId) {
+                throw new BadRequestException('Token inválido');
+            }
+
+            // Buscar aluno na turma com todas as relações necessárias
+            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
+                where: { id: decoded.alunoTurmaId },
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
+            });
+
+            if (!alunoTurma || !alunoTurma.id_aluno_fk) {
+                throw new NotFoundException('Aluno não encontrado na turma');
+            }
+
+            const aluno = alunoTurma.id_aluno_fk;
+            const turma = alunoTurma.id_turma_fk;
+            const treinamento = turma?.id_treinamento_fk;
+            const polo = turma?.id_polo_fk;
+
+            // Atualizar dados do aluno
+            await this.uow.alunosRP.update(
+                { id: aluno.id },
+                {
+                    nome: dados.nome || aluno.nome,
+                    nome_cracha: dados.nome_cracha || aluno.nome_cracha,
+                    email: dados.email || aluno.email,
+                    cpf: dados.cpf || aluno.cpf,
+                    telefone_um: dados.telefone_um || aluno.telefone_um,
+                    telefone_dois: dados.telefone_dois || aluno.telefone_dois,
+                    cep: dados.cep || aluno.cep,
+                    logradouro: dados.logradouro || aluno.logradouro,
+                    complemento: dados.complemento || aluno.complemento,
+                    numero: dados.numero || aluno.numero,
+                    bairro: dados.bairro || aluno.bairro,
+                    cidade: dados.cidade || aluno.cidade,
+                    estado: dados.estado || aluno.estado,
+                    profissao: dados.profissao || aluno.profissao,
+                    genero: dados.genero || aluno.genero,
+                    data_nascimento: dados.data_nascimento || aluno.data_nascimento,
+                    desc_deficiencia: dados.desc_deficiencia || aluno.desc_deficiencia,
+                    url_foto_aluno: dados.url_foto_aluno || aluno.url_foto_aluno,
+                    possui_deficiencia: dados.possui_deficiencia !== undefined ? dados.possui_deficiencia : aluno.possui_deficiencia,
+                    atualizado_em: new Date(),
+                },
+            );
+
+            // Atualizar status do check-in se ainda não foi realizado
+            const statusAtualizado = alunoTurma.status_aluno_turma !== EStatusAlunosTurmas.CHECKIN_REALIZADO;
+            if (statusAtualizado) {
+                await this.uow.turmasAlunosRP.update(
+                    { id: decoded.alunoTurmaId },
+                    {
+                        status_aluno_turma: EStatusAlunosTurmas.CHECKIN_REALIZADO,
+                        atualizado_em: new Date(),
+                    },
+                );
+            }
+
+            // Obter telefone atualizado (priorizar dados do formulário)
+            const telefoneAtualizado = dados.telefone_um || aluno.telefone_um;
+
+            // Enviar QR Code via WhatsApp após finalizar formulário
+            if (telefoneAtualizado && turma && treinamento) {
+                try {
+                    const qrCodeData = {
+                        alunoTurmaId: alunoTurma.id,
+                        alunoNome: dados.nome || aluno.nome || aluno.nome_cracha || 'Aluno',
+                        alunoTelefone: telefoneAtualizado,
+                        turmaId: turma.id,
+                        treinamentoNome: treinamento?.treinamento || 'Treinamento não informado',
+                        poloNome: polo?.polo || 'Polo não informado',
+                        dataEvento: turma.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : 'Data não informada',
+                    };
+
+                    console.log('📱 [preencherDadosAluno] Enviando QR Code após finalizar formulário para:', qrCodeData.alunoNome);
+                    console.log('📱 [preencherDadosAluno] Dados do QR Code:', JSON.stringify(qrCodeData, null, 2));
+
+                    const resultadoQRCode = await this.sendQRCodeCredenciamento(qrCodeData);
+
+                    if (resultadoQRCode.success) {
+                        console.log('✅ QR Code enviado com sucesso para:', qrCodeData.alunoNome);
+                    } else {
+                        console.error('❌ Falha ao enviar QR Code:', resultadoQRCode.error);
+                    }
+                } catch (error) {
+                    console.error('❌ Erro ao enviar QR Code (não interrompe o fluxo):', error);
+                    // Não relançar o erro para não interromper o fluxo principal
+                }
+            } else {
+                console.warn('⚠️ QR Code não enviado - dados faltando:', {
+                    temTelefone: !!telefoneAtualizado,
+                    temTurma: !!turma,
+                    temTreinamento: !!treinamento,
+                });
+            }
+
+            return {
+                success: true,
+                message: 'Dados salvos e check-in realizado com sucesso!',
+            };
+        } catch (error: unknown) {
+            console.error('Erro ao preencher dados do aluno:', error);
+
+            if (error instanceof Error) {
+                if (error.name === 'JsonWebTokenError') {
+                    throw new BadRequestException('Token inválido');
+                }
+
+                if (error.name === 'TokenExpiredError') {
+                    throw new BadRequestException('Token expirado');
+                }
+            }
+
+            if (error instanceof BadRequestException || error instanceof NotFoundException) {
+                throw error;
+            }
+
+            throw new BadRequestException('Erro ao salvar dados do aluno');
+        }
+    }
+
+    /**
+     * Atualiza foto do aluno por token
+     */
+    async atualizarFotoAluno(token: string, urlFoto: string): Promise<any> {
+        try {
+            // Verificar e decodificar token
+            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+
+            if (!decoded.alunoTurmaId) {
+                throw new BadRequestException('Token inválido');
+            }
+
+            // Buscar aluno na turma
+            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
+                where: { id: decoded.alunoTurmaId },
+                relations: ['id_aluno_fk'],
+            });
+
+            if (!alunoTurma || !alunoTurma.id_aluno_fk) {
+                throw new NotFoundException('Aluno não encontrado na turma');
+            }
+
+            const aluno = alunoTurma.id_aluno_fk;
+
+            // Atualizar foto
+            await this.uow.alunosRP.update(
+                { id: aluno.id },
+                {
+                    url_foto_aluno: urlFoto,
+                    atualizado_em: new Date(),
+                },
+            );
+
+            // Buscar aluno atualizado
+            const alunoAtualizado = await this.uow.alunosRP.findOne({
+                where: { id: aluno.id },
+            });
+
+            return alunoAtualizado;
+        } catch (error: unknown) {
+            console.error('Erro ao atualizar foto do aluno:', error);
+
+            if (error instanceof Error) {
+                if (error.name === 'JsonWebTokenError') {
+                    throw new BadRequestException('Token inválido');
+                }
+
+                if (error.name === 'TokenExpiredError') {
+                    throw new BadRequestException('Token expirado');
+                }
+            }
+
+            if (error instanceof BadRequestException || error instanceof NotFoundException) {
+                throw error;
+            }
+
+            throw new BadRequestException('Erro ao atualizar foto do aluno');
         }
     }
 
@@ -353,15 +607,6 @@ export class WhatsAppService {
      */
     async sendQRCodeCredenciamento(data: SendQRCodeDto): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
-            console.log('🔍 [sendQRCodeCredenciamento] Iniciando envio de QR code...');
-            console.log('🔍 [sendQRCodeCredenciamento] Dados recebidos:', data);
-
-            // Verificar se temos as credenciais da Z-API
-            console.log('🔍 [sendQRCodeCredenciamento] Verificando credenciais Z-API...');
-            console.log(`URL: ${this.zApiUrl}`);
-            console.log(`Token: ${this.zApiToken ? 'CONFIGURADO' : 'NÃO CONFIGURADO'}`);
-            console.log(`Instance: ${this.zApiInstance ? 'CONFIGURADO' : 'NÃO CONFIGURADO'}`);
-
             if (!this.zApiToken || !this.zApiInstance) {
                 console.log('❌ [sendQRCodeCredenciamento] Credenciais Z-API não configuradas');
                 return {
@@ -383,7 +628,6 @@ export class WhatsAppService {
 
             // Converter para string JSON para o QR code
             const qrCodeData = JSON.stringify(qrData);
-            console.log('🔍 [sendQRCodeCredenciamento] QR Data gerado:', qrCodeData);
 
             // Gerar QR code como imagem base64
             const qrCodeImage = await QRCode.toDataURL(qrCodeData, {
@@ -406,7 +650,7 @@ export class WhatsAppService {
             await this.sendMessage(cleanPhone, message);
 
             // Enviar QR code como imagem
-            const imageResult = await this.sendImageMessage(cleanPhone, qrCodeImage, `QR Code - ${data.alunoNome}`);
+            const imageResult = await this.sendImageMessage(cleanPhone, qrCodeImage, `QR Code - ${data.treinamentoNome} - ${data.alunoNome}`);
 
             console.log(`✅ QR code enviado para ${data.alunoNome} (${cleanPhone})`);
             return imageResult;
@@ -467,9 +711,7 @@ export class WhatsAppService {
 💡 *Como usar:*
 • Salve a imagem do QR code
 • Use na próxima vez para credenciamento rápido
-• Apresente na entrada do evento
-
-🎓 Obrigado por participar do IAM Control!`;
+• Apresente na entrada do evento`;
     }
 
     private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string): string {

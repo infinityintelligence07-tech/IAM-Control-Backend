@@ -9,6 +9,8 @@ import {
     DocumentosFilterDto,
     CriarContratoZapSignDto,
     RespostaContratoZapSignDto,
+    CriarTermoZapSignDto,
+    RespostaTermoZapSignDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { Request } from 'express';
@@ -158,6 +160,16 @@ export class DocumentosController {
         console.log('Criando contrato no ZapSign para aluno:', criarContratoDto.id_aluno);
         const userId = (req.user as any)?.sub;
         return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
+    }
+
+    @Post('zapsign/criar-termo')
+    @UseGuards(JwtAuthGuard)
+    async criarTermoZapSign(@Body() criarTermoDto: CriarTermoZapSignDto, @Req() req: Request): Promise<RespostaTermoZapSignDto> {
+        console.log('=== CRIANDO TERMO NO ZAPSIGN ===');
+        console.log('Dados recebidos:', JSON.stringify(criarTermoDto, null, 2));
+        console.log('Criando termo no ZapSign para aluno:', criarTermoDto.id_aluno);
+        const userId = (req.user as any)?.sub;
+        return this.documentosService.criarTermoZapSign(criarTermoDto, userId);
     }
 
     // Endpoint público para teste (TEMPORÁRIO)
@@ -333,6 +345,57 @@ export class DocumentosController {
         } catch (error) {
             console.error('Erro ao enviar email:', error);
             throw error;
+        }
+    }
+
+    @Post('sincronizar-status-zapsign/:contratoId')
+    @UseGuards(JwtAuthGuard)
+    async sincronizarStatusZapSign(@Param('contratoId') contratoId: string): Promise<{
+        message: string;
+        status: string;
+        assinaturasCompletas: number;
+        totalAssinaturas: number;
+    }> {
+        return await this.documentosService.sincronizarStatusZapSign(contratoId);
+    }
+
+    @Post('sincronizar-todos-status-zapsign')
+    @UseGuards(JwtAuthGuard)
+    async sincronizarTodosStatusZapSign(): Promise<{
+        message: string;
+        sincronizados: number;
+        erros: number;
+    }> {
+        return await this.documentosService.sincronizarTodosStatusZapSign();
+    }
+
+    /**
+     * Webhook do ZapSign - recebe notificações quando um documento é assinado
+     * Este endpoint não requer autenticação JWT pois é chamado pelo ZapSign
+     */
+    @Post('webhook-zapsign')
+    async webhookZapSign(@Body() body: any): Promise<{ message: string }> {
+        try {
+            console.log('Webhook ZapSign recebido:', JSON.stringify(body, null, 2));
+
+            // O ZapSign pode enviar diferentes tipos de eventos
+            // Vamos procurar pelo document_id ou token do documento
+            const documentId = body.document_id || body.token || body.document?.token || body.document?.id;
+
+            if (!documentId) {
+                console.warn('Webhook ZapSign sem document_id');
+                return { message: 'Webhook recebido, mas sem document_id' };
+            }
+
+            // Sincronizar o status usando o document_id do ZapSign
+            // O método sincronizarStatusZapSignPorDocumentId será criado no service
+            await this.documentosService.sincronizarStatusZapSignPorDocumentId(documentId);
+
+            return { message: 'Status sincronizado com sucesso' };
+        } catch (error: any) {
+            console.error('Erro ao processar webhook do ZapSign:', error);
+            // Não lançar erro para não quebrar o webhook do ZapSign
+            return { message: `Erro ao processar webhook: ${error.message}` };
         }
     }
 }

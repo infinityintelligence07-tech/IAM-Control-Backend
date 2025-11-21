@@ -17,12 +17,16 @@ import {
     CriarContratoZapSignDto,
     RespostaContratoZapSignDto,
     AtualizarStatusContratoDto,
+    CriarTermoZapSignDto,
+    RespostaTermoZapSignDto,
 } from './dto/documentos.dto';
 import { ETipoDocumento, EFormasPagamento } from '@/modules/config/entities/enum';
 import { ZapSignService } from './zapsign.service';
 import { ContractTemplateService } from './contract-template.service';
-import * as PDFDocument from 'pdfkit';
+import { TermTemplateService } from './term-template.service';
+import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
+import { TurmasService } from '../turmas/turmas.service';
 
 @Injectable()
 export class DocumentosService {
@@ -30,7 +34,9 @@ export class DocumentosService {
         private readonly uow: UnitOfWorkService,
         private readonly zapSignService: ZapSignService,
         private readonly contractTemplateService: ContractTemplateService,
+        private readonly termTemplateService: TermTemplateService,
         private readonly mailService: MailService,
+        private readonly turmasService: TurmasService,
     ) {}
 
     async createDocumento(createDocumentoDto: CreateDocumentoDto, userId?: number): Promise<DocumentoResponseDto> {
@@ -228,13 +234,17 @@ export class DocumentosService {
 
             // Se não existir, criar um registro temporário
             if (!turmaAluno) {
+                const idTurmaParaCracha = criarContratoDto.id_turma_bonus ? parseInt(criarContratoDto.id_turma_bonus) : 1;
+                // Gerar número de crachá único para esta turma
+                const numeroCracha = await this.turmasService.generateUniqueCrachaNumber(idTurmaParaCracha);
+
                 turmaAluno = this.uow.turmasAlunosRP.create({
                     id_aluno: criarContratoDto.id_aluno,
-                    id_turma: 1, // Turma padrão temporária
+                    id_turma: idTurmaParaCracha,
                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO, // Origem padrão
                     status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN, // Status padrão
                     nome_cracha: aluno.nome_cracha || aluno.nome,
-                    numero_cracha: 'TEMP001', // Número temporário
+                    numero_cracha: numeroCracha,
                 });
                 turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
             }
@@ -248,16 +258,65 @@ export class DocumentosService {
                 },
             });
 
-            // Se não existir, criar um registro temporário
+            // Se não existir, verificar se há um registro deletado para reativar
             if (!turmaAlunoTreinamento) {
-                turmaAlunoTreinamento = this.uow.turmasAlunosTreinamentosRP.create({
-                    id_turma_aluno: turmaAluno.id,
-                    id_treinamento: parseInt(criarContratoDto.id_treinamento),
-                    preco_treinamento: treinamento.preco_treinamento || 0,
-                    forma_pgto: [],
-                    preco_total_pago: 0,
+                const registroDeletado = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                    where: {
+                        id_turma_aluno: turmaAluno.id,
+                        id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                    },
                 });
-                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
+
+                if (registroDeletado && registroDeletado.deletado_em) {
+                    // Reativar o registro deletado
+                    registroDeletado.deletado_em = null;
+                    registroDeletado.atualizado_em = new Date();
+                    if (userId) {
+                        registroDeletado.atualizado_por = userId;
+                    }
+                    turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroDeletado);
+                } else {
+                    // Criar um novo registro
+                    try {
+                        turmaAlunoTreinamento = this.uow.turmasAlunosTreinamentosRP.create({
+                            id_turma_aluno: turmaAluno.id,
+                            id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                            preco_treinamento: treinamento.preco_treinamento || 0,
+                            forma_pgto: [],
+                            preco_total_pago: 0,
+                        });
+                        turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
+                    } catch (error) {
+                        // Se houver erro de constraint única, tentar reativar registro deletado
+                        if (
+                            typeof error === 'object' &&
+                            error !== null &&
+                            'code' in error &&
+                            ((error as any).code === '23505' || (error as any).driverError?.code === '23505')
+                        ) {
+                            const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                                where: {
+                                    id_turma_aluno: turmaAluno.id,
+                                    id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                                },
+                            });
+
+                            if (registroExistente && registroExistente.deletado_em) {
+                                // Reativar o registro deletado
+                                registroExistente.deletado_em = null;
+                                registroExistente.atualizado_em = new Date();
+                                if (userId) {
+                                    registroExistente.atualizado_por = userId;
+                                }
+                                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroExistente);
+                            } else {
+                                throw error;
+                            }
+                        } else {
+                            throw error;
+                        }
+                    }
+                }
             }
 
             // Preparar dados para o template usando os dados do DTO
@@ -274,25 +333,6 @@ export class DocumentosService {
                     action: 'sign' as const,
                 },
             ];
-
-            // Adicionar testemunhas se fornecidas
-            if (criarContratoDto.testemunha_um_nome && criarContratoDto.testemunha_um_cpf) {
-                signers.push({
-                    name: criarContratoDto.testemunha_um_nome,
-                    email: criarContratoDto.testemunha_um_email || '',
-                    phone: criarContratoDto.testemunha_um_telefone || '',
-                    action: 'sign' as const,
-                });
-            }
-
-            if (criarContratoDto.testemunha_dois_nome && criarContratoDto.testemunha_dois_cpf) {
-                signers.push({
-                    name: criarContratoDto.testemunha_dois_nome,
-                    email: criarContratoDto.testemunha_dois_email || '',
-                    phone: criarContratoDto.testemunha_dois_telefone || '',
-                    action: 'sign' as const,
-                });
-            }
 
             // Criar documento no ZapSign usando o PDF gerado
             const documentData = {
@@ -386,22 +426,25 @@ export class DocumentosService {
                     valores_bonus: bonusData.valores_bonus,
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
-                    testemunhas: {
-                        testemunha_um: {
-                            nome: criarContratoDto.testemunha_um_nome || '',
-                            cpf: criarContratoDto.testemunha_um_cpf || '',
-                            email: criarContratoDto.testemunha_um_email || '',
-                            telefone: criarContratoDto.testemunha_um_telefone || '',
-                            id: criarContratoDto.testemunha_um_id || null,
-                        },
-                        testemunha_dois: {
-                            nome: criarContratoDto.testemunha_dois_nome || '',
-                            cpf: criarContratoDto.testemunha_dois_cpf || '',
-                            email: criarContratoDto.testemunha_dois_email || '',
-                            telefone: criarContratoDto.testemunha_dois_telefone || '',
-                            id: criarContratoDto.testemunha_dois_id || null,
-                        },
-                    },
+                    testemunhas:
+                        criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome
+                            ? {
+                                  testemunha_um: {
+                                      nome: criarContratoDto.testemunha_um_nome || '',
+                                      cpf: criarContratoDto.testemunha_um_cpf || '',
+                                      email: criarContratoDto.testemunha_um_email || '',
+                                      telefone: criarContratoDto.testemunha_um_telefone || '',
+                                      id: criarContratoDto.testemunha_um_id || null,
+                                  },
+                                  testemunha_dois: {
+                                      nome: criarContratoDto.testemunha_dois_nome || '',
+                                      cpf: criarContratoDto.testemunha_dois_cpf || '',
+                                      email: criarContratoDto.testemunha_dois_email || '',
+                                      telefone: criarContratoDto.testemunha_dois_telefone || '',
+                                      id: criarContratoDto.testemunha_dois_id || null,
+                                  },
+                              }
+                            : undefined,
                 },
                 criado_por: userId,
                 atualizado_por: userId,
@@ -514,22 +557,25 @@ export class DocumentosService {
             bonus_selecionados: criarContratoDto.tipos_bonus || [],
             valores_bonus: bonusData.valores_bonus,
             campos_variaveis: bonusData.campos_variaveis,
-            testemunhas: {
-                testemunha_um: {
-                    nome: criarContratoDto.testemunha_um_nome || '',
-                    cpf: criarContratoDto.testemunha_um_cpf || '',
-                    email: criarContratoDto.testemunha_um_email || '',
-                    telefone: criarContratoDto.testemunha_um_telefone || '',
-                    id: criarContratoDto.testemunha_um_id || null,
-                },
-                testemunha_dois: {
-                    nome: criarContratoDto.testemunha_dois_nome || '',
-                    cpf: criarContratoDto.testemunha_dois_cpf || '',
-                    email: criarContratoDto.testemunha_dois_email || '',
-                    telefone: criarContratoDto.testemunha_dois_telefone || '',
-                    id: criarContratoDto.testemunha_dois_id || null,
-                },
-            },
+            testemunhas:
+                criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome
+                    ? {
+                          testemunha_um: {
+                              nome: criarContratoDto.testemunha_um_nome || '',
+                              cpf: criarContratoDto.testemunha_um_cpf || '',
+                              email: criarContratoDto.testemunha_um_email || '',
+                              telefone: criarContratoDto.testemunha_um_telefone || '',
+                              id: criarContratoDto.testemunha_um_id || null,
+                          },
+                          testemunha_dois: {
+                              nome: criarContratoDto.testemunha_dois_nome || '',
+                              cpf: criarContratoDto.testemunha_dois_cpf || '',
+                              email: criarContratoDto.testemunha_dois_email || '',
+                              telefone: criarContratoDto.testemunha_dois_telefone || '',
+                              id: criarContratoDto.testemunha_dois_id || null,
+                          },
+                      }
+                    : undefined,
             observacoes: criarContratoDto.observacoes || '',
             clausulas: clausulas,
         };
@@ -1310,12 +1356,14 @@ export class DocumentosService {
                 });
             });
 
-            // Usar query builder para buscar contrato pelo zapsign_document_id específico
-            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP
+            // Buscar contrato pelo zapsign_document_id ou por ID numérico com relacionamentos
+            let contrato = await this.uow.turmasAlunosTreinamentosContratosRP
                 .createQueryBuilder('contrato')
+                .leftJoinAndSelect('contrato.id_turma_aluno_treinamento_fk', 'turma_aluno_treinamento')
+                .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
+                .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
                 .where('contrato.deletado_em IS NULL')
                 .andWhere('contrato.zapsign_document_id = :documentoId', { documentoId })
-                .select(['contrato.id', 'contrato.zapsign_document_id', 'contrato.dados_contrato'])
                 .getOne();
 
             if (!contrato) {
@@ -1323,51 +1371,222 @@ export class DocumentosService {
                 console.log('Tentando buscar por ID numérico...');
 
                 // Tentar buscar por ID numérico também
-                const contratoPorId = await this.uow.turmasAlunosTreinamentosContratosRP
+                contrato = await this.uow.turmasAlunosTreinamentosContratosRP
                     .createQueryBuilder('contrato')
+                    .leftJoinAndSelect('contrato.id_turma_aluno_treinamento_fk', 'turma_aluno_treinamento')
+                    .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
+                    .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
                     .where('contrato.deletado_em IS NULL')
                     .andWhere('contrato.id = :documentoId', { documentoId: parseInt(documentoId) })
-                    .select(['contrato.id', 'contrato.dados_contrato'])
                     .getOne();
 
-                if (contratoPorId) {
-                    console.log('Contrato encontrado por ID numérico:', contratoPorId.id);
-                    // Usar o contrato encontrado por ID
-                    const contratoEncontrado = contratoPorId;
-
-                    // Cancelar documento no ZapSign usando o zapsign_document_id específico
-                    const documentIdZapSign = contratoEncontrado.zapsign_document_id || contratoEncontrado.dados_contrato?.zapsign_document_id;
-                    if (documentIdZapSign) {
-                        await this.zapSignService.cancelDocument(documentIdZapSign);
-                        console.log('Documento cancelado no ZapSign com sucesso');
-                    }
-
-                    // Fazer soft delete no banco
-                    await this.uow.turmasAlunosTreinamentosContratosRP.update(contratoEncontrado.id, {
-                        deletado_em: new Date(),
-                        atualizado_por: userId,
-                    });
-
-                    console.log('Contrato removido do banco (soft delete)');
-                    return { message: 'Documento cancelado e removido com sucesso' };
-                } else {
+                if (!contrato) {
                     throw new NotFoundException('Contrato não encontrado no banco de dados');
                 }
             }
 
             console.log('Contrato encontrado no banco:', contrato.id);
 
-            // Cancelar documento no ZapSign
-            await this.zapSignService.cancelDocument(documentoId);
-            console.log('Documento cancelado no ZapSign com sucesso');
+            // Buscar dados do contrato para identificar alunos relacionados
+            const dadosContrato = contrato.dados_contrato || {};
+            const alunoContrato = dadosContrato.aluno || {};
+            const idAlunoComprador = alunoContrato.id || alunoContrato.id_aluno;
+            const emailComprador = alunoContrato.email || '';
 
-            // Fazer soft delete no banco (atualizar deleted_em)
+            console.log('📋 Dados do contrato:', {
+                idAlunoComprador,
+                emailComprador,
+                nomeComprador: alunoContrato.nome,
+            });
+
+            // Lista de IDs de turmas_alunos para remover
+            const idsTurmasAlunosParaRemover: string[] = [];
+
+            // 1. Buscar o aluno comprador na turma relacionada ao contrato
+            if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk) {
+                const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk;
+                if (turmaAlunoComprador && turmaAlunoComprador.id) {
+                    idsTurmasAlunosParaRemover.push(turmaAlunoComprador.id);
+                    console.log('✅ Aluno comprador identificado na turma:', turmaAlunoComprador.id);
+                }
+            }
+
+            // 2. Buscar alunos convidados (criados com email @convidado.temp ou nome contendo "Convidado")
+            if (emailComprador || alunoContrato.nome) {
+                const emailBase = emailComprador ? emailComprador.split('@')[0] : '';
+                const nomeComprador = alunoContrato.nome || '';
+
+                // Buscar por email @convidado.temp
+                if (emailBase) {
+                    const alunosConvidadosEmail = await this.uow.alunosRP
+                        .createQueryBuilder('aluno')
+                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.conv%` })
+                        .andWhere('aluno.email LIKE :suffix', { suffix: '%@convidado.temp' })
+                        .andWhere('aluno.deletado_em IS NULL')
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${alunosConvidadosEmail.length} alunos convidados por email`);
+
+                    for (const alunoConvidado of alunosConvidadosEmail) {
+                        const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
+                            where: {
+                                id_aluno: alunoConvidado.id.toString(),
+                                origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                                deletado_em: null,
+                            },
+                        });
+
+                        for (const turmaAluno of turmasAlunosConvidado) {
+                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                                console.log('✅ Convidado identificado na turma (por email):', turmaAluno.id);
+                            }
+                        }
+                    }
+                }
+
+                // Buscar por nome contendo o nome do comprador + "Convidado"
+                if (nomeComprador) {
+                    // Buscar alunos com nome que contém o nome do comprador e "Convidado"
+                    const alunosConvidadosNome = await this.uow.alunosRP
+                        .createQueryBuilder('aluno')
+                        .where('aluno.nome LIKE :pattern', { pattern: `%${nomeComprador}%Convidado%` })
+                        .andWhere('aluno.deletado_em IS NULL')
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${alunosConvidadosNome.length} alunos convidados por nome`);
+
+                    for (const alunoConvidado of alunosConvidadosNome) {
+                        // Verificar se o email também é de convidado ou se está na mesma turma
+                        const isConvidadoEmail = alunoConvidado.email?.includes('@convidado.temp') || false;
+
+                        if (isConvidadoEmail || nomeComprador) {
+                            const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
+                                where: {
+                                    id_aluno: alunoConvidado.id.toString(),
+                                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                                    deletado_em: null,
+                                },
+                            });
+
+                            for (const turmaAluno of turmasAlunosConvidado) {
+                                if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                                    idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                                    console.log('✅ Convidado identificado na turma (por nome):', turmaAluno.id, alunoConvidado.nome);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Também buscar diretamente na turma por alunos com nome contendo "Convidado" e origem COMPROU_INGRESSO
+                // se tivermos a turma relacionada ao contrato
+                if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma) {
+                    const idTurma = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma;
+
+                    const turmasAlunosConvidados = await this.uow.turmasAlunosRP
+                        .createQueryBuilder('turma_aluno')
+                        .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
+                        .where('turma_aluno.id_turma = :idTurma', { idTurma })
+                        .andWhere('turma_aluno.origem_aluno = :origem', { origem: EOrigemAlunos.COMPROU_INGRESSO })
+                        .andWhere('turma_aluno.deletado_em IS NULL')
+                        .andWhere('(aluno.email LIKE :emailPattern OR aluno.nome LIKE :nomePattern)', {
+                            emailPattern: '%@convidado.temp',
+                            nomePattern: nomeComprador ? `%${nomeComprador}%Convidado%` : '%Convidado%',
+                        })
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${turmasAlunosConvidados.length} alunos convidados na turma ${idTurma}`);
+
+                    for (const turmaAluno of turmasAlunosConvidados) {
+                        if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                            idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                            console.log('✅ Convidado identificado na turma (busca direta):', turmaAluno.id);
+                        }
+                    }
+                }
+            }
+
+            // 3. Buscar alunos bônus (criados com email @bonus.temp ou com id_aluno_bonus)
+            if (idAlunoComprador) {
+                const alunosBonus = await this.uow.turmasAlunosRP.find({
+                    where: {
+                        id_aluno_bonus: idAlunoComprador.toString(),
+                        origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                        deletado_em: null,
+                    },
+                });
+
+                console.log(`🔍 Encontrados ${alunosBonus.length} alunos bônus por id_aluno_bonus`);
+
+                for (const turmaAluno of alunosBonus) {
+                    if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                        idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                        console.log('✅ Bônus identificado na turma:', turmaAluno.id);
+                    }
+                }
+
+                // Também buscar por email @bonus.temp
+                if (emailComprador) {
+                    const emailBase = emailComprador.split('@')[0];
+                    const alunosBonusEmail = await this.uow.alunosRP
+                        .createQueryBuilder('aluno')
+                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.bon%.%bonus.temp` })
+                        .andWhere('aluno.deletado_em IS NULL')
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${alunosBonusEmail.length} alunos bônus por email`);
+
+                    for (const alunoBonus of alunosBonusEmail) {
+                        const turmasAlunosBonus = await this.uow.turmasAlunosRP.find({
+                            where: {
+                                id_aluno: alunoBonus.id.toString(),
+                                origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                                deletado_em: null,
+                            },
+                        });
+
+                        for (const turmaAluno of turmasAlunosBonus) {
+                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                                console.log('✅ Bônus identificado na turma:', turmaAluno.id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Remover todos os alunos identificados das turmas
+            console.log(`🗑️ Removendo ${idsTurmasAlunosParaRemover.length} aluno(s) das turmas...`);
+            for (const idTurmaAluno of idsTurmasAlunosParaRemover) {
+                try {
+                    await this.turmasService.removeAlunoTurma(idTurmaAluno);
+                    console.log(`✅ Aluno removido da turma: ${idTurmaAluno}`);
+                } catch (error) {
+                    console.error(`⚠️ Erro ao remover aluno ${idTurmaAluno} da turma:`, error);
+                    // Continuar removendo os outros mesmo se um falhar
+                }
+            }
+
+            // Cancelar documento no ZapSign
+            const documentIdZapSign = contrato.zapsign_document_id || contrato.dados_contrato?.zapsign_document_id || documentoId;
+            if (documentIdZapSign) {
+                try {
+                    await this.zapSignService.cancelDocument(documentIdZapSign);
+                    console.log('Documento cancelado no ZapSign com sucesso');
+                } catch (zapSignError) {
+                    console.error('Erro ao cancelar no ZapSign:', zapSignError);
+                    // Continuar mesmo se falhar na Zapsign
+                }
+            }
+
+            // Fazer soft delete no banco
             await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
                 deletado_em: new Date(),
                 atualizado_por: userId,
             });
 
-            console.log('Contrato removido do banco (soft delete)');
+            console.log('✅ Contrato removido do banco (soft delete)');
 
             return { message: 'Documento cancelado e removido com sucesso' };
         } catch (error) {
@@ -1384,12 +1603,14 @@ export class DocumentosService {
             console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
             console.log('ID do contrato:', contratoId);
 
-            // Buscar o contrato no banco de dados
+            // Buscar o contrato no banco de dados com relacionamentos
             const contrato = await this.uow.turmasAlunosTreinamentosContratosRP
                 .createQueryBuilder('contrato')
+                .leftJoinAndSelect('contrato.id_turma_aluno_treinamento_fk', 'turma_aluno_treinamento')
+                .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
+                .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
                 .where('contrato.deletado_em IS NULL')
                 .andWhere('contrato.id = :contratoId', { contratoId: parseInt(contratoId) })
-                .select(['contrato.id', 'contrato.zapsign_document_id', 'contrato.dados_contrato'])
                 .getOne();
 
             if (!contrato) {
@@ -1397,6 +1618,188 @@ export class DocumentosService {
             }
 
             console.log('Contrato encontrado no banco:', contrato.id);
+
+            // Buscar dados do contrato para identificar alunos relacionados
+            const dadosContrato = contrato.dados_contrato || {};
+            const alunoContrato = dadosContrato.aluno || {};
+            const idAlunoComprador = alunoContrato.id || alunoContrato.id_aluno;
+            const emailComprador = alunoContrato.email || '';
+
+            console.log('📋 Dados do contrato:', {
+                idAlunoComprador,
+                emailComprador,
+                nomeComprador: alunoContrato.nome,
+            });
+
+            // Lista de IDs de turmas_alunos para remover
+            const idsTurmasAlunosParaRemover: string[] = [];
+
+            // 1. Buscar o aluno comprador na turma relacionada ao contrato
+            if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk) {
+                const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk;
+                if (turmaAlunoComprador && turmaAlunoComprador.id) {
+                    idsTurmasAlunosParaRemover.push(turmaAlunoComprador.id);
+                    console.log('✅ Aluno comprador identificado na turma:', turmaAlunoComprador.id);
+                }
+            }
+
+            // 2. Buscar alunos convidados (criados com email @convidado.temp ou nome contendo "Convidado")
+            if (emailComprador || alunoContrato.nome) {
+                const emailBase = emailComprador ? emailComprador.split('@')[0] : '';
+                const nomeComprador = alunoContrato.nome || '';
+
+                // Buscar por email @convidado.temp
+                if (emailBase) {
+                    const alunosConvidadosEmail = await this.uow.alunosRP
+                        .createQueryBuilder('aluno')
+                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.conv%` })
+                        .andWhere('aluno.email LIKE :suffix', { suffix: '%@convidado.temp' })
+                        .andWhere('aluno.deletado_em IS NULL')
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${alunosConvidadosEmail.length} alunos convidados por email`);
+
+                    for (const alunoConvidado of alunosConvidadosEmail) {
+                        const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
+                            where: {
+                                id_aluno: alunoConvidado.id.toString(),
+                                origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                                deletado_em: null,
+                            },
+                        });
+
+                        for (const turmaAluno of turmasAlunosConvidado) {
+                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                                console.log('✅ Convidado identificado na turma (por email):', turmaAluno.id);
+                            }
+                        }
+                    }
+                }
+
+                // Buscar por nome contendo o nome do comprador + "Convidado"
+                if (nomeComprador) {
+                    // Buscar alunos com nome que contém o nome do comprador e "Convidado"
+                    const alunosConvidadosNome = await this.uow.alunosRP
+                        .createQueryBuilder('aluno')
+                        .where('aluno.nome LIKE :pattern', { pattern: `%${nomeComprador}%Convidado%` })
+                        .andWhere('aluno.deletado_em IS NULL')
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${alunosConvidadosNome.length} alunos convidados por nome`);
+
+                    for (const alunoConvidado of alunosConvidadosNome) {
+                        // Verificar se o email também é de convidado ou se está na mesma turma
+                        const isConvidadoEmail = alunoConvidado.email?.includes('@convidado.temp') || false;
+
+                        if (isConvidadoEmail || nomeComprador) {
+                            const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
+                                where: {
+                                    id_aluno: alunoConvidado.id.toString(),
+                                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                                    deletado_em: null,
+                                },
+                            });
+
+                            for (const turmaAluno of turmasAlunosConvidado) {
+                                if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                                    idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                                    console.log('✅ Convidado identificado na turma (por nome):', turmaAluno.id, alunoConvidado.nome);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Também buscar diretamente na turma por alunos com nome contendo "Convidado" e origem COMPROU_INGRESSO
+                // se tivermos a turma relacionada ao contrato
+                if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma) {
+                    const idTurma = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma;
+
+                    const turmasAlunosConvidados = await this.uow.turmasAlunosRP
+                        .createQueryBuilder('turma_aluno')
+                        .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
+                        .where('turma_aluno.id_turma = :idTurma', { idTurma })
+                        .andWhere('turma_aluno.origem_aluno = :origem', { origem: EOrigemAlunos.COMPROU_INGRESSO })
+                        .andWhere('turma_aluno.deletado_em IS NULL')
+                        .andWhere('(aluno.email LIKE :emailPattern OR aluno.nome LIKE :nomePattern)', {
+                            emailPattern: '%@convidado.temp',
+                            nomePattern: nomeComprador ? `%${nomeComprador}%Convidado%` : '%Convidado%',
+                        })
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${turmasAlunosConvidados.length} alunos convidados na turma ${idTurma}`);
+
+                    for (const turmaAluno of turmasAlunosConvidados) {
+                        if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                            idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                            console.log('✅ Convidado identificado na turma (busca direta):', turmaAluno.id);
+                        }
+                    }
+                }
+            }
+
+            // 3. Buscar alunos bônus (criados com email @bonus.temp ou com id_aluno_bonus)
+            if (idAlunoComprador) {
+                // Buscar por id_aluno_bonus
+                const alunosBonus = await this.uow.turmasAlunosRP.find({
+                    where: {
+                        id_aluno_bonus: idAlunoComprador.toString(),
+                        origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                        deletado_em: null,
+                    },
+                });
+
+                console.log(`🔍 Encontrados ${alunosBonus.length} alunos bônus por id_aluno_bonus`);
+
+                for (const turmaAluno of alunosBonus) {
+                    if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                        idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                        console.log('✅ Bônus identificado na turma:', turmaAluno.id);
+                    }
+                }
+
+                // Também buscar por email @bonus.temp
+                if (emailComprador) {
+                    const emailBase = emailComprador.split('@')[0];
+                    const alunosBonusEmail = await this.uow.alunosRP
+                        .createQueryBuilder('aluno')
+                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.bon%.%bonus.temp` })
+                        .andWhere('aluno.deletado_em IS NULL')
+                        .getMany();
+
+                    console.log(`🔍 Encontrados ${alunosBonusEmail.length} alunos bônus por email`);
+
+                    for (const alunoBonus of alunosBonusEmail) {
+                        const turmasAlunosBonus = await this.uow.turmasAlunosRP.find({
+                            where: {
+                                id_aluno: alunoBonus.id.toString(),
+                                origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                                deletado_em: null,
+                            },
+                        });
+
+                        for (const turmaAluno of turmasAlunosBonus) {
+                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                                console.log('✅ Bônus identificado na turma:', turmaAluno.id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Remover todos os alunos identificados das turmas
+            console.log(`🗑️ Removendo ${idsTurmasAlunosParaRemover.length} aluno(s) das turmas...`);
+            for (const idTurmaAluno of idsTurmasAlunosParaRemover) {
+                try {
+                    await this.turmasService.removeAlunoTurma(idTurmaAluno);
+                    console.log(`✅ Aluno removido da turma: ${idTurmaAluno}`);
+                } catch (error) {
+                    console.error(`⚠️ Erro ao remover aluno ${idTurmaAluno} da turma:`, error);
+                    // Continuar removendo os outros mesmo se um falhar
+                }
+            }
 
             // Remover documento da Zapsign se existir
             const documentIdZapSign = contrato.zapsign_document_id || contrato.dados_contrato?.zapsign_document_id;
@@ -1416,7 +1819,7 @@ export class DocumentosService {
                 atualizado_por: userId,
             });
 
-            console.log('Contrato excluído com sucesso');
+            console.log('✅ Contrato excluído com sucesso');
             return { message: 'Contrato excluído com sucesso' };
         } catch (error) {
             console.error('Erro ao excluir contrato:', error);
@@ -2049,6 +2452,525 @@ export class DocumentosService {
 
             throw new BadRequestException('Erro ao enviar email de contrato. Verifique as configurações MAIL_* no servidor.');
         }
+    }
+
+    async criarTermoZapSign(criarTermoDto: CriarTermoZapSignDto, userId?: number): Promise<RespostaTermoZapSignDto> {
+        try {
+            console.log('=== CRIAR TERMO ZAPSIGN - INÍCIO ===');
+            console.log('criarTermoDto:', JSON.stringify(criarTermoDto, null, 2));
+
+            // Buscar dados do aluno
+            const aluno = await this.uow.alunosRP.findOne({
+                where: { id: parseInt(criarTermoDto.id_aluno), deletado_em: null },
+                relations: ['id_polo_fk'],
+            });
+
+            if (!aluno) {
+                throw new NotFoundException('Aluno não encontrado');
+            }
+
+            // Buscar cláusulas do banco de dados se template_id foi fornecido
+            let clausulas = '';
+            if (criarTermoDto.template_id) {
+                const documento = await this.uow.documentosRP.findOne({
+                    where: { id: parseInt(criarTermoDto.template_id), deletado_em: null },
+                });
+                clausulas = documento?.clausulas || criarTermoDto.clausulas || '';
+            } else {
+                clausulas = criarTermoDto.clausulas || '';
+            }
+
+            // Preparar dados para o template do termo
+            const templateData = {
+                aluno: {
+                    id: aluno.id,
+                    nome: aluno.nome,
+                    cpf: aluno.cpf,
+                    email: aluno.email,
+                    telefone_um: aluno.telefone_um,
+                    logradouro: aluno.logradouro,
+                    numero: aluno.numero,
+                    bairro: aluno.bairro,
+                    cidade: aluno.cidade,
+                    estado: aluno.estado,
+                    cep: aluno.cep,
+                },
+                termo: {
+                    titulo: criarTermoDto.termo_titulo,
+                    texto_introducao: criarTermoDto.texto_introducao || '',
+                    clausulas: clausulas,
+                    possui_testemunhas: criarTermoDto.possui_testemunhas || false,
+                    local_assinatura: criarTermoDto.local_assinatura || 'Americana/SP',
+                    observacoes: criarTermoDto.observacoes || '',
+                },
+                testemunhas: {
+                    testemunha_um: {
+                        nome: criarTermoDto.testemunha_um_nome || '',
+                        cpf: criarTermoDto.testemunha_um_cpf || '',
+                        email: criarTermoDto.testemunha_um_email || '',
+                    },
+                    testemunha_dois: {
+                        nome: criarTermoDto.testemunha_dois_nome || '',
+                        cpf: criarTermoDto.testemunha_dois_cpf || '',
+                        email: criarTermoDto.testemunha_dois_email || '',
+                    },
+                },
+                campos_variaveis: criarTermoDto.campos_variaveis || {},
+            };
+
+            // Gerar PDF do termo usando o template
+            const pdfBuffer = await this.generateTermPDF(templateData);
+
+            // Preparar signers
+            const signers = [
+                {
+                    name: aluno.nome,
+                    email: aluno.email,
+                    phone: aluno.telefone_um,
+                    action: 'sign' as const,
+                },
+            ];
+
+            // Adicionar testemunhas se necessário
+            if (criarTermoDto.possui_testemunhas) {
+                if (criarTermoDto.testemunha_um_nome && criarTermoDto.testemunha_um_cpf) {
+                    signers.push({
+                        name: criarTermoDto.testemunha_um_nome,
+                        email: criarTermoDto.testemunha_um_email || '',
+                        phone: '',
+                        action: 'sign' as const,
+                    });
+                }
+
+                if (criarTermoDto.testemunha_dois_nome && criarTermoDto.testemunha_dois_cpf) {
+                    signers.push({
+                        name: criarTermoDto.testemunha_dois_nome,
+                        email: criarTermoDto.testemunha_dois_email || '',
+                        phone: '',
+                        action: 'sign' as const,
+                    });
+                }
+            }
+
+            // Criar documento no ZapSign
+            const documentData = {
+                name: criarTermoDto.termo_titulo,
+                signers: signers,
+                message: 'Por favor, assine este termo.',
+                sandbox: false,
+                file: pdfBuffer,
+            };
+
+            console.log('Documento termo sendo criado:', documentData.name);
+
+            const zapSignResponse = await this.zapSignService.createDocumentFromFile(documentData);
+
+            // Preparar dados dos signers
+            const signersData = signers.map((signer, index) => ({
+                name: signer.name,
+                email: signer.email || undefined,
+                telefone: signer.phone || undefined,
+                cpf: index === 0 ? aluno.cpf : index === 1 ? criarTermoDto.testemunha_um_cpf : criarTermoDto.testemunha_dois_cpf || '',
+                status: 'pending',
+                signing_url: zapSignResponse.signers.find((s) => s.name === signer.name)?.sign_url || '',
+            }));
+
+            // Preparar status do documento
+            const documentStatus = {
+                status: zapSignResponse.status,
+                created_at: zapSignResponse.created_at,
+                document_id: zapSignResponse.token,
+                signing_url: zapSignResponse.signers[0]?.sign_url || '',
+            };
+
+            // Para termos, precisamos criar um registro temporário de turma_aluno_treinamento
+            // Buscar ou criar registro de TurmasAlunos primeiro
+            let turmaAluno = await this.uow.turmasAlunosRP.findOne({
+                where: {
+                    id_aluno: criarTermoDto.id_aluno,
+                    deletado_em: null,
+                },
+            });
+
+            // Se não existir, criar um registro temporário
+            if (!turmaAluno) {
+                const idTurmaParaCracha = 1; // Turma padrão temporária
+                // Gerar número de crachá único para esta turma
+                const numeroCracha = await this.turmasService.generateUniqueCrachaNumber(idTurmaParaCracha);
+
+                turmaAluno = this.uow.turmasAlunosRP.create({
+                    id_aluno: criarTermoDto.id_aluno,
+                    id_turma: idTurmaParaCracha,
+                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                    status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                    nome_cracha: aluno.nome_cracha || aluno.nome,
+                    numero_cracha: numeroCracha,
+                });
+                turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
+            }
+
+            // Buscar um treinamento válido ou usar um existente
+            const treinamentoParaTermo = await this.uow.treinamentosRP.findOne({
+                where: { deletado_em: null },
+                order: { id: 'ASC' },
+            });
+
+            // Criar registro temporário de TurmasAlunosTreinamentos se não existir
+            let turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                where: {
+                    id_turma_aluno: turmaAluno.id,
+                    deletado_em: null,
+                },
+            });
+
+            if (!turmaAlunoTreinamento && treinamentoParaTermo) {
+                // Verificar se há um registro deletado para reativar
+                const registroDeletado = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                    where: {
+                        id_turma_aluno: turmaAluno.id,
+                        id_treinamento: treinamentoParaTermo.id,
+                    },
+                });
+
+                if (registroDeletado && registroDeletado.deletado_em) {
+                    // Reativar o registro deletado
+                    registroDeletado.deletado_em = null;
+                    registroDeletado.atualizado_em = new Date();
+                    if (userId) {
+                        registroDeletado.atualizado_por = userId;
+                    }
+                    turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroDeletado);
+                } else {
+                    // Criar um novo registro
+                    try {
+                        turmaAlunoTreinamento = this.uow.turmasAlunosTreinamentosRP.create({
+                            id_turma_aluno: turmaAluno.id,
+                            id_treinamento: treinamentoParaTermo.id,
+                            preco_treinamento: 0,
+                            forma_pgto: [],
+                            preco_total_pago: 0,
+                        });
+                        turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
+                    } catch (error) {
+                        // Se houver erro de constraint única, tentar reativar registro deletado
+                        if (
+                            typeof error === 'object' &&
+                            error !== null &&
+                            'code' in error &&
+                            ((error as any).code === '23505' || (error as any).driverError?.code === '23505')
+                        ) {
+                            const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                                where: {
+                                    id_turma_aluno: turmaAluno.id,
+                                    id_treinamento: treinamentoParaTermo.id,
+                                },
+                            });
+
+                            if (registroExistente && registroExistente.deletado_em) {
+                                // Reativar o registro deletado
+                                registroExistente.deletado_em = null;
+                                registroExistente.atualizado_em = new Date();
+                                if (userId) {
+                                    registroExistente.atualizado_por = userId;
+                                }
+                                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroExistente);
+                            } else {
+                                throw error;
+                            }
+                        } else {
+                            throw error;
+                        }
+                    }
+                }
+            } else if (!turmaAlunoTreinamento) {
+                // Se não houver treinamento, criar um termo sem vínculo completo
+                throw new NotFoundException('Não foi possível criar o termo. Nenhum treinamento disponível.');
+            }
+
+            // Salvar informações do termo no banco de dados
+            const termo = this.uow.turmasAlunosTreinamentosContratosRP.create({
+                id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                id_documento: parseInt(criarTermoDto.template_id),
+                status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                zapsign_document_id: zapSignResponse.token,
+                zapsign_signers_data: signersData,
+                zapsign_document_status: documentStatus,
+                dados_contrato: {
+                    zapsign_document_id: zapSignResponse.token,
+                    zapsign_document_url: zapSignResponse.signers[0]?.sign_url || '',
+                    termo: {
+                        file_url: zapSignResponse.original_file,
+                        id_documento_zapsign: zapSignResponse.token,
+                    },
+                    aluno: {
+                        id: aluno.id,
+                        nome: aluno.nome,
+                        cpf: aluno.cpf,
+                        email: aluno.email,
+                        telefone_um: aluno.telefone_um,
+                        logradouro: aluno.logradouro,
+                        numero: aluno.numero,
+                        bairro: aluno.bairro,
+                        cidade: aluno.cidade,
+                        estado: aluno.estado,
+                        cep: aluno.cep,
+                    },
+                    termo_info: {
+                        titulo: criarTermoDto.termo_titulo,
+                        texto_introducao: criarTermoDto.texto_introducao,
+                        clausulas: criarTermoDto.clausulas,
+                        possui_testemunhas: criarTermoDto.possui_testemunhas,
+                        local_assinatura: criarTermoDto.local_assinatura,
+                        observacoes: criarTermoDto.observacoes,
+                    },
+                    campos_variaveis: criarTermoDto.campos_variaveis || {},
+                    testemunhas: {
+                        testemunha_um: {
+                            nome: criarTermoDto.testemunha_um_nome || '',
+                            cpf: criarTermoDto.testemunha_um_cpf || '',
+                            email: criarTermoDto.testemunha_um_email || '',
+                        },
+                        testemunha_dois: {
+                            nome: criarTermoDto.testemunha_dois_nome || '',
+                            cpf: criarTermoDto.testemunha_dois_cpf || '',
+                            email: criarTermoDto.testemunha_dois_email || '',
+                        },
+                    },
+                },
+                criado_por: userId,
+                atualizado_por: userId,
+            });
+
+            await this.uow.turmasAlunosTreinamentosContratosRP.save(termo);
+
+            return {
+                id: zapSignResponse.token,
+                nome_documento: criarTermoDto.termo_titulo || 'Termo',
+                status: zapSignResponse.status,
+                url_assinatura: zapSignResponse.signers[0]?.sign_url || '',
+                signers: signers.map((signer) => ({
+                    nome: signer.name,
+                    email: signer.email,
+                    status: 'pending',
+                    tipo: 'sign' as const,
+                })),
+                created_at: zapSignResponse.created_at,
+                file_url: zapSignResponse.original_file,
+            };
+        } catch (error: any) {
+            console.error('Erro ao criar termo no ZapSign:', error);
+            throw new BadRequestException(`Erro ao criar termo: ${error.message}`);
+        }
+    }
+
+    /**
+     * Sincroniza o status de assinatura do contrato com o ZapSign
+     * Atualiza os status individuais e determina o status geral do documento
+     */
+    async sincronizarStatusZapSign(contratoId: string): Promise<{
+        message: string;
+        status: string;
+        assinaturasCompletas: number;
+        totalAssinaturas: number;
+    }> {
+        try {
+            // Buscar o contrato
+            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: {
+                    id: contratoId,
+                    deletado_em: null,
+                },
+            });
+
+            if (!contrato) {
+                throw new NotFoundException('Contrato não encontrado');
+            }
+
+            if (!contrato.zapsign_document_id) {
+                throw new BadRequestException('Contrato não possui documento no ZapSign');
+            }
+
+            // Buscar o status atual do documento no ZapSign
+            const zapSignDocument = await this.zapSignService.getDocument(contrato.zapsign_document_id);
+
+            // Atualizar os dados dos signatários
+            const signersData = zapSignDocument.signers.map((signer) => ({
+                name: signer.name,
+                email: signer.email || '',
+                telefone: '',
+                cpf: '',
+                status: signer.status,
+                signing_url: signer.sign_url || '',
+            }));
+
+            // Atualizar o status do documento
+            const documentStatus = {
+                status: zapSignDocument.status,
+                created_at: zapSignDocument.created_at,
+                document_id: zapSignDocument.token,
+                signing_url: zapSignDocument.signers[0]?.sign_url || '',
+            };
+
+            // Contar assinaturas
+            const totalSigners = zapSignDocument.signers.length;
+            const assinaturasCompletas = zapSignDocument.signers.filter((signer) => signer.status === 'signed' || signer.status === 'completed').length;
+
+            // Determinar qual signatário é qual baseado na ordem e nos dados do contrato
+            // Assumindo que o primeiro signatário é sempre o aluno
+            const alunoSigner = zapSignDocument.signers[0];
+            const testemunhaUmSigner = zapSignDocument.signers[1];
+            const testemunhaDoisSigner = zapSignDocument.signers[2];
+
+            // Atualizar status do aluno
+            if (alunoSigner) {
+                if (alunoSigner.status === 'signed' || alunoSigner.status === 'completed') {
+                    // Se for 1 assinatura de 1: ASSINADO
+                    // Se for 1 assinatura de 3 ou mais: PARCIALMENTE_ASSINADO
+                    if (totalSigners === 1) {
+                        contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
+                    } else if (totalSigners > 1 && assinaturasCompletas < totalSigners) {
+                        contrato.status_ass_aluno = EStatusAssinaturasContratos.PARCIALMENTE_ASSINADO;
+                    } else if (assinaturasCompletas === totalSigners) {
+                        contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
+                    } else {
+                        contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINATURA_PENDENTE;
+                    }
+
+                    if (alunoSigner.signed_at) {
+                        contrato.data_ass_aluno = new Date(alunoSigner.signed_at);
+                    }
+                } else {
+                    contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINATURA_PENDENTE;
+                }
+            }
+
+            // Atualizar status da testemunha 1
+            if (testemunhaUmSigner && contrato.testemunha_um) {
+                if (testemunhaUmSigner.status === 'signed' || testemunhaUmSigner.status === 'completed') {
+                    contrato.status_ass_test_um = EStatusAssinaturasContratos.ASSINADO;
+                    if (testemunhaUmSigner.signed_at) {
+                        contrato.data_ass_test_um = new Date(testemunhaUmSigner.signed_at);
+                    }
+                } else {
+                    contrato.status_ass_test_um = EStatusAssinaturasContratos.ASSINATURA_PENDENTE;
+                }
+            }
+
+            // Atualizar status da testemunha 2
+            if (testemunhaDoisSigner && contrato.testemunha_dois) {
+                if (testemunhaDoisSigner.status === 'signed' || testemunhaDoisSigner.status === 'completed') {
+                    contrato.status_ass_test_dois = EStatusAssinaturasContratos.ASSINADO;
+                    if (testemunhaDoisSigner.signed_at) {
+                        contrato.data_ass_test_dois = new Date(testemunhaDoisSigner.signed_at);
+                    }
+                } else {
+                    contrato.status_ass_test_dois = EStatusAssinaturasContratos.ASSINATURA_PENDENTE;
+                }
+            }
+
+            // Atualizar dados do ZapSign no contrato
+            contrato.zapsign_signers_data = signersData;
+            contrato.zapsign_document_status = documentStatus;
+
+            // Salvar as alterações
+            await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+
+            // Determinar mensagem de status
+            let statusMessage = '';
+            if (assinaturasCompletas === totalSigners && totalSigners > 0) {
+                statusMessage = 'Documento totalmente assinado';
+            } else if (assinaturasCompletas > 0 && assinaturasCompletas < totalSigners) {
+                statusMessage = 'Documento parcialmente assinado';
+            } else {
+                statusMessage = 'Documento pendente de assinatura';
+            }
+
+            return {
+                message: statusMessage,
+                status: zapSignDocument.status,
+                assinaturasCompletas,
+                totalAssinaturas: totalSigners,
+            };
+        } catch (error: any) {
+            console.error('Erro ao sincronizar status do ZapSign:', error);
+            throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
+        }
+    }
+
+    /**
+     * Sincroniza o status de um contrato pelo document_id do ZapSign
+     * Usado principalmente por webhooks
+     */
+    async sincronizarStatusZapSignPorDocumentId(zapsignDocumentId: string): Promise<{
+        message: string;
+        status: string;
+        assinaturasCompletas: number;
+        totalAssinaturas: number;
+    }> {
+        try {
+            // Buscar o contrato pelo zapsign_document_id
+            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: {
+                    zapsign_document_id: zapsignDocumentId,
+                    deletado_em: null,
+                },
+            });
+
+            if (!contrato) {
+                throw new NotFoundException(`Contrato não encontrado para document_id: ${zapsignDocumentId}`);
+            }
+
+            return await this.sincronizarStatusZapSign(contrato.id);
+        } catch (error: any) {
+            console.error('Erro ao sincronizar status por document_id:', error);
+            throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
+        }
+    }
+
+    /**
+     * Sincroniza o status de todos os contratos com documentos no ZapSign
+     */
+    async sincronizarTodosStatusZapSign(): Promise<{
+        message: string;
+        sincronizados: number;
+        erros: number;
+    }> {
+        try {
+            // Buscar todos os contratos com documento no ZapSign
+            const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+                where: {
+                    zapsign_document_id: Not(IsNull()),
+                    deletado_em: null,
+                },
+            });
+
+            let sincronizados = 0;
+            let erros = 0;
+
+            for (const contrato of contratos) {
+                try {
+                    await this.sincronizarStatusZapSign(contrato.id);
+                    sincronizados++;
+                } catch (error) {
+                    console.error(`Erro ao sincronizar contrato ${contrato.id}:`, error);
+                    erros++;
+                }
+            }
+
+            return {
+                message: `Sincronização concluída: ${sincronizados} contratos atualizados, ${erros} erros`,
+                sincronizados,
+                erros,
+            };
+        } catch (error: any) {
+            console.error('Erro ao sincronizar todos os status:', error);
+            throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
+        }
+    }
+
+    private async generateTermPDF(templateData: any): Promise<Buffer> {
+        // Usar o novo term template service
+        return await this.termTemplateService.generateTermPDF(templateData);
     }
 
     private mapToResponseDto(documento: Documentos): DocumentoResponseDto {

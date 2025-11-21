@@ -16,6 +16,30 @@ export class ContractTemplateService {
         const campos_variaveis = contrato.dados_contrato?.campos_variaveis;
         const template = contrato.dados_contrato?.template;
 
+        const normalizarTexto = (valor: unknown): string => (typeof valor === 'string' ? valor.toLowerCase() : '');
+
+        const referencias = [
+            normalizarTexto(template?.nome),
+            normalizarTexto(template?.tipo_documento),
+            normalizarTexto(treinamento?.nome),
+            normalizarTexto(treinamento?.treinamento),
+        ];
+
+        const isIPRContract = referencias.some(
+            (texto) => texto?.includes('contrato do ipr') || texto?.includes('imersão prosperar') || texto?.includes('imersao prosperar'),
+        );
+
+        const possuiTestemunhas =
+            Boolean(testemunhas?.testemunha_um?.nome && testemunhas?.testemunha_um?.cpf) ||
+            Boolean(testemunhas?.testemunha_dois?.nome && testemunhas?.testemunha_dois?.cpf);
+
+        const mostrarTestemunhas = possuiTestemunhas && !isIPRContract;
+
+        const possuiBonusRelevante =
+            !isIPRContract &&
+            ((Array.isArray(bonus?.tipos_bonus) && bonus.tipos_bonus.some((tipo: string) => tipo && tipo !== 'nao_aplica' && tipo !== 'nenhum')) ||
+                Object.keys(bonus?.valores_bonus || {}).length > 0);
+
         // Obter a URL absoluta da logo
         const logoUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/images/logo/logo-escuro.png`;
 
@@ -64,6 +88,62 @@ export class ContractTemplateService {
             `;
         };
 
+        const dadosPessoaisHTML = isIPRContract
+            ? `
+              <table class="table">
+                <tr class="table-row">
+                  <td class="table-cell full-width" colspan="2"><strong>Nome Completo:</strong> ${aluno?.nome || '_________________'}</td>
+                </tr>
+                <tr class="table-row">
+                  <td class="table-cell half-width"><strong>Telefone:</strong> ${aluno?.telefone_um || '_________________'}</td>
+                  <td class="table-cell half-width"><strong>E-mail:</strong> ${aluno?.email || '_________________'}</td>
+                </tr>
+              </table>
+            `
+            : `
+              <table class="table">
+                <tr class="table-row">
+                  <td class="table-cell full-width" colspan="2"><strong>Nome Completo:</strong> ${aluno?.nome || '_________________'}</td>
+                </tr>
+                <tr class="table-row">
+                  <td class="table-cell half-width"><strong>CPF/CNPJ:</strong> ${aluno?.cpf || '_________________'}</td>
+                  <td class="table-cell half-width"><strong>Data de Nascimento:</strong> ${(() => {
+                      if (!aluno?.data_nascimento) return '___/___/___';
+                      const dataISO = aluno.data_nascimento;
+                      if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                          const [ano, mes, dia] = dataISO.split('-');
+                          return `${dia}/${mes}/${ano}`;
+                      }
+                      return new Date(dataISO).toLocaleDateString('pt-BR');
+                  })()}</td>
+                </tr>
+                <tr class="table-row">
+                  <td class="table-cell half-width"><strong>WhatsApp:</strong> ${aluno?.telefone_um || '_________________'}</td>
+                  <td class="table-cell half-width"><strong>E-mail:</strong> ${aluno?.email || '_________________'}</td>
+                </tr>
+                <tr class="table-row">
+                  <td class="table-cell full-width" colspan="2"><strong>Endereço:</strong> ${(() => {
+                      const endereco = aluno?.endereco;
+                      if (!endereco) return '_________________';
+
+                      const partes = [];
+                      if (endereco.logradouro) partes.push(endereco.logradouro);
+                      if (endereco.numero) partes.push(endereco.numero);
+                      if (endereco.complemento) partes.push(endereco.complemento);
+                      if (endereco.bairro) partes.push(endereco.bairro);
+
+                      return partes.length > 0 ? partes.join(', ') : '_________________';
+                  })()}</td>
+                </tr>
+                <tr class="table-row">
+                  <td class="table-cell half-width"><strong>Cidade/Estado:</strong> ${
+                      aluno?.endereco?.cidade || '_______________'
+                  } / ${aluno?.endereco?.estado || '________'}</td>
+                  <td class="table-cell half-width"><strong>CEP:</strong> ${aluno?.endereco?.cep || '____________'}</td>
+                </tr>
+              </table>
+            `;
+
         // Função para gerar página de assinaturas
         const generateSignaturePage = (showLogo: boolean = true) => {
             return `
@@ -94,12 +174,11 @@ export class ContractTemplateService {
                   <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
                 </div>
                 
-                <!-- Espaço entre assinatura do aluno e testemunhas -->
+                ${
+                    mostrarTestemunhas
+                        ? `
                 <div style="margin-bottom: 15px;"></div>
-                
-                <!-- Testemunhas com linhas de assinatura individuais -->
                 <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
-                  <!-- Testemunha 1 -->
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                       ${
@@ -115,8 +194,6 @@ export class ContractTemplateService {
                     Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
                     CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
                   </div>
-                  
-                  <!-- Testemunha 2 -->
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                       ${
@@ -132,7 +209,9 @@ export class ContractTemplateService {
                     Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
                     CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
                   </div>
-                </div>
+                </div>`
+                        : ''
+                }
                 
                 <!-- Footer da Página com Logo -->
                 ${generateFooter(showLogo)}
@@ -261,45 +340,44 @@ export class ContractTemplateService {
                             <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
                           </div>
                           
-                          <!-- Espaço entre assinatura do aluno e testemunhas -->
-                          <div style="margin-bottom: 15px;"></div>
-                          
-                          <!-- Testemunhas com linhas de assinatura individuais -->
-                          <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
-                            <!-- Testemunha 1 -->
-                            <div style="flex: 1; line-height: 1;">
-                              <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                                ${
-                                    contrato.assinatura_testemunha_um_base64
-                                        ? `
-                                  <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_um_base64)}" alt="Assinatura Testemunha 1" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                                `
-                                        : ''
-                                }
-                              </div>
-                              <div class="signature-line"></div>
-                              <strong>Testemunha 1</strong><br>
-                              Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
-                              CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
-                            </div>
-                            
-                            <!-- Testemunha 2 -->
-                            <div style="flex: 1; line-height: 1;">
-                              <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                                ${
-                                    contrato.assinatura_testemunha_dois_base64
-                                        ? `
-                                  <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_dois_base64)}" alt="Assinatura Testemunha 2" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                                `
-                                        : ''
-                                }
-                              </div>
-                              <div class="signature-line"></div>
-                              <strong>Testemunha 2</strong><br>
-                              Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
-                              CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
-                            </div>
-                          </div>
+                ${
+                    mostrarTestemunhas
+                        ? `
+                <div style="margin-bottom: 15px;"></div>
+                <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
+                  <div style="flex: 1; line-height: 1;">
+                    <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
+                      ${
+                          contrato.assinatura_testemunha_um_base64
+                              ? `
+                        <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_um_base64)}" alt="Assinatura Testemunha 1" style="max-height: 60px; max-width: 300px; object-fit: contain;">
+                      `
+                              : ''
+                      }
+                    </div>
+                    <div class="signature-line"></div>
+                    <strong>Testemunha 1</strong><br>
+                    Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
+                    CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
+                  </div>
+                  <div style="flex: 1; line-height: 1;">
+                    <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
+                      ${
+                          contrato.assinatura_testemunha_dois_base64
+                              ? `
+                        <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_dois_base64)}" alt="Assinatura Testemunha 2" style="max-height: 60px; max-width: 300px; object-fit: contain;">
+                      `
+                              : ''
+                      }
+                    </div>
+                    <div class="signature-line"></div>
+                    <strong>Testemunha 2</strong><br>
+                    Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
+                    CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
+                  </div>
+                </div>`
+                        : ''
+                }
                         </div>
                         ${generateFooter(true)}
                       </div>
@@ -788,52 +866,12 @@ export class ContractTemplateService {
               </p>
               
               <!-- Dados Pessoais -->
-              <table class="table">
-                <tr class="table-row">
-                  <td class="table-cell full-width" colspan="2"><strong>Nome Completo:</strong> ${aluno?.nome || '_________________'}</td>
-                </tr>
-                <tr class="table-row">
-                  <td class="table-cell half-width"><strong>CPF/CNPJ:</strong> ${aluno?.cpf || '_________________'}</td>
-                  <td class="table-cell half-width"><strong>Data de Nascimento:</strong> ${(() => {
-                      if (!aluno?.data_nascimento) return '___/___/___';
-                      const dataISO = aluno.data_nascimento;
-                      if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                          const [ano, mes, dia] = dataISO.split('-');
-                          return `${dia}/${mes}/${ano}`;
-                      }
-                      return new Date(dataISO).toLocaleDateString('pt-BR');
-                  })()}</td>
-                </tr>
-                <tr class="table-row">
-                  <td class="table-cell half-width"><strong>WhatsApp:</strong> ${aluno?.telefone_um || '_________________'}</td>
-                  <td class="table-cell half-width"><strong>E-mail:</strong> ${aluno?.email || '_________________'}</td>
-                </tr>
-                <tr class="table-row">
-                  <td class="table-cell full-width" colspan="2"><strong>Endereço:</strong> ${(() => {
-                      const endereco = aluno?.endereco;
-                      if (!endereco) return '_________________';
-
-                      const partes = [];
-                      if (endereco.logradouro) partes.push(endereco.logradouro);
-                      if (endereco.numero) partes.push(endereco.numero);
-                      if (endereco.complemento) partes.push(endereco.complemento);
-                      if (endereco.bairro) partes.push(endereco.bairro);
-
-                      return partes.length > 0 ? partes.join(', ') : '_________________';
-                  })()}</td>
-                </tr>
-                <tr class="table-row">
-                  <td class="table-cell half-width"><strong>Cidade/Estado:</strong> ${
-                      aluno?.endereco?.cidade || '_______________'
-                  } / ${aluno?.endereco?.estado || '________'}</td>
-                  <td class="table-cell half-width"><strong>CEP:</strong> ${aluno?.endereco?.cep || '____________'}</td>
-                </tr>
-              </table>
+              ${dadosPessoaisHTML}
               
               <!-- Treinamento e Bônus -->
               <table class="table">
                 <tr class="table-row">
-                  <td class="table-cell half-width" style="vertical-align: top;">
+                  <td class="table-cell ${possuiBonusRelevante ? 'half-width' : ''}" ${possuiBonusRelevante ? '' : 'colspan="2"'} style="vertical-align: top;">
                     <strong>Treinamento:</strong> ${treinamento?.nome || '_________________'}<br><br>
                     <strong>Cidade:</strong> ${campos_variaveis?.['Cidade do Treinamento'] || 'Local a definir'}<br><br>
                     <strong>Data Prevista:</strong> ${(() => {
@@ -877,7 +915,9 @@ export class ContractTemplateService {
                         return 'R$ _________________';
                     })()}
                   </td>
-                  <td class="table-cell half-width" style="vertical-align: top;">
+                  ${
+                      possuiBonusRelevante
+                          ? `<td class="table-cell half-width" style="vertical-align: top;">
                     <strong>Bônus:</strong><br>
                           ${(() => {
                               const bonusItems = [];
@@ -955,7 +995,9 @@ export class ContractTemplateService {
 
                               return bonusItems.join('');
                           })()}
-                  </td>
+                  </td>`
+                          : ''
+                  }
                 </tr>
               </table>
               
@@ -1223,12 +1265,11 @@ export class ContractTemplateService {
                 <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
               </div>
               
-              <!-- Espaço entre assinatura do aluno e testemunhas -->
+              ${
+                  mostrarTestemunhas
+                      ? `
               <div style="margin-bottom: 15px;"></div>
-              
-              <!-- Testemunhas com linhas de assinatura individuais -->
               <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
-                <!-- Testemunha 1 -->
                 <div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                     ${
@@ -1244,8 +1285,6 @@ export class ContractTemplateService {
                   Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
                   CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
                 </div>
-                
-                <!-- Testemunha 2 -->
                 <div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                     ${
@@ -1261,7 +1300,9 @@ export class ContractTemplateService {
                   Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
                   CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
                 </div>
-              </div>
+              </div>`
+                      : ''
+              }
               
               <!-- Footer da Primeira Página com Logo -->
               <div class="footer">

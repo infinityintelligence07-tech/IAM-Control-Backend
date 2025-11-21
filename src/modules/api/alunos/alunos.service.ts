@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto } from './dto/alunos.dto';
-import { Like, FindManyOptions, ILike } from 'typeorm';
+import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
 
 @Injectable()
@@ -167,6 +167,84 @@ export class AlunosService {
 
     async create(createAlunoDto: CreateAlunoDto): Promise<AlunoResponseDto> {
         try {
+            // Verificar se já existe um aluno com esse email (incluindo deletados)
+            // Usar query SQL direta para garantir que busca incluindo deletados
+            const queryRunner = this.uow.alunosRP.manager.connection.createQueryRunner();
+            const alunoExistenteRaw = await queryRunner.query('SELECT * FROM alunos WHERE email = $1 LIMIT 1', [createAlunoDto.email]);
+            await queryRunner.release();
+
+            console.log('Buscando aluno com email:', createAlunoDto.email);
+            console.log('Aluno encontrado (raw):', alunoExistenteRaw);
+
+            let alunoExistente: Alunos | null = null;
+            if (alunoExistenteRaw && alunoExistenteRaw.length > 0) {
+                // Criar entidade a partir dos dados raw
+                const rawData = alunoExistenteRaw[0];
+                alunoExistente = this.uow.alunosRP.create();
+                Object.assign(alunoExistente, rawData);
+                // Converter datas se necessário
+                if (rawData.criado_em) alunoExistente.criado_em = new Date(rawData.criado_em);
+                if (rawData.atualizado_em) alunoExistente.atualizado_em = new Date(rawData.atualizado_em);
+                if (rawData.deletado_em) alunoExistente.deletado_em = new Date(rawData.deletado_em);
+                console.log('Aluno encontrado:', { id: alunoExistente.id, deletado_em: alunoExistente.deletado_em });
+            } else {
+                console.log('Aluno não encontrado');
+            }
+
+            if (alunoExistente) {
+                // Se existe, fazer UPDATE ao invés de INSERT
+                console.log('Aluno existente encontrado, fazendo UPDATE:', alunoExistente.id);
+
+                // Preservar o criado_por original
+                const criadoPorOriginal = alunoExistente.criado_por;
+
+                // Reativar se estiver deletado
+                if (alunoExistente.deletado_em) {
+                    alunoExistente.deletado_em = null;
+                    console.log('Aluno deletado encontrado, reativando:', alunoExistente.id);
+                }
+
+                // Atualizar com os novos dados
+                Object.assign(alunoExistente, createAlunoDto);
+                alunoExistente.atualizado_em = new Date();
+                alunoExistente.atualizado_por = createAlunoDto.criado_por;
+
+                // Restaurar o criado_por original
+                alunoExistente.criado_por = criadoPorOriginal;
+
+                const alunoAtualizado = await this.uow.alunosRP.save(alunoExistente);
+                console.log('Aluno atualizado com sucesso:', alunoAtualizado);
+
+                return {
+                    id: alunoAtualizado.id,
+                    id_polo: alunoAtualizado.id_polo,
+                    nome: alunoAtualizado.nome,
+                    nome_cracha: alunoAtualizado.nome_cracha,
+                    email: alunoAtualizado.email,
+                    genero: alunoAtualizado.genero,
+                    cpf: alunoAtualizado.cpf,
+                    data_nascimento: alunoAtualizado.data_nascimento,
+                    telefone_um: alunoAtualizado.telefone_um,
+                    telefone_dois: alunoAtualizado.telefone_dois,
+                    cep: alunoAtualizado.cep,
+                    logradouro: alunoAtualizado.logradouro,
+                    complemento: alunoAtualizado.complemento,
+                    numero: alunoAtualizado.numero,
+                    bairro: alunoAtualizado.bairro,
+                    cidade: alunoAtualizado.cidade,
+                    estado: alunoAtualizado.estado,
+                    profissao: alunoAtualizado.profissao,
+                    status_aluno_geral: alunoAtualizado.status_aluno_geral,
+                    possui_deficiencia: alunoAtualizado.possui_deficiencia,
+                    desc_deficiencia: alunoAtualizado.desc_deficiencia,
+                    url_foto_aluno: alunoAtualizado.url_foto_aluno,
+                    created_at: alunoAtualizado.criado_em,
+                    updated_at: alunoAtualizado.atualizado_em,
+                    polo: undefined, // Será carregado se necessário
+                };
+            }
+
+            // Se não existe, criar novo
             const novoAluno = new Alunos();
             Object.assign(novoAluno, createAlunoDto);
             novoAluno.criado_por = createAlunoDto.criado_por;
@@ -202,7 +280,10 @@ export class AlunosService {
                 polo: undefined, // Será carregado se necessário
             };
         } catch (error) {
-            console.error('Erro ao criar aluno:', error);
+            console.error('Erro ao criar/atualizar aluno:', error);
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
             throw new Error('Erro interno do servidor ao criar aluno');
         }
     }
@@ -264,9 +345,25 @@ export class AlunosService {
             };
         } catch (error) {
             console.error('Erro ao atualizar aluno:', error);
-            if (error instanceof NotFoundException) {
+
+            // Tratar erro específico de violação de constraint única (email duplicado)
+            if (typeof error === 'object' && error !== null) {
+                const errorObj = error as any;
+                const errorCode = errorObj.code || errorObj.driverError?.code;
+                const constraint = errorObj.constraint || errorObj.driverError?.constraint;
+                const detail = errorObj.detail || errorObj.driverError?.detail;
+
+                if (errorCode === '23505' && constraint === 'UQ_1f9a8f3f4e5a314a2d7f828a605') {
+                    const email = detail?.match(/\(email\)=\(([^)]+)\)/)?.[1] || 'fornecido';
+                    throw new BadRequestException(`O email ${email} já está cadastrado. Por favor, use outro email.`);
+                }
+            }
+
+            // Se for uma exceção do NestJS, re-lançar
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
+
             throw new Error('Erro interno do servidor ao atualizar aluno');
         }
     }

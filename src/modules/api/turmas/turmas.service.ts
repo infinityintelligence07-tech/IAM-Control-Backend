@@ -16,6 +16,7 @@ import {
 } from './dto/turmas.dto';
 import { FindManyOptions, ILike, Not, In } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import * as jwt from 'jsonwebtoken';
 
 @Injectable()
 export class TurmasService {
@@ -506,6 +507,268 @@ export class TurmasService {
     }
 
     /**
+     * Trilha do aluno: lista todas as turmas nas quais o aluno já esteve vinculado
+     * Inclui também palestras/masterclass onde o aluno participou
+     * O tipo é determinado pelo tipo do treinamento (palestra ou treinamento)
+     */
+    async getTrilhaAluno(id_aluno: number): Promise<
+        {
+            id_turma_aluno: string;
+            status_aluno_turma: string | null;
+            presenca_turma: string | null;
+            criado_em: Date;
+            tipo: 'palestra' | 'treinamento';
+            turma: {
+                id: number;
+                nome_evento: string;
+                sigla_evento: string;
+                edicao_turma?: string;
+                local: string;
+                data_inicio: string;
+                data_final: string;
+                polo?: {
+                    nome: string;
+                    cidade: string;
+                    estado: string;
+                };
+            };
+        }[]
+    > {
+        try {
+            // Buscar dados do aluno para usar em buscas alternativas
+            const aluno = await this.uow.alunosRP.findOne({
+                where: { id: id_aluno, deletado_em: null },
+            });
+
+            // Buscar turmas onde o aluno está vinculado
+            const turmasAluno = await this.uow.turmasAlunosRP.find({
+                where: { id_aluno: id_aluno.toString() },
+                relations: ['id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
+                order: { criado_em: 'DESC' },
+            });
+
+            // Obter IDs das turmas do aluno para busca alternativa
+            const idsTurmasAluno = turmasAluno.map((ta) => ta.id_turma).filter((id) => id);
+
+            // Buscar masterclass/palestras onde o aluno está vinculado diretamente
+            const idAlunoString = id_aluno.toString();
+
+            let masterclassAluno = await this.uow.masterclassPreCadastrosRP
+                .createQueryBuilder('mc')
+                .distinct(true)
+                .leftJoinAndSelect('mc.id_turma_fk', 'turma')
+                .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+                .leftJoinAndSelect('turma.id_polo_fk', 'polo')
+                .where('CAST(mc.id_aluno_vinculado AS TEXT) = :idAluno', { idAluno: idAlunoString })
+                .orWhere('mc.id_aluno_vinculado = :idAlunoNum', { idAlunoNum: id_aluno })
+                .orderBy('mc.criado_em', 'DESC')
+                .getMany();
+
+            // Se não encontrou masterclass vinculadas diretamente, buscar por outros critérios
+            if (masterclassAluno.length === 0 && aluno) {
+                const qb = this.uow.masterclassPreCadastrosRP
+                    .createQueryBuilder('mc')
+                    .leftJoinAndSelect('mc.id_turma_fk', 'turma')
+                    .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+                    .leftJoinAndSelect('turma.id_polo_fk', 'polo')
+                    .where('mc.id_aluno_vinculado IS NULL'); // Apenas masterclass não vinculadas
+
+                const conditions: string[] = [];
+                const params: any = {};
+
+                // Buscar por email
+                if (aluno.email) {
+                    conditions.push('LOWER(mc.email) = LOWER(:email)');
+                    params.email = aluno.email;
+                }
+
+                // Buscar por telefone (normalizar removendo caracteres especiais)
+                if (aluno.telefone_um) {
+                    const telefoneNormalizado = aluno.telefone_um.replace(/\D/g, '');
+                    conditions.push("REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(mc.telefone, '(', ''), ')', ''), '-', ''), ' ', ''), '.', '') = :telefone");
+                    params.telefone = telefoneNormalizado;
+                }
+
+                // Buscar por turmas compartilhadas
+                if (idsTurmasAluno.length > 0) {
+                    conditions.push('mc.id_turma IN (:...idsTurmas)');
+                    params.idsTurmas = idsTurmasAluno;
+                }
+
+                if (conditions.length > 0) {
+                    qb.distinct(true).andWhere(`(${conditions.join(' OR ')})`, params);
+                    const masterclassEncontradas = await qb.orderBy('mc.criado_em', 'DESC').getMany();
+                    // Garantir que não haja duplicatas mesmo com DISTINCT
+                    const uniqueMap = new Map<string, any>();
+                    masterclassEncontradas.forEach((mc) => {
+                        if (!uniqueMap.has(mc.id)) {
+                            uniqueMap.set(mc.id, mc);
+                        }
+                    });
+                    masterclassAluno = Array.from(uniqueMap.values());
+                }
+            }
+
+            console.log(`[getTrilhaAluno] Buscando masterclass para aluno ID: ${id_aluno} (string: "${idAlunoString}")`);
+            console.log(`[getTrilhaAluno] Masterclass encontradas: ${masterclassAluno.length}`);
+            if (masterclassAluno.length > 0) {
+                masterclassAluno.forEach((mc, index) => {
+                    console.log(`[getTrilhaAluno] Masterclass ${index + 1}:`, {
+                        id: mc.id,
+                        id_aluno_vinculado: mc.id_aluno_vinculado,
+                        tipo_id_aluno_vinculado: typeof mc.id_aluno_vinculado,
+                        evento_nome: mc.evento_nome,
+                        tem_turma: !!mc.id_turma_fk,
+                        turma_id: mc.id_turma_fk?.id,
+                    });
+                });
+            } else {
+                // Debug: buscar todos os masterclass para ver quais existem
+                const todasMasterclass = await this.uow.masterclassPreCadastrosRP.find({
+                    where: { id_aluno_vinculado: Not(null) },
+                    take: 5,
+                });
+                console.log(
+                    `[getTrilhaAluno] Exemplo de masterclass com vínculo (primeiras 5):`,
+                    todasMasterclass.map((mc) => ({
+                        id: mc.id,
+                        id_aluno_vinculado: mc.id_aluno_vinculado,
+                        tipo: typeof mc.id_aluno_vinculado,
+                    })),
+                );
+            }
+
+            // Função auxiliar para determinar o tipo baseado no treinamento
+            const determinarTipo = (treinamento: any): 'palestra' | 'treinamento' => {
+                if (!treinamento) return 'treinamento';
+                return treinamento.tipo_palestra ? 'palestra' : 'treinamento';
+            };
+
+            // Mapear turmas normais
+            const trilhaTurmas = turmasAluno.map((ta) => {
+                const turma = ta.id_turma_fk;
+                const treinamento = turma?.id_treinamento_fk;
+                const polo = turma?.id_polo_fk;
+
+                const localParts: string[] = [];
+                if (turma?.cidade) localParts.push(turma.cidade);
+                if (turma?.estado) localParts.push(turma.estado);
+                const local = localParts.join(' - ');
+
+                return {
+                    id_turma_aluno: ta.id,
+                    status_aluno_turma: ta.status_aluno_turma || null,
+                    presenca_turma: ta.presenca_turma || null,
+                    criado_em: ta.criado_em,
+                    tipo: determinarTipo(treinamento),
+                    turma: {
+                        id: turma?.id || 0,
+                        nome_evento: treinamento?.treinamento || '',
+                        sigla_evento: treinamento?.sigla_treinamento || treinamento?.treinamento || '',
+                        edicao_turma: turma?.edicao_turma || undefined,
+                        local,
+                        data_inicio: turma?.data_inicio || '',
+                        data_final: turma?.data_final || '',
+                        polo: polo
+                            ? {
+                                  nome: polo.polo,
+                                  cidade: polo.cidade,
+                                  estado: polo.estado,
+                              }
+                            : undefined,
+                    },
+                };
+            });
+
+            // Remover duplicatas de masterclass baseado no ID primeiro
+            // Usar Map para garantir que cada ID apareça apenas uma vez
+            const masterclassMapById = new Map<string, any>();
+            masterclassAluno.forEach((mc) => {
+                if (!masterclassMapById.has(mc.id)) {
+                    masterclassMapById.set(mc.id, mc);
+                }
+            });
+            let masterclassUnicas = Array.from(masterclassMapById.values());
+
+            // Deduplicação adicional: remover masterclass duplicadas mesmo com IDs diferentes
+            // baseado em evento_nome + data_evento + email (chave composta)
+            const masterclassMapUnicas = new Map<string, any>();
+            masterclassUnicas.forEach((mc) => {
+                const dataEventoStr = mc.data_evento ? new Date(mc.data_evento).toISOString().split('T')[0] : '';
+                const chaveUnica = `${mc.evento_nome || ''}_${dataEventoStr}_${mc.email || ''}`.toLowerCase();
+
+                // Se já existe uma masterclass com a mesma chave, manter apenas a mais antiga (criada primeiro)
+                if (!masterclassMapUnicas.has(chaveUnica)) {
+                    masterclassMapUnicas.set(chaveUnica, mc);
+                } else {
+                    const existente = masterclassMapUnicas.get(chaveUnica);
+                    // Manter a que foi criada primeiro
+                    if (new Date(mc.criado_em) < new Date(existente.criado_em)) {
+                        masterclassMapUnicas.set(chaveUnica, mc);
+                    }
+                }
+            });
+            masterclassUnicas = Array.from(masterclassMapUnicas.values());
+
+            console.log(`[getTrilhaAluno] Masterclass após deduplicação: ${masterclassUnicas.length} (de ${masterclassAluno.length} encontradas)`);
+
+            // Re-mapear masterclass únicas
+            const trilhaMasterclassUnicas = masterclassUnicas.map((mc) => {
+                const turma = mc.id_turma_fk;
+                const treinamento = turma?.id_treinamento_fk;
+                const polo = turma?.id_polo_fk;
+
+                // Se não tiver turma relacionada, usar dados do próprio registro de masterclass
+                const localParts: string[] = [];
+                if (turma?.cidade) localParts.push(turma.cidade);
+                if (turma?.estado) localParts.push(turma.estado);
+                // Se não tiver turma, tentar obter local de outra forma ou deixar vazio
+                const local = localParts.length > 0 ? localParts.join(' - ') : 'N/A';
+
+                // Determinar tipo: se tem treinamento, usa o tipo do treinamento, senão assume palestra
+                const tipo = treinamento ? determinarTipo(treinamento) : 'palestra';
+
+                // Data do evento: priorizar turma, senão usar data_evento do masterclass
+                const dataEvento = mc.data_evento ? new Date(mc.data_evento).toISOString().split('T')[0] : '';
+                const dataInicio = turma?.data_inicio || dataEvento || '';
+                const dataFinal = turma?.data_final || dataEvento || '';
+
+                return {
+                    id_turma_aluno: mc.id,
+                    status_aluno_turma: mc.presente ? 'PRESENTE' : null,
+                    presenca_turma: mc.presente ? 'PRESENTE' : null,
+                    criado_em: mc.criado_em,
+                    tipo,
+                    turma: {
+                        id: turma?.id || 0,
+                        nome_evento: mc.evento_nome || treinamento?.treinamento || 'Masterclass',
+                        sigla_evento: treinamento?.sigla_treinamento || treinamento?.treinamento || mc.evento_nome || '',
+                        edicao_turma: turma?.edicao_turma || undefined,
+                        local,
+                        data_inicio: dataInicio,
+                        data_final: dataFinal,
+                        polo: polo
+                            ? {
+                                  nome: polo.polo,
+                                  cidade: polo.cidade,
+                                  estado: polo.estado,
+                              }
+                            : undefined,
+                    },
+                };
+            });
+
+            // Combinar e ordenar por data de criação (mais recente primeiro)
+            const trilhaCompleta = [...trilhaTurmas, ...trilhaMasterclassUnicas].sort((a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime());
+
+            return trilhaCompleta;
+        } catch (error) {
+            console.error('Erro ao buscar trilha do aluno:', error);
+            throw new BadRequestException('Erro ao buscar trilha do aluno');
+        }
+    }
+
+    /**
      * Buscar turmas de IPR (Imersão Prosperar) com inscrições abertas para usar como bônus
      */
     async findIPRTurmasBonus(): Promise<TurmaResponseDto[]> {
@@ -930,7 +1193,64 @@ export class TurmasService {
                 throw new NotFoundException('Aluno não encontrado na turma');
             }
 
-            await this.uow.turmasAlunosRP.delete(id_turma_aluno);
+            // First, find all related turmas_alunos_treinamentos records
+            const turmasAlunosTreinamentos = await this.uow.turmasAlunosTreinamentosRP.find({
+                where: {
+                    id_turma_aluno: id_turma_aluno,
+                    deletado_em: null,
+                },
+            });
+
+            // Soft delete all related turmas_alunos_treinamentos_contratos records
+            for (const turmaAlunoTreinamento of turmasAlunosTreinamentos) {
+                const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+                    where: {
+                        id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                        deletado_em: null,
+                    },
+                });
+
+                for (const contrato of contratos) {
+                    contrato.deletado_em = new Date();
+                    await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+                }
+            }
+
+            // Soft delete all related turmas_alunos_treinamentos records
+            for (const turmaAlunoTreinamento of turmasAlunosTreinamentos) {
+                turmaAlunoTreinamento.deletado_em = new Date();
+                await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
+            }
+
+            // Soft delete all related turmas_alunos_produtos records
+            const produtos = await this.uow.turmasAlunosProdutosRP.find({
+                where: {
+                    id_turma_aluno: id_turma_aluno,
+                    deletado_em: null,
+                },
+            });
+
+            for (const produto of produtos) {
+                produto.deletado_em = new Date();
+                await this.uow.turmasAlunosProdutosRP.save(produto);
+            }
+
+            // Soft delete all related turmas_alunos_treinamentos_bonus records
+            const bonuses = await this.uow.turmasAlunosTreinamentosBonusRP.find({
+                where: {
+                    id_turma_aluno: id_turma_aluno,
+                    deletado_em: null,
+                },
+            });
+
+            for (const bonus of bonuses) {
+                bonus.deletado_em = new Date();
+                await this.uow.turmasAlunosTreinamentosBonusRP.save(bonus);
+            }
+
+            // Finally, soft delete the turmas_alunos record
+            turmaAluno.deletado_em = new Date();
+            await this.uow.turmasAlunosRP.save(turmaAluno);
         } catch (error) {
             console.error('Erro ao remover aluno da turma:', error);
             if (error instanceof NotFoundException) {
@@ -979,11 +1299,12 @@ export class TurmasService {
             console.log('Dados após save:', turmaAlunoAtualizada);
 
             // Verificar se o status foi alterado para CHECKIN_REALIZADO
+            // Enviar link do formulário para o aluno preencher seus dados
             if (statusAnterior !== EStatusAlunosTurmas.CHECKIN_REALIZADO && turmaAlunoAtualizada.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO) {
-                console.log('🎉 Status alterado para CHECKIN_REALIZADO - Enviando QR Code via WhatsApp...');
+                console.log('📧 Status alterado para CHECKIN_REALIZADO - Enviando link do formulário via WhatsApp...');
 
-                // Enviar QR Code via WhatsApp automaticamente
-                await this.enviarQRCodeWhatsApp(turmaAlunoAtualizada);
+                // Enviar link do formulário via WhatsApp automaticamente
+                await this.enviarLinkFormularioWhatsApp(turmaAlunoAtualizada);
             }
 
             return {
@@ -1013,7 +1334,7 @@ export class TurmasService {
     }
 
     // Método para gerar número de crachá único dentro da turma
-    private async generateUniqueCrachaNumber(id_turma: number): Promise<string> {
+    async generateUniqueCrachaNumber(id_turma: number): Promise<string> {
         const maxTentativas = 100;
         let tentativas = 0;
 
@@ -1042,13 +1363,13 @@ export class TurmasService {
     }
 
     /**
-     * Envia QR Code de credenciamento via WhatsApp quando status é alterado para CHECKIN_REALIZADO
+     * Envia link do formulário de preenchimento via WhatsApp quando status é alterado para CHECKIN_REALIZADO
      */
-    private async enviarQRCodeWhatsApp(turmaAluno: any): Promise<void> {
+    private async enviarLinkFormularioWhatsApp(turmaAluno: any): Promise<void> {
         try {
             // Verificar se temos os dados necessários
             if (!turmaAluno.id_aluno_fk || !turmaAluno.id_turma_fk) {
-                console.error('❌ Dados insuficientes para enviar QR Code:', {
+                console.error('❌ Dados insuficientes para enviar link do formulário:', {
                     hasAluno: !!turmaAluno.id_aluno_fk,
                     hasTurma: !!turmaAluno.id_turma_fk,
                 });
@@ -1057,36 +1378,62 @@ export class TurmasService {
 
             const aluno = turmaAluno.id_aluno_fk;
             const turma = turmaAluno.id_turma_fk;
-            const polo = turma.id_polo_fk;
             const treinamento = turma.id_treinamento_fk;
 
-            // Preparar dados para o QR Code
-            const qrCodeData = {
+            // Gerar token JWT para o link de check-in
+            const jwtSecret = process.env.JWT_SECRET || 'default-secret-key';
+            const checkInToken = jwt.sign(
+                {
+                    alunoTurmaId: turmaAluno.id,
+                    turmaId: turma.id,
+                    timestamp: Date.now(),
+                },
+                jwtSecret,
+                { expiresIn: '7d' }, // Link expira em 7 dias
+            );
+
+            // Preparar dados para envio do link
+            const checkInData = {
                 alunoTurmaId: turmaAluno.id,
                 alunoNome: aluno.nome,
                 alunoTelefone: aluno.telefone_um,
                 turmaId: turma.id,
                 treinamentoNome: treinamento?.treinamento || 'Treinamento não informado',
-                poloNome: polo?.polo || 'Polo não informado',
-                dataEvento: turma.data_inicio ? new Date(turma.data_inicio).toLocaleDateString('pt-BR') : 'Data não informada',
             };
 
-            console.log('📱 Enviando QR Code para:', {
+            console.log('📧 Enviando link do formulário para:', {
                 nome: aluno.nome,
                 telefone: aluno.telefone_um,
-                treinamento: qrCodeData.treinamentoNome,
+                treinamento: checkInData.treinamentoNome,
             });
 
-            // Enviar QR Code via WhatsApp
-            const result = await this.whatsappService.sendQRCodeCredenciamento(qrCodeData);
+            // Gerar URL do formulário de preenchimento
+            const frontendUrl = process.env.FRONTEND_URL || 'https://localhost:3001';
+            const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
+
+            // Gerar mensagem
+            const message = `Olá ${aluno.nome}! 👋
+
+Você está confirmado(a) para o treinamento *${checkInData.treinamentoNome}*! 🎉
+
+📋 Para completar seu cadastro e confirmar sua presença, clique no link abaixo e preencha seus dados:
+
+${formularioUrl}
+
+⚠️ *IMPORTANTE:* Preencha todos os dados solicitados para completar seu check-in.
+
+Nos vemos lá! 🚀`;
+
+            // Enviar mensagem via WhatsApp
+            const result = await this.whatsappService.sendMessage(aluno.telefone_um, message);
 
             if (result.success) {
-                console.log('✅ QR Code enviado com sucesso para:', aluno.nome);
+                console.log('✅ Link do formulário enviado com sucesso para:', aluno.nome);
             } else {
-                console.error('❌ Erro ao enviar QR Code para:', aluno.nome, result.error);
+                console.error('❌ Erro ao enviar link do formulário para:', aluno.nome, result.error);
             }
         } catch (error) {
-            console.error('❌ Erro interno ao enviar QR Code via WhatsApp:', error);
+            console.error('❌ Erro interno ao enviar link do formulário via WhatsApp:', error);
             // Não relançar o erro para não interromper o fluxo principal
         }
     }

@@ -63,6 +63,15 @@ export enum EPresencaTurmas {
     PRESENTE = 'PRESENTE',
 }
 
+export enum EProfissao {
+    CLT = 'CLT',
+    DESEMPREGADO = 'DESEMPREGADO',
+    EMPRESARIO = 'EMPRESARIO',
+    FUNCIONARIO_PUBLICO = 'FUNCIONARIO_PUBLICO',
+    LIDER = 'LIDER',
+    PROFISSIONAL_LIBERAL = 'PROFISSIONAL_LIBERAL',
+}
+
 export enum EStatusAlunosGeral {
     ATIVO = 'ATIVO',
     INADIMPLENTE = 'INADIMPLENTE',
@@ -82,6 +91,7 @@ export enum EStatusAlunosTurmas {
 export enum EStatusAssinaturasContratos {
     ASSINADO = 'ASSINADO',
     ASSINATURA_PENDENTE = 'ASSINATURA_PENDENTE',
+    PARCIALMENTE_ASSINADO = 'PARCIALMENTE_ASSINADO',
 }
 
 export enum EStatusTurmas {

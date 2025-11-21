@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ETipoDocumento } from '@/modules/config/entities/enum';
 
@@ -297,4 +297,81 @@ export class FiltrosContratosDto {
     @IsOptional()
     @IsString()
     data_fim?: string;
+}
+
+// DTOs para criação de Termos
+export class CriarTermoZapSignDto {
+    @IsString()
+    @IsNotEmpty()
+    template_id: string;
+
+    @IsString()
+    @IsNotEmpty()
+    id_aluno: string;
+
+    @IsString()
+    @IsNotEmpty()
+    termo_titulo: string; // Título do termo
+
+    @IsOptional()
+    @IsString()
+    texto_introducao?: string;
+
+    @IsOptional()
+    @IsString()
+    clausulas?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    possui_testemunhas?: boolean;
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_nome?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_cpf?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_um_email?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_nome?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_cpf?: string;
+
+    @IsOptional()
+    @IsString()
+    testemunha_dois_email?: string;
+
+    @IsOptional()
+    campos_variaveis?: Record<string, string>;
+
+    @IsOptional()
+    @IsString()
+    local_assinatura?: string;
+
+    @IsOptional()
+    @IsString()
+    observacoes?: string;
+}
+
+export class RespostaTermoZapSignDto {
+    id: string;
+    nome_documento: string;
+    status: string;
+    url_assinatura?: string;
+    signers: Array<{
+        nome: string;
+        email: string;
+        status: string;
+        tipo: 'sign' | 'witness';
+    }>;
+    created_at: string;
+    file_url?: string;
 }

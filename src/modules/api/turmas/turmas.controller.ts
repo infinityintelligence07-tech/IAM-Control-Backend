@@ -61,6 +61,35 @@ export class TurmasController {
         }
     }
 
+    @Get('aluno-trilha/:id_aluno')
+    @UseGuards(JwtAuthGuard)
+    async getTrilhaAluno(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<
+        {
+            id_turma_aluno: string;
+            status_aluno_turma: string | null;
+            presenca_turma: string | null;
+            criado_em: Date;
+            tipo: 'palestra' | 'treinamento';
+            turma: {
+                id: number;
+                nome_evento: string;
+                sigla_evento: string;
+                edicao_turma?: string;
+                local: string;
+                data_inicio: string;
+                data_final: string;
+                polo?: {
+                    nome: string;
+                    cidade: string;
+                    estado: string;
+                };
+            };
+        }[]
+    > {
+        console.log('Buscando trilha do aluno ID:', id_aluno);
+        return this.turmasService.getTrilhaAluno(id_aluno);
+    }
+
     // CRUD de Turmas
 
     @Get()

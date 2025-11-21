@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termo de Autorização</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #000;
+            background-color: white;
+        }
+        
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logo-image {
+            width: 80px;
+            height: auto;
+            object-fit: contain;
+        }
+        
+        .logo-divider {
+            width: 2px;
+            height: 40px;
+            background: #002279;
+            margin: 0 10px;
+        }
+        
+        .logo-text {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .logo {
+            font-weight: 600;
+            font-size: 24px;
+            color: #002279;
+            margin: 0;
+            line-height: 1;
+            text-transform: uppercase;
+        }
+        
+        .title {
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+        }
+        
+        .intro-text {
+            font-size: 11px;
+            text-align: justify;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        
+        .clauses-section {
+            margin-top: 20px;
+        }
+        
+        .clause {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+        
+        .clause-title {
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        
+        .clause-text {
+            font-size: 11px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        
+        .paragraph {
+            margin-left: 20px;
+            margin-top: 8px;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        
+        ul {
+            margin-left: 20px;
+            margin-top: 8px;
+        }
+        
+        li {
+            margin-bottom: 5px;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        
+        .signature-section {
+            margin-top: 30px;
+        }
+        
+        .signature-line {
+            border-bottom: 1px solid #000;
+            margin-bottom: 10px;
+            width: 60%;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .signature-label {
+            text-align: center;
+            font-size: 10px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        
+        .witnesses-section {
+            display: flex;
+            justify-content: space-between;
+            gap: 40px;
+            margin-top: 30px;
+        }
+        
+        .witness {
+            flex: 1;
+        }
+        
+        .witness-line {
+            border-bottom: 1px solid #000;
+            margin-bottom: 10px;
+        }
+        
+        .witness-info {
+            font-size: 10px;
+            line-height: 1.6;
+        }
+        
+        .footer {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10px;
+        }
+        
+        .page {
+            position: relative;
+            min-height: 900px;
+            padding: 40px;
+            padding-bottom: 100px;
+        }
+        
+        .page-break {
+            page-break-before: always;
+        }
+        
+        @media print {
+            body {
+                background: white;
+            }
+            
+            .page-break {
+                page-break-before: always;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-container">
+                <img src="{{LOGO_URL}}" alt="Instituto Academy Mind" class="logo-image" crossorigin="anonymous">
+                <hr class="logo-divider">
+                <div class="logo-text">
+                    <div class="logo">INSTITUTO ACADEMY MIND</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Título -->
+        <div class="title">
+            {{TERMO_TITULO}}
+        </div>
+        
+        <!-- Texto introdutório -->
+        <div class="intro-text">
+            {{TEXTO_INTRODUCAO}}
+        </div>
+        
+        <!-- Cláusulas -->
+        <div class="clauses-section">
+            {{CLÁUSULAS}}
+        </div>
+        
+        <!-- Seção de Assinatura -->
+        <div class="signature-section">
+            <div style="text-align: center; margin-bottom: 20px; font-size: 11px;">
+                <p>E por estarem justos e acordados, firmam o presente termo em duas vias de igual teor e forma, para que produza seus efeitos legais.</p>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; margin-bottom: 40px;">
+                <div>Local: {{LOCAL_ASSINATURA}}</div>
+                <div>Data: {{DATA_ASSINATURA}}</div>
+            </div>
+            
+            {{#IF_TESTEMUNHAS}}
+            <!-- Assinatura do Participante/Titular -->
+            <div style="text-align: center; margin-bottom: 30px;">
+                <div style="height: 60px; display: flex; align-items: center; justify-content: center;">
+                    {{#IF_ASSINATURA_PARTICIPANTE}}
+                    <img src="{{ASSINATURA_PARTICIPANTE}}" alt="Assinatura" style="max-height: 60px; object-fit: contain;">
+                    {{/IF_ASSINATURA_PARTICIPANTE}}
+                </div>
+                <div class="signature-line"></div>
+                <div class="signature-label">Assinatura do PARTICIPANTE/Titular dos Dados.</div>
+            </div>
+            
+            <!-- Testemunhas -->
+            <div class="witnesses-section">
+                <div class="witness">
+                    <div style="height: 60px; display: flex; align-items: center; justify-content: center;">
+                        {{#IF_ASSINATURA_TESTEMUNHA_1}}
+                        <img src="{{ASSINATURA_TESTEMUNHA_1}}" alt="Assinatura Testemunha 1" style="max-height: 60px; object-fit: contain;">
+                        {{/IF_ASSINATURA_TESTEMUNHA_1}}
+                    </div>
+                    <div class="witness-line"></div>
+                    <div class="witness-info">
+                        <div><strong>Testemunha 1</strong></div>
+                        <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                        <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+                    </div>
+                </div>
+                
+                <div class="witness">
+                    <div style="height: 60px; display: flex; align-items: center; justify-content: center;">
+                        {{#IF_ASSINATURA_TESTEMUNHA_2}}
+                        <img src="{{ASSINATURA_TESTEMUNHA_2}}" alt="Assinatura Testemunha 2" style="max-height: 60px; object-fit: contain;">
+                        {{/IF_ASSINATURA_TESTEMUNHA_2}}
+                    </div>
+                    <div class="witness-line"></div>
+                    <div class="witness-info">
+                        <div><strong>Testemunha 2</strong></div>
+                        <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                        <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+                    </div>
+                </div>
+            </div>
+            {{/IF_TESTEMUNHAS}}
+            
+            {{#IF_SEM_TESTEMUNHAS}}
+            <!-- Assinatura única sem testemunhas -->
+            <div style="text-align: center; margin-bottom: 30px;">
+                <div style="height: 60px; display: flex; align-items: center; justify-content: center;">
+                    {{#IF_ASSINATURA}}
+                    <img src="{{ASSINATURA}}" alt="Assinatura" style="max-height: 60px; object-fit: contain;">
+                    {{/IF_ASSINATURA}}
+                </div>
+                <div class="signature-line"></div>
+                <div class="signature-label">Assinatura</div>
+            </div>
+            {{/IF_SEM_TESTEMUNHAS}}
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            {{FOOTER_CONTENT}}
+        </div>
+    </div>
+</body>
+</html>

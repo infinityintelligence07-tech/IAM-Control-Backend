@@ -3,7 +3,7 @@ import { Entity, Column, PrimaryGeneratedColumn, OneToMany, ManyToOne, JoinColum
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
 import { TurmasAlunos } from './turmasAlunos.entity';
-import { EStatusAlunosGeral } from './enum';
+import { EProfissao, EStatusAlunosGeral } from './enum';
 import { Polos } from './polos.entity';
 import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 
@@ -63,8 +63,15 @@ export class Alunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'estado', nullable: true })
     estado: string;
 
-    @Column({ type: 'varchar', name: 'profissao', nullable: true })
-    profissao: string;
+    @Column({
+        type: 'enum',
+        enum: EProfissao,
+        enumName: 'EProfissao',
+        name: 'profissao',
+        default: EProfissao.CLT,
+        nullable: true,
+    })
+    profissao: EProfissao;
 
     @Column({
         type: 'enum',

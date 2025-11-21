@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, Put } from '@nestjs/common';
 import { WhatsAppService } from './whatsapp.service';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
@@ -65,5 +65,23 @@ export class WhatsAppController {
     async testConnection() {
         console.log('Testando conectividade Z-API...');
         return this.whatsappService.testZApiConnection();
+    }
+
+    @Get('dados-aluno/:token')
+    async getDadosAlunoPorToken(@Param('token') token: string) {
+        console.log('Buscando dados do aluno por token:', token);
+        return this.whatsappService.getDadosAlunoPorToken(token);
+    }
+
+    @Post('preencher-dados/:token')
+    async preencherDadosAluno(@Param('token') token: string, @Body() dados: any) {
+        console.log('Preenchendo dados do aluno por token:', token);
+        return this.whatsappService.preencherDadosAluno(token, dados);
+    }
+
+    @Put('atualizar-foto/:token')
+    async atualizarFotoAluno(@Param('token') token: string, @Body() body: { url_foto_aluno: string }) {
+        console.log('Atualizando foto do aluno por token:', token);
+        return this.whatsappService.atualizarFotoAluno(token, body.url_foto_aluno);
     }
 }

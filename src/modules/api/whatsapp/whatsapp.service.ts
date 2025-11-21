@@ -1,9 +1,8 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
-import axios from 'axios';
+import { ChatGuruService } from './chatguru/chatguru.service';
 import * as jwt from 'jsonwebtoken';
-import * as QRCode from 'qrcode';
 
 export interface CheckInStudentDto {
     alunoTurmaId: string;
@@ -24,54 +23,24 @@ export interface SendQRCodeDto {
 
 @Injectable()
 export class WhatsAppService {
-    private readonly zApiUrl: string;
-    private readonly zApiToken: string;
     private readonly frontendUrl: string;
     private readonly jwtSecret: string;
-    private readonly zApiInstance: string;
-    private readonly zApiClientToken: string;
-    constructor(private readonly uow: UnitOfWorkService) {
-        // Configurações Z-API (devem vir de variáveis de ambiente)
-        this.zApiUrl = process.env.Z_API_URL || 'https://api.z-api.io';
-        this.zApiToken = process.env.Z_API_TOKEN || '';
-        this.zApiInstance = process.env.Z_API_INSTANCE_ID || '';
-        this.zApiClientToken = process.env.Z_API_CLIENT_TOKEN || '';
+
+    constructor(
+        private readonly uow: UnitOfWorkService,
+        private readonly chatGuruService: ChatGuruService,
+    ) {
         this.frontendUrl = process.env.FRONTEND_URL || 'https://localhost:3001';
         this.jwtSecret = process.env.JWT_SECRET;
     }
 
     /**
-     * Envia mensagem via Z-API
+     * Envia mensagem via ChatGuru
+     * Cria o chat com o nome do contato e telefone primário
      */
-    async sendMessage(phone: string, message: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    async sendMessage(phone: string, message: string, contactName?: string): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
-            // Debug das credenciais
-            console.log('🔍 DEBUG Z-API Credenciais:');
-            console.log(`URL: ${this.zApiUrl}`);
-            console.log(`Token: ${this.zApiToken ? this.zApiToken.substring(0, 8) + '...' : 'VAZIO'}`);
-            console.log(`Instance: ${this.zApiInstance ? this.zApiInstance.substring(0, 8) + '...' : 'VAZIO'}`);
-            console.log(`Client-Token: ${this.zApiClientToken ? this.zApiClientToken.substring(0, 8) + '...' : 'VAZIO'}`);
-
-            // MODO SIMULAÇÃO ATIVO se faltar configuração
-            if (!this.zApiToken || !this.zApiInstance) {
-                // Formatar número mesmo no modo simulação para mostrar como ficaria
-                let formattedPhone = phone.replace(/\D/g, '');
-                if (!formattedPhone.startsWith('55')) {
-                    formattedPhone = '55' + formattedPhone;
-                }
-
-                console.log('🔄 MODO SIMULAÇÃO ATIVO - WhatsApp');
-                console.log(`📱 Número original: ${phone}`);
-                console.log(`📱 Número formatado: ${formattedPhone}`);
-                console.log(`💬 Mensagem: ${message.substring(0, 150)}...`);
-                console.log('✅ Simulação concluída - Status do aluno será atualizado');
-                return {
-                    success: true,
-                    message: 'Mensagem enviada com sucesso (modo simulação)',
-                };
-            }
-
-            // Formatar número de telefone (remover caracteres especiais e adicionar código do Brasil)
+            // Formatar número de telefone (remover caracteres especiais)
             let formattedPhone = phone.replace(/\D/g, '');
 
             // Adicionar código do país (55) se não estiver presente
@@ -79,41 +48,12 @@ export class WhatsAppService {
                 formattedPhone = '55' + formattedPhone;
             }
 
-            const headers: any = {
-                'Content-Type': 'application/json',
-            };
+            console.log(`📱 Enviando mensagem via ChatGuru para ${formattedPhone}${contactName ? ` (${contactName})` : ''}`);
 
-            // Adicionar Client-Token se disponível
-            if (this.zApiClientToken) {
-                headers['Client-Token'] = this.zApiClientToken;
-            }
+            // Usa o método createChatAndSendMessage que cria o chat com o nome e envia a mensagem
+            const result = await this.chatGuruService.createChatAndSendMessage(formattedPhone, message, contactName);
 
-            const response = await axios.post(
-                `${this.zApiUrl}/instances/${this.zApiInstance}/token/${this.zApiToken}/send-text`,
-                {
-                    phone: formattedPhone,
-                    message: message,
-                },
-                {
-                    headers,
-                },
-            );
-
-            const responseData = response.data as any;
-
-            // Debug da resposta da Z-API
-            console.log('🔍 Resposta Z-API:', JSON.stringify(responseData, null, 2));
-
-            // Z-API pode retornar diferentes estruturas de sucesso
-            const isSuccess =
-                responseData?.success === true ||
-                responseData?.status === 'sent' ||
-                responseData?.status === 'delivered' ||
-                responseData?.messageId ||
-                responseData?.id ||
-                (response.status === 200 && !responseData?.error);
-
-            if (isSuccess) {
+            if (result.success) {
                 return {
                     success: true,
                     message: 'Mensagem enviada com sucesso',
@@ -121,36 +61,11 @@ export class WhatsAppService {
             } else {
                 return {
                     success: false,
-                    error: `Falha ao enviar mensagem via Z-API: ${responseData?.error || 'Resposta inesperada'}`,
+                    error: 'Falha ao enviar mensagem via ChatGuru',
                 };
             }
         } catch (error: unknown) {
-            console.error('Erro ao enviar mensagem via Z-API:', error);
-
-            // Se for erro 400 com "client-token is not configured", usar modo simulação
-            if (error && typeof error === 'object' && 'response' in error) {
-                const axiosError = error as any;
-                if (axiosError.response?.status === 400 && axiosError.response?.data?.error === 'your client-token is not configured') {
-                    console.log('⚠️ Credenciais Z-API inválidas, ativando modo simulação...');
-
-                    // Formatar número para simulação
-                    let formattedPhone = phone.replace(/\D/g, '');
-                    if (!formattedPhone.startsWith('55')) {
-                        formattedPhone = '55' + formattedPhone;
-                    }
-
-                    console.log('🔄 MODO SIMULAÇÃO ATIVO - WhatsApp (Fallback)');
-                    console.log(`📱 Número formatado: ${formattedPhone}`);
-                    console.log(`💬 Mensagem: ${message.substring(0, 150)}...`);
-                    console.log('✅ Simulação concluída - Status do aluno será atualizado');
-
-                    return {
-                        success: true,
-                        message: 'Mensagem enviada com sucesso (modo simulação - credenciais inválidas)',
-                    };
-                }
-            }
-
+            console.error('Erro ao enviar mensagem via ChatGuru:', error);
             const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar mensagem';
             return {
                 success: false,
@@ -201,7 +116,8 @@ export class WhatsAppService {
 
                 // Enviar mensagem
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
-                const sendResult = await this.sendMessage(phone, message);
+                const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
+                const sendResult = await this.sendMessage(phone, message, alunoNome);
 
                 if (sendResult.success) {
                     // Atualizar status do aluno para AGUARDANDO_CHECKIN
@@ -560,41 +476,28 @@ export class WhatsAppService {
     }
 
     /**
-     * Testa conectividade com Z-API
+     * Testa conectividade com ChatGuru
      */
     async testZApiConnection(): Promise<{ success: boolean; message: string; details?: any }> {
         try {
-            if (!this.zApiToken || !this.zApiInstance) {
-                return {
-                    success: false,
-                    message: 'Credenciais Z-API não configuradas',
-                };
-            }
-
-            const headers: any = {
-                'Content-Type': 'application/json',
-            };
-
-            if (this.zApiClientToken) {
-                headers['Client-Token'] = this.zApiClientToken;
-            }
-
-            console.log('🔍 Testando conectividade Z-API...');
-            console.log(`URL: ${this.zApiUrl}/instances/${this.zApiInstance}/token/${this.zApiToken}/status`);
-
-            const response = await axios.get(`${this.zApiUrl}/instances/${this.zApiInstance}/token/${this.zApiToken}/status`, { headers });
+            console.log('🔍 Testando conectividade ChatGuru...');
+            
+            // Tenta criar um chat de teste (não envia mensagem, apenas testa a conexão)
+            // Usa um número de teste que não será usado
+            const testPhone = '5511999999999';
+            const testResult = await this.chatGuruService.createChat(testPhone, 'Teste de conexão');
 
             return {
                 success: true,
-                message: 'Conectividade Z-API OK',
-                details: response.data,
+                message: 'Conectividade ChatGuru OK',
+                details: testResult,
             };
         } catch (error: any) {
-            console.error('❌ Erro ao testar Z-API:', error.response?.data || error.message);
+            console.error('❌ Erro ao testar ChatGuru:', error.message);
             return {
                 success: false,
-                message: 'Erro de conectividade Z-API',
-                details: error.response?.data || error.message,
+                message: 'Erro de conectividade ChatGuru',
+                details: error.message,
             };
         }
     }
@@ -607,14 +510,6 @@ export class WhatsAppService {
      */
     async sendQRCodeCredenciamento(data: SendQRCodeDto): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
-            if (!this.zApiToken || !this.zApiInstance) {
-                console.log('❌ [sendQRCodeCredenciamento] Credenciais Z-API não configuradas');
-                return {
-                    success: false,
-                    error: 'Credenciais da Z-API não configuradas. Verifique as variáveis de ambiente.',
-                };
-            }
-
             // Gerar dados do QR code
             const qrData = {
                 id_turma_aluno: data.alunoTurmaId,
@@ -626,34 +521,46 @@ export class WhatsAppService {
                 timestamp: new Date().toISOString(),
             };
 
-            // Converter para string JSON para o QR code
-            const qrCodeData = JSON.stringify(qrData);
-
-            // Gerar QR code como imagem base64
-            const qrCodeImage = await QRCode.toDataURL(qrCodeData, {
-                errorCorrectionLevel: 'M',
-                margin: 1,
-                color: {
-                    dark: '#000000',
-                    light: '#FFFFFF',
-                },
-                width: 256,
-            });
-
             // Limpar telefone (remover caracteres não numéricos)
-            const cleanPhone = data.alunoTelefone.replace(/\D/g, '');
+            let cleanPhone = data.alunoTelefone.replace(/\D/g, '');
+
+            // Adicionar código do país (55) se não estiver presente
+            if (!cleanPhone.startsWith('55')) {
+                cleanPhone = '55' + cleanPhone;
+            }
 
             // Gerar mensagem de texto
             const message = this.generateQRCodeMessage(data.alunoNome, data.treinamentoNome);
 
-            // Enviar mensagem de texto primeiro
-            await this.sendMessage(cleanPhone, message);
+            console.log(`📱 Enviando QR code para ${data.alunoNome} (${cleanPhone}) via ChatGuru`);
 
-            // Enviar QR code como imagem
-            const imageResult = await this.sendImageMessage(cleanPhone, qrCodeImage, `QR Code - ${data.treinamentoNome} - ${data.alunoNome}`);
+            // Usa o método que cria chat, envia mensagem e QR code
+            const result = await this.chatGuruService.createChatAndSendMessageWithQRCode(
+                cleanPhone,
+                message,
+                qrData,
+                data.alunoNome, // Nome do contato
+            );
 
-            console.log(`✅ QR code enviado para ${data.alunoNome} (${cleanPhone})`);
-            return imageResult;
+            if (result.success && result.qrCodeSent) {
+                console.log(`✅ QR code enviado para ${data.alunoNome} (${cleanPhone})`);
+                return {
+                    success: true,
+                    message: 'QR code enviado com sucesso',
+                };
+            } else if (result.success && !result.qrCodeSent) {
+                console.warn(`⚠️ Mensagem enviada mas QR code falhou para ${data.alunoNome}`);
+                return {
+                    success: true,
+                    message: 'Mensagem enviada, mas QR code não pôde ser enviado',
+                    error: result.warning,
+                };
+            } else {
+                return {
+                    success: false,
+                    error: 'Falha ao enviar QR code',
+                };
+            }
         } catch (error: any) {
             console.error('❌ Erro ao enviar QR code:', error);
             return {
@@ -664,38 +571,35 @@ export class WhatsAppService {
     }
 
     /**
-     * Envia imagem via WhatsApp usando Z-API
+     * Envia imagem via WhatsApp usando ChatGuru
      */
-    async sendImageMessage(phone: string, imageBase64: string, caption: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    async sendImageMessage(phone: string, imageBase64: string, caption: string, contactName?: string): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
-            const headers: any = {
-                'Content-Type': 'application/json',
-            };
+            // Formatar número de telefone (remover caracteres especiais)
+            let formattedPhone = phone.replace(/\D/g, '');
 
-            if (this.zApiClientToken) {
-                headers['Client-Token'] = this.zApiClientToken;
+            // Adicionar código do país (55) se não estiver presente
+            if (!formattedPhone.startsWith('55')) {
+                formattedPhone = '55' + formattedPhone;
             }
 
-            const payload = {
-                phone: phone,
-                image: imageBase64,
-                caption: caption,
-            };
+            console.log(`📱 Enviando imagem para: ${formattedPhone}${contactName ? ` (${contactName})` : ''}`);
 
-            console.log(`📱 Enviando imagem para: ${phone}`);
+            // Primeiro cria o chat se necessário, depois envia a imagem
+            await this.chatGuruService.createChat(formattedPhone, contactName);
 
-            const response = await axios.post(`${this.zApiUrl}/instances/${this.zApiInstance}/token/${this.zApiToken}/send-image`, payload, { headers });
+            const result = await this.chatGuruService.sendImage(formattedPhone, imageBase64, caption);
 
-            console.log('✅ Imagem enviada com sucesso:', response.data);
+            console.log('✅ Imagem enviada com sucesso');
             return {
                 success: true,
                 message: 'Imagem enviada com sucesso',
             };
         } catch (error: any) {
-            console.error('❌ Erro ao enviar imagem Z-API:', error.response?.data || error.message);
+            console.error('❌ Erro ao enviar imagem ChatGuru:', error.message);
             return {
                 success: false,
-                error: error.response?.data?.message || error.message || 'Erro ao enviar imagem',
+                error: error.message || 'Erro ao enviar imagem',
             };
         }
     }

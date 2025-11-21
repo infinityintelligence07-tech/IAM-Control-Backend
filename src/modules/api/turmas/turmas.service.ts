@@ -1425,7 +1425,7 @@ ${formularioUrl}
 Nos vemos lá! 🚀`;
 
             // Enviar mensagem via WhatsApp
-            const result = await this.whatsappService.sendMessage(aluno.telefone_um, message);
+            const result = await this.whatsappService.sendMessage(aluno.telefone_um, message, aluno.nome);
 
             if (result.success) {
                 console.log('✅ Link do formulário enviado com sucesso para:', aluno.nome);

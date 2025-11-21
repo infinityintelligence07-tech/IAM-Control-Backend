@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 export interface SendMessageDto {
     phone: string;
     message: string;
+    contactName?: string;
 }
 
 export interface CheckInStudentDto {
@@ -36,8 +37,8 @@ export class WhatsAppController {
     @Post('send-message')
     @UseGuards(JwtAuthGuard)
     async sendMessage(@Body() data: SendMessageDto) {
-        console.log('Enviando mensagem WhatsApp:', data);
-        return this.whatsappService.sendMessage(data.phone, data.message);
+        console.log('Enviando mensagem WhatsApp via ChatGuru:', data);
+        return this.whatsappService.sendMessage(data.phone, data.message, data.contactName);
     }
 
     @Post('send-checkin-links')
@@ -63,7 +64,7 @@ export class WhatsAppController {
     @Get('test-connection')
     @UseGuards(JwtAuthGuard)
     async testConnection() {
-        console.log('Testando conectividade Z-API...');
+        console.log('Testando conectividade ChatGuru...');
         return this.whatsappService.testZApiConnection();
     }
 

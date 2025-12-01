@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsNumber, IsEnum, IsNotEmpty, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { EStatusAlunosGeral } from '../../../config/entities/enum';
+import { EStatusAlunosGeral, ETipoVinculoAluno } from '../../../config/entities/enum';
 
 export class GetAlunosDto {
     @IsOptional()
@@ -61,11 +61,19 @@ export class AlunoResponseDto {
     possui_deficiencia: boolean;
     desc_deficiencia?: string;
     url_foto_aluno?: string;
+    id_aluno_vinculado?: number;
+    tipo_vinculo?: ETipoVinculoAluno;
+    id_treinamento_bonus?: number;
     created_at: Date;
     updated_at: Date;
     polo?: {
         id: number;
         nome: string;
+    };
+    id_aluno_vinculado_fk?: {
+        id: number;
+        nome: string;
+        email: string;
     };
 }
 
@@ -188,6 +196,20 @@ export class CreateAlunoDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => parseInt(value))
+    id_aluno_vinculado?: number;
+
+    @IsOptional()
+    @IsEnum(ETipoVinculoAluno)
+    tipo_vinculo?: ETipoVinculoAluno;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => parseInt(value))
+    id_treinamento_bonus?: number;
+
+    @IsOptional()
+    @IsNumber()
     criado_por?: number;
 }
 
@@ -299,6 +321,20 @@ export class UpdateAlunoDto {
     @IsString()
     @Transform(({ value }) => value?.trim())
     url_foto_aluno?: string;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => parseInt(value))
+    id_aluno_vinculado?: number;
+
+    @IsOptional()
+    @IsEnum(ETipoVinculoAluno)
+    tipo_vinculo?: ETipoVinculoAluno;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => parseInt(value))
+    id_treinamento_bonus?: number;
 
     @IsOptional()
     @IsNumber()

@@ -342,6 +342,7 @@ export class TurmasService {
                 id_treinamento: turma.id_treinamento,
                 lider_evento: turma.lider_evento,
                 edicao_turma: turma.edicao_turma,
+                id_endereco_evento: turma.id_endereco_evento,
                 cep: turma.cep,
                 logradouro: turma.logradouro,
                 complemento: turma.complemento,
@@ -438,6 +439,72 @@ export class TurmasService {
                 throw new NotFoundException('Líder do evento não encontrado');
             }
 
+            // Processar endereço: se tiver id_endereco_evento, buscar o endereço predefinido
+            let enderecoData: {
+                id_endereco_evento?: number;
+                cep: string;
+                logradouro: string;
+                complemento?: string;
+                numero: string;
+                bairro: string;
+                cidade: string;
+                estado: string;
+            };
+
+            if (createTurmaDto.id_endereco_evento) {
+                // Buscar endereço predefinido
+                const enderecoEvento = await this.uow.enderecoEventosRP.findOne({
+                    where: {
+                        id: createTurmaDto.id_endereco_evento,
+                        deletado_em: null,
+                    },
+                });
+
+                if (!enderecoEvento) {
+                    throw new NotFoundException('Endereço de evento não encontrado');
+                }
+
+                enderecoData = {
+                    id_endereco_evento: createTurmaDto.id_endereco_evento,
+                    cep: enderecoEvento.cep || '',
+                    logradouro: enderecoEvento.logradouro || '',
+                    complemento: createTurmaDto.complemento || enderecoEvento.numero ? undefined : undefined,
+                    numero: enderecoEvento.numero || '',
+                    bairro: enderecoEvento.bairro || '',
+                    cidade: enderecoEvento.cidade || '',
+                    estado: enderecoEvento.estado || '',
+                };
+
+                // Permitir complemento manual mesmo usando endereço predefinido
+                if (createTurmaDto.complemento) {
+                    enderecoData.complemento = createTurmaDto.complemento;
+                }
+            } else {
+                // Validar que todos os campos de endereço foram fornecidos
+                if (
+                    !createTurmaDto.cep ||
+                    !createTurmaDto.logradouro ||
+                    !createTurmaDto.numero ||
+                    !createTurmaDto.bairro ||
+                    !createTurmaDto.cidade ||
+                    !createTurmaDto.estado
+                ) {
+                    throw new BadRequestException(
+                        'É necessário fornecer um endereço de evento predefinido (id_endereco_evento) ou preencher todos os campos de endereço (CEP, logradouro, número, bairro, cidade e estado)',
+                    );
+                }
+
+                enderecoData = {
+                    cep: createTurmaDto.cep,
+                    logradouro: createTurmaDto.logradouro,
+                    complemento: createTurmaDto.complemento,
+                    numero: createTurmaDto.numero,
+                    bairro: createTurmaDto.bairro,
+                    cidade: createTurmaDto.cidade,
+                    estado: createTurmaDto.estado,
+                };
+            }
+
             // Processar detalhamento de bônus
             let detalhamento_bonus = null;
             if (createTurmaDto.autorizar_bonus && createTurmaDto.bonus_treinamentos?.length > 0) {
@@ -452,6 +519,7 @@ export class TurmasService {
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
                 ...createData,
+                ...enderecoData,
                 turma_aberta: createTurmaDto.turma_aberta || false,
                 id_turma_bonus: createTurmaDto.id_turma_bonus || null,
                 detalhamento_bonus,
@@ -464,6 +532,9 @@ export class TurmasService {
             return this.findById(turmaSalva.id);
         } catch (error) {
             console.error('Erro ao criar turma:', error);
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
             throw new BadRequestException('Erro ao criar turma');
         }
     }
@@ -1013,6 +1084,83 @@ export class TurmasService {
                 }
             }
 
+            // Processar endereço: se tiver id_endereco_evento, buscar o endereço predefinido
+            let enderecoData: Partial<{
+                id_endereco_evento?: number;
+                cep: string;
+                logradouro: string;
+                complemento?: string;
+                numero: string;
+                bairro: string;
+                cidade: string;
+                estado: string;
+            }> = {};
+
+            if (updateTurmaDto.id_endereco_evento !== undefined) {
+                if (updateTurmaDto.id_endereco_evento) {
+                    // Buscar endereço predefinido
+                    const enderecoEvento = await this.uow.enderecoEventosRP.findOne({
+                        where: {
+                            id: updateTurmaDto.id_endereco_evento,
+                            deletado_em: null,
+                        },
+                    });
+
+                    if (!enderecoEvento) {
+                        throw new NotFoundException('Endereço de evento não encontrado');
+                    }
+
+                    enderecoData = {
+                        id_endereco_evento: updateTurmaDto.id_endereco_evento,
+                        cep: enderecoEvento.cep || '',
+                        logradouro: enderecoEvento.logradouro || '',
+                        numero: enderecoEvento.numero || '',
+                        bairro: enderecoEvento.bairro || '',
+                        cidade: enderecoEvento.cidade || '',
+                        estado: enderecoEvento.estado || '',
+                    };
+
+                    // Permitir complemento manual mesmo usando endereço predefinido
+                    if (updateTurmaDto.complemento !== undefined) {
+                        enderecoData.complemento = updateTurmaDto.complemento;
+                    }
+                } else {
+                    // Se id_endereco_evento for null, limpar a referência mas manter campos de endereço se fornecidos
+                    enderecoData.id_endereco_evento = null;
+                }
+            } else if (
+                updateTurmaDto.cep ||
+                updateTurmaDto.logradouro ||
+                updateTurmaDto.numero ||
+                updateTurmaDto.bairro ||
+                updateTurmaDto.cidade ||
+                updateTurmaDto.estado
+            ) {
+                // Se campos de endereço foram fornecidos sem id_endereco_evento, validar que todos foram fornecidos
+                if (
+                    !updateTurmaDto.cep ||
+                    !updateTurmaDto.logradouro ||
+                    !updateTurmaDto.numero ||
+                    !updateTurmaDto.bairro ||
+                    !updateTurmaDto.cidade ||
+                    !updateTurmaDto.estado
+                ) {
+                    throw new BadRequestException(
+                        'Ao atualizar o endereço manualmente, todos os campos devem ser fornecidos (CEP, logradouro, número, bairro, cidade e estado)',
+                    );
+                }
+
+                enderecoData = {
+                    cep: updateTurmaDto.cep,
+                    logradouro: updateTurmaDto.logradouro,
+                    complemento: updateTurmaDto.complemento,
+                    numero: updateTurmaDto.numero,
+                    bairro: updateTurmaDto.bairro,
+                    cidade: updateTurmaDto.cidade,
+                    estado: updateTurmaDto.estado,
+                };
+            }
+
             // Processar detalhamento de bônus
             let detalhamento_bonus = turma.detalhamento_bonus; // Manter o existente por padrão
 
@@ -1037,6 +1185,7 @@ export class TurmasService {
             // Atualizar turma
             await this.uow.turmasRP.update(id, {
                 ...updateData,
+                ...enderecoData,
                 detalhamento_bonus,
                 atualizado_por: updateTurmaDto.atualizado_por,
             });

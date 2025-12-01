@@ -3,7 +3,7 @@ import { Entity, Column, PrimaryGeneratedColumn, OneToMany, ManyToOne, JoinColum
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
 import { TurmasAlunos } from './turmasAlunos.entity';
-import { EProfissao, EStatusAlunosGeral } from './enum';
+import { EProfissao, EStatusAlunosGeral, ETipoVinculoAluno } from './enum';
 import { Polos } from './polos.entity';
 import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 
@@ -92,9 +92,31 @@ export class Alunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'url_foto_aluno', nullable: true })
     url_foto_aluno: string;
 
+    @Column({ type: 'int', name: 'id_aluno_vinculado', nullable: true })
+    id_aluno_vinculado: number;
+
+    @Column({
+        type: 'enum',
+        enum: ETipoVinculoAluno,
+        enumName: 'ETipoVinculoAluno',
+        name: 'tipo_vinculo',
+        nullable: true,
+    })
+    tipo_vinculo: ETipoVinculoAluno;
+
+    @Column({ type: 'int', name: 'id_treinamento_bonus', nullable: true })
+    id_treinamento_bonus: number;
+
     @ManyToOne(() => Polos, (polos) => polos.alunos)
     @JoinColumn([{ name: 'id_polo', referencedColumnName: 'id' }])
     id_polo_fk: Polos;
+
+    @ManyToOne(() => Alunos, (aluno) => aluno.alunosVinculados, { nullable: true })
+    @JoinColumn([{ name: 'id_aluno_vinculado', referencedColumnName: 'id' }])
+    id_aluno_vinculado_fk: Alunos;
+
+    @OneToMany(() => Alunos, (aluno) => aluno.id_aluno_vinculado_fk)
+    alunosVinculados: Alunos[];
 
     @OneToMany(() => TurmasAlunos, (turmasAlunos) => turmasAlunos.id_aluno_fk)
     turmasAlunos: TurmasAlunos[];

@@ -83,12 +83,22 @@ export class AlunosService {
                 possui_deficiencia: aluno.possui_deficiencia,
                 desc_deficiencia: aluno.desc_deficiencia,
                 url_foto_aluno: aluno.url_foto_aluno,
+                id_aluno_vinculado: aluno.id_aluno_vinculado,
+                tipo_vinculo: aluno.tipo_vinculo,
+                id_treinamento_bonus: aluno.id_treinamento_bonus,
                 created_at: aluno.criado_em,
                 updated_at: aluno.atualizado_em,
                 polo: aluno.id_polo_fk
                     ? {
                           id: aluno.id_polo_fk.id,
                           nome: aluno.id_polo_fk.polo,
+                      }
+                    : undefined,
+                id_aluno_vinculado_fk: aluno.id_aluno_vinculado_fk
+                    ? {
+                          id: aluno.id_aluno_vinculado_fk.id,
+                          nome: aluno.id_aluno_vinculado_fk.nome,
+                          email: aluno.id_aluno_vinculado_fk.email,
                       }
                     : undefined,
             }));
@@ -120,7 +130,7 @@ export class AlunosService {
                     id,
                     deletado_em: null,
                 },
-                relations: ['id_polo_fk'],
+                relations: ['id_polo_fk', 'id_aluno_vinculado_fk'],
             });
 
             if (!aluno) {
@@ -150,12 +160,22 @@ export class AlunosService {
                 possui_deficiencia: aluno.possui_deficiencia,
                 desc_deficiencia: aluno.desc_deficiencia,
                 url_foto_aluno: aluno.url_foto_aluno,
+                id_aluno_vinculado: aluno.id_aluno_vinculado,
+                tipo_vinculo: aluno.tipo_vinculo,
+                id_treinamento_bonus: aluno.id_treinamento_bonus,
                 created_at: aluno.criado_em,
                 updated_at: aluno.atualizado_em,
                 polo: aluno.id_polo_fk
                     ? {
                           id: aluno.id_polo_fk.id,
                           nome: aluno.id_polo_fk.polo,
+                      }
+                    : undefined,
+                id_aluno_vinculado_fk: aluno.id_aluno_vinculado_fk
+                    ? {
+                          id: aluno.id_aluno_vinculado_fk.id,
+                          nome: aluno.id_aluno_vinculado_fk.nome,
+                          email: aluno.id_aluno_vinculado_fk.email,
                       }
                     : undefined,
             };
@@ -295,7 +315,7 @@ export class AlunosService {
                     id,
                     deletado_em: null,
                 },
-                relations: ['id_polo_fk'],
+                relations: ['id_polo_fk', 'id_aluno_vinculado_fk'],
             });
 
             if (!aluno) {

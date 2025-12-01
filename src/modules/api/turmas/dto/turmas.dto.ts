@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { EStatusTurmas } from '../../../config/entities/enum';
 
@@ -53,27 +53,37 @@ export class CreateTurmaDto {
     @Transform(({ value }) => value?.trim())
     edicao_turma?: string;
 
-    @IsString()
-    cep: string;
+    @IsOptional()
+    @IsNumber()
+    id_endereco_evento?: number;
 
+    @ValidateIf((o) => !o.id_endereco_evento)
     @IsString()
-    logradouro: string;
+    cep?: string;
+
+    @ValidateIf((o) => !o.id_endereco_evento)
+    @IsString()
+    logradouro?: string;
 
     @IsOptional()
     @IsString()
     complemento?: string;
 
+    @ValidateIf((o) => !o.id_endereco_evento)
     @IsString()
-    numero: string;
+    numero?: string;
 
+    @ValidateIf((o) => !o.id_endereco_evento)
     @IsString()
-    bairro: string;
+    bairro?: string;
 
+    @ValidateIf((o) => !o.id_endereco_evento)
     @IsString()
-    cidade: string;
+    cidade?: string;
 
+    @ValidateIf((o) => !o.id_endereco_evento)
     @IsString()
-    estado: string;
+    estado?: string;
 
     @IsOptional()
     @IsEnum(EStatusTurmas)
@@ -131,6 +141,10 @@ export class UpdateTurmaDto {
     @IsString()
     @Transform(({ value }) => value?.trim())
     edicao_turma?: string;
+
+    @IsOptional()
+    @IsNumber()
+    id_endereco_evento?: number;
 
     @IsOptional()
     @IsString()
@@ -265,6 +279,7 @@ export class TurmaResponseDto {
     id_treinamento: number;
     lider_evento: number;
     edicao_turma?: string;
+    id_endereco_evento?: number;
     cep: string;
     logradouro: string;
     complemento: string;

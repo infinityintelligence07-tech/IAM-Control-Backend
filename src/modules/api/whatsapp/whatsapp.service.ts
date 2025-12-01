@@ -89,7 +89,7 @@ export class WhatsAppService {
                 // Buscar dados do aluno na turma
                 const alunoTurma = await this.uow.turmasAlunosRP.findOne({
                     where: { id: student.alunoTurmaId },
-                    relations: ['id_aluno_fk'],
+                    relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk'],
                 });
 
                 if (!alunoTurma || !alunoTurma.id_aluno_fk) {
@@ -111,8 +111,19 @@ export class WhatsAppService {
                 // Gerar URL de check-in - link para formulário de preenchimento de dados
                 const checkInUrl = `${this.frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
+                // Obter dados da turma para local e data
+                const turma = alunoTurma.id_turma_fk;
+                const poloNome = turma?.id_polo_fk?.polo || '';
+                const dataEvento = turma?.data_inicio
+                    ? new Date(turma.data_inicio).toLocaleDateString('pt-BR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                      })
+                    : '';
+
                 // Gerar mensagem
-                const message = this.generateCheckInMessage(student.alunoNome, student.treinamentoNome, checkInUrl);
+                const message = this.generateCheckInMessage(student.alunoNome, student.treinamentoNome, checkInUrl, poloNome, dataEvento);
 
                 // Enviar mensagem
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
@@ -481,7 +492,7 @@ export class WhatsAppService {
     async testZApiConnection(): Promise<{ success: boolean; message: string; details?: any }> {
         try {
             console.log('🔍 Testando conectividade ChatGuru...');
-            
+
             // Tenta criar um chat de teste (não envia mensagem, apenas testa a conexão)
             // Usa um número de teste que não será usado
             const testPhone = '5511999999999';
@@ -573,7 +584,12 @@ export class WhatsAppService {
     /**
      * Envia imagem via WhatsApp usando ChatGuru
      */
-    async sendImageMessage(phone: string, imageBase64: string, caption: string, contactName?: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    async sendImageMessage(
+        phone: string,
+        imageBase64: string,
+        caption: string,
+        contactName?: string,
+    ): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
             // Formatar número de telefone (remover caracteres especiais)
             let formattedPhone = phone.replace(/\D/g, '');
@@ -618,16 +634,23 @@ export class WhatsAppService {
 • Apresente na entrada do evento`;
     }
 
-    private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string): string {
-        return `Olá ${alunoNome}! 👋
+    private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string, local?: string, data?: string): string {
+        const localEData = local && data ? `${local} em ${data}` : local || data || 'local e data a confirmar';
 
-Você está confirmado(a) para o treinamento *${treinamentoNome}*! 🎉
+        return `${alunoNome}, parabéns por dizer SIM a essa jornada transformadora! ✨
 
-Para confirmar sua presença, clique no link abaixo:
+Você garantiu o seu lugar no ${treinamentoNome} em ${localEData} e estamos muito animados pra te receber! 🤩
+
+Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
+
+Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
+
 ${checkInUrl}
 
-⚠️ *IMPORTANTE:* Clique no link apenas quando estiver presente no local do evento.
+Assim que finalizar, sua presença será confirmada automaticamente.
 
-Nos vemos lá! 🚀`;
+Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
+
+Vamos Prosperar! 🙌`;
     }
 }

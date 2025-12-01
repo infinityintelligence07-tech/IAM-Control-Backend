@@ -111,3 +111,8 @@ export enum ETipoDocumento {
     CONTRATO = 'CONTRATO',
     TERMO = 'TERMO',
 }
+
+export enum ETipoVinculoAluno {
+    BONUS = 'BONUS',
+    CONVIDADO = 'CONVIDADO',
+}

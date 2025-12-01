@@ -9,6 +9,7 @@ import { TurmasAlunos } from './turmasAlunos.entity';
 import { Usuarios } from './usuarios.entity';
 import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.entity';
 import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
+import { EnderecoEventos } from './enderecoEventos.entity';
 
 @Entity('turmas', { schema: type_schema })
 export class Turmas extends BaseEntity {
@@ -48,6 +49,9 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'varchar', name: 'estado', nullable: true })
     estado: string;
 
+    @Column({ type: 'int', name: 'id_endereco_evento', nullable: true })
+    id_endereco_evento: number;
+
     @Column({ type: 'enum', enum: EStatusTurmas, enumName: 'EStatusTurmas', name: 'status_turma', default: EStatusTurmas.INSCRICOES_ABERTAS, nullable: false })
     status_turma: EStatusTurmas;
 
@@ -86,6 +90,10 @@ export class Turmas extends BaseEntity {
     @ManyToOne(() => Usuarios, (usuarios) => usuarios.turmas)
     @JoinColumn([{ name: 'lider_evento', referencedColumnName: 'id' }])
     lider_evento_fk: Usuarios;
+
+    @ManyToOne(() => EnderecoEventos)
+    @JoinColumn([{ name: 'id_endereco_evento', referencedColumnName: 'id' }])
+    id_endereco_evento_fk: EnderecoEventos;
 
     @OneToMany(() => TurmasAlunos, (turmasAlunos) => turmasAlunos.id_turma_fk)
     turmasAlunos: TurmasAlunos[];

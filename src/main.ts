@@ -26,7 +26,7 @@ async function bootstrap() {
 
     // Configuração do CORS
     app.enableCors({
-        origin: process.env.FRONTEND_URL || 'https://localhost:3001',
+        origin: process.env.FRONTEND_URL || 'https://iamcontrol.com.br',
         credentials: true,
     });
 

@@ -41,7 +41,7 @@ export class ContractTemplateService {
                 Object.keys(bonus?.valores_bonus || {}).length > 0);
 
         // Obter a URL absoluta da logo
-        const logoUrl = `${process.env.FRONTEND_URL || 'https://iamcontrol.com.br'}/images/logo/logo-escuro.png`;
+        const logoUrl = `${process.env.FRONTEND_URL || 'http://iamcontrol.com.br'}/images/logo/logo-escuro.png`;
 
         // Função para converter URLs do Google Drive para formato de visualização
         const convertGoogleDriveUrl = (url: string): string => {
@@ -65,7 +65,7 @@ export class ContractTemplateService {
             if (url.startsWith('http')) return url;
 
             // Caso contrário, adiciona a URL base do frontend
-            return `${process.env.FRONTEND_URL || 'https://iamcontrol.com.br'}${url}`;
+            return `${process.env.FRONTEND_URL || 'http://iamcontrol.com.br'}${url}`;
         };
 
         // Função para converter URLs relativas em absolutas

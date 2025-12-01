@@ -30,7 +30,7 @@ export class WhatsAppService {
         private readonly uow: UnitOfWorkService,
         private readonly chatGuruService: ChatGuruService,
     ) {
-        this.frontendUrl = process.env.FRONTEND_URL || 'https://localhost:3001';
+        this.frontendUrl = process.env.FRONTEND_URL || 'https://iamcontrol.com.br';
         this.jwtSecret = process.env.JWT_SECRET;
     }
 

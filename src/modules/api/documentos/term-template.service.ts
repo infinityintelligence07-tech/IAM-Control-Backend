@@ -13,7 +13,7 @@ export class TermTemplateService {
         const campos_variaveis = termoData.campos_variaveis || {};
 
         // Obter a URL absoluta da logo
-        const logoUrl = `${process.env.FRONTEND_URL || 'http://localhost:3001'}/images/logo/logo-claro.png`;
+        const logoUrl = `${process.env.FRONTEND_URL || 'https://iamcontrol.com.br'}/images/logo/logo-claro.png`;
 
         // Função para converter URLs
         const convertGoogleDriveUrl = (url: string): string => {
@@ -28,7 +28,7 @@ export class TermTemplateService {
             }
 
             if (url.startsWith('http')) return url;
-            return `${process.env.FRONTEND_URL || 'http://localhost:3001'}${url}`;
+            return `${process.env.FRONTEND_URL || 'https://iamcontrol.com.br'}${url}`;
         };
 
         // Preparar dados do aluno para o termo

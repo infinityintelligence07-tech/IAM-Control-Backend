@@ -1,24 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
-    // Configuração HTTPS
-    let httpsOptions = undefined;
-    try {
-        httpsOptions = {
-            key: readFileSync(join(__dirname, '..', 'cert', 'localhost-key.pem')),
-            cert: readFileSync(join(__dirname, '..', 'cert', 'localhost.pem')),
-        };
-        console.log('🔐 HTTPS configurado com certificados locais');
-    } catch (error) {
-        console.log('⚠️  Certificados HTTPS não encontrados, rodando em HTTP');
-    }
-
-    const app = await NestFactory.create(AppModule, { httpsOptions });
+    const app = await NestFactory.create(AppModule);
 
     // Configuração do body parser para payloads grandes (50MB)
     app.use(bodyParser.json({ limit: '50mb' }));
@@ -26,7 +12,7 @@ async function bootstrap() {
 
     // Configuração do CORS
     app.enableCors({
-        origin: process.env.FRONTEND_URL || 'https://iamcontrol.com.br',
+        origin: process.env.FRONTEND_URL || 'http://iamcontrol.com.br',
         credentials: true,
     });
 
@@ -41,7 +27,6 @@ async function bootstrap() {
 
     const port = process.env.PORT || 3000;
     await app.listen(port);
-    const protocol = httpsOptions ? 'https' : 'http';
-    console.log(`🚀 Servidor rodando em ${protocol}://localhost:${port}`);
+    console.log(`🚀 Servidor rodando em http://localhost:${port}`);
 }
 bootstrap();

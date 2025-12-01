@@ -1667,7 +1667,7 @@ export class TurmasService {
             });
 
             // Gerar URL do formulário de preenchimento
-            const frontendUrl = process.env.FRONTEND_URL || 'https://iamcontrol.com.br';
+            const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
             const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
             // Gerar mensagem

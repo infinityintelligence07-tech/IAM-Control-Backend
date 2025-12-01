@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto } from './dto/usuarios.dto';
-import { ILike, IsNull, Not } from 'typeorm';
+import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
+import { ILike, IsNull, Not, ArrayContains } from 'typeorm';
 import { Usuarios } from '../../config/entities/usuarios.entity';
 import { ESetores, EFuncoes } from '../../config/entities/enum';
 
@@ -10,7 +10,7 @@ export class UsuariosService {
     constructor(private readonly uow: UnitOfWorkService) {}
 
     async findAll(filters: GetUsuariosDto): Promise<UsuariosListResponseDto> {
-        const { page = 1, limit = 10, nome, email, setor } = filters;
+        const { page = 1, limit = 10, nome, email, setor, funcao } = filters;
 
         console.log('Filtros recebidos:', filters);
 
@@ -29,6 +29,10 @@ export class UsuariosService {
 
         if (setor) {
             whereConditions.setor = setor;
+        }
+
+        if (funcao) {
+            whereConditions.funcao = ArrayContains([funcao]);
         }
 
         try {
@@ -205,6 +209,56 @@ export class UsuariosService {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao atualizar usuário');
+        }
+    }
+
+    async softDelete(id: number, softDeleteDto: SoftDeleteUsuarioDto): Promise<void> {
+        try {
+            const usuario = await this.uow.usuariosRP.findOne({
+                where: {
+                    id,
+                    deletado_em: IsNull(),
+                },
+            });
+
+            if (!usuario) {
+                throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
+            }
+
+            usuario.deletado_em = new Date(softDeleteDto.deletado_em);
+            if (softDeleteDto.atualizado_por) {
+                usuario.atualizado_por = softDeleteDto.atualizado_por;
+            }
+
+            await this.uow.usuariosRP.save(usuario);
+            console.log('Usuário marcado como deletado:', id);
+        } catch (error) {
+            console.error('Erro ao fazer soft delete do usuário:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao fazer soft delete do usuário');
+        }
+    }
+
+    async delete(id: number): Promise<void> {
+        try {
+            const usuario = await this.uow.usuariosRP.findOne({
+                where: { id },
+            });
+
+            if (!usuario) {
+                throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
+            }
+
+            await this.uow.usuariosRP.remove(usuario);
+            console.log('Usuário removido permanentemente:', id);
+        } catch (error) {
+            console.error('Erro ao deletar usuário:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao deletar usuário');
         }
     }
 }

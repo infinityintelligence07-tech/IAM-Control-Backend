@@ -6,6 +6,9 @@ import * as bodyParser from 'body-parser';
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
 
+    // Prefixo global para todas as rotas da API
+    app.setGlobalPrefix('api');
+
     // Configuração do body parser para payloads grandes (50MB)
     app.use(bodyParser.json({ limit: '50mb' }));
     app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
@@ -32,6 +35,6 @@ async function bootstrap() {
 
     const port = process.env.PORT || 3000;
     await app.listen(port);
-    console.log(`🚀 Servidor rodando em http://localhost:${port}`);
+    console.log(`🚀 Servidor rodando em http://localhost:${port}/api`);
 }
 bootstrap();

@@ -18,6 +18,10 @@ export class GetUsuariosDto {
     setor?: ESetores;
 
     @IsOptional()
+    @IsEnum(EFuncoes)
+    funcao?: EFuncoes;
+
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value))
     page?: number = 1;
@@ -84,4 +88,14 @@ export class UpdateUsuarioDto {
     @IsOptional()
     @IsString()
     url_foto?: string;
+}
+
+export class SoftDeleteUsuarioDto {
+    @IsNotEmpty()
+    @IsString()
+    deletado_em: string;
+
+    @IsOptional()
+    @IsNumber()
+    atualizado_por?: number;
 }

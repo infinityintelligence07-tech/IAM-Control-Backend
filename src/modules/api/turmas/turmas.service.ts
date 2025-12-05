@@ -26,6 +26,33 @@ export class TurmasService {
     ) {}
 
     /**
+     * Formatar data para o formato YYYY-MM-DD (apenas data, sem hora)
+     */
+    private formatDateToDateOnly(dateString: string): string {
+        if (!dateString) return dateString;
+        
+        // Se já está no formato YYYY-MM-DD, retornar como está
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+            return dateString;
+        }
+        
+        // Tentar parsear a data e formatar
+        try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) {
+                return dateString; // Retornar original se inválida
+            }
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        } catch (error) {
+            console.error('Erro ao formatar data:', error);
+            return dateString; // Retornar original em caso de erro
+        }
+    }
+
+    /**
      * Verificar e atualizar automaticamente o status da turma para ENCERRADA
      * quando necessário (data atual > data_final OU (data atual >= data_inicio E expectativa_real >= capacidade_sala))
      */
@@ -103,11 +130,16 @@ export class TurmasService {
         if (!turmasIds.length) return {};
 
         try {
+            console.log(`🔍 [getPreCadastrosCountByTurmas] Buscando pré-cadastros para turmas:`, turmasIds);
+
             const preCadastros = await this.uow.masterclassPreCadastrosRP.find({
                 where: {
                     id_turma: In(turmasIds),
+                    deletado_em: null,
                 },
             });
+
+            console.log(`📊 [getPreCadastrosCountByTurmas] Total de pré-cadastros encontrados: ${preCadastros.length}`);
 
             const counts: Record<number, { total: number; presentes: number }> = {};
 
@@ -121,9 +153,11 @@ export class TurmasService {
                 }
             });
 
+            console.log(`✅ [getPreCadastrosCountByTurmas] Contadores por turma:`, counts);
+
             return counts;
         } catch (error) {
-            console.error('Erro ao buscar contadores de pré-cadastrados:', error);
+            console.error('❌ [getPreCadastrosCountByTurmas] Erro ao buscar contadores de pré-cadastrados:', error);
             return {};
         }
     }
@@ -156,48 +190,97 @@ export class TurmasService {
     }
 
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
-        const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento } = filters;
+        const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final } = filters;
 
         console.log('Filtros recebidos:', filters);
 
-        // Construir condições de busca
-        const whereConditions: any = {};
-
-        if (edicao_turma) {
-            whereConditions.edicao_turma = ILike(`%${edicao_turma}%`);
-        }
-
-        if (status_turma) {
-            whereConditions.status_turma = status_turma;
-        }
-
-        if (id_polo) {
-            whereConditions.id_polo = id_polo;
-        }
-
-        if (id_treinamento) {
-            whereConditions.id_treinamento = id_treinamento;
-        }
-
-        // Adicionar condição para excluir registros deletados
-        whereConditions.deletado_em = null;
-
-        // Configurar opções de busca
-        const findOptions: FindManyOptions = {
-            where: whereConditions,
-            relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos', 'turmasAlunos.id_aluno_fk'],
-            order: {
-                criado_em: 'DESC',
-            },
-            skip: (page - 1) * limit,
-            take: limit,
-        };
-
-        console.log('Opções de busca:', JSON.stringify(findOptions, null, 2));
-
         try {
-            // Buscar turmas com paginação
-            const [turmas, total] = await this.uow.turmasRP.findAndCount(findOptions);
+            let turmas: any[];
+            let total: number;
+
+            // Se houver filtros de data, usar QueryBuilder para condições mais complexas
+            if (data_inicio || data_final) {
+                const queryBuilder = this.uow.turmasRP
+                    .createQueryBuilder('turma')
+                    .leftJoinAndSelect('turma.id_polo_fk', 'polo', 'polo.deletado_em IS NULL')
+                    .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento', 'treinamento.deletado_em IS NULL')
+                    .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
+                    .leftJoinAndSelect('turma.turmasAlunos', 'turmasAlunos', 'turmasAlunos.deletado_em IS NULL')
+                    .leftJoinAndSelect('turmasAlunos.id_aluno_fk', 'aluno', 'aluno.deletado_em IS NULL')
+                    .where('turma.deletado_em IS NULL');
+
+                // Aplicar filtros básicos
+                if (edicao_turma) {
+                    queryBuilder.andWhere('turma.edicao_turma ILIKE :edicao_turma', { edicao_turma: `%${edicao_turma}%` });
+                }
+
+                if (status_turma) {
+                    queryBuilder.andWhere('turma.status_turma = :status_turma', { status_turma });
+                }
+
+                if (id_polo) {
+                    queryBuilder.andWhere('turma.id_polo = :id_polo', { id_polo });
+                }
+
+                if (id_treinamento) {
+                    queryBuilder.andWhere('turma.id_treinamento = :id_treinamento', { id_treinamento });
+                }
+
+                // Aplicar filtros de data
+                // Buscar turmas que tenham sobreposição com o intervalo especificado
+                // Uma turma está no intervalo se: data_inicio_turma <= data_final_filtro E data_final_turma >= data_inicio_filtro
+                if (data_inicio && data_final) {
+                    queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
+                    queryBuilder.andWhere('turma.data_final >= :data_inicio', { data_inicio });
+                } else if (data_inicio) {
+                    // Apenas data início: buscar turmas que terminem depois ou na data inicial
+                    queryBuilder.andWhere('turma.data_final >= :data_inicio', { data_inicio });
+                } else if (data_final) {
+                    // Apenas data final: buscar turmas que comecem antes ou na data final
+                    queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
+                }
+
+                queryBuilder.orderBy('turma.criado_em', 'DESC');
+                queryBuilder.skip((page - 1) * limit);
+                queryBuilder.take(limit);
+
+                [turmas, total] = await queryBuilder.getManyAndCount();
+            } else {
+                // Sem filtros de data, usar o método padrão
+                const whereConditions: any = {};
+
+                if (edicao_turma) {
+                    whereConditions.edicao_turma = ILike(`%${edicao_turma}%`);
+                }
+
+                if (status_turma) {
+                    whereConditions.status_turma = status_turma;
+                }
+
+                if (id_polo) {
+                    whereConditions.id_polo = id_polo;
+                }
+
+                if (id_treinamento) {
+                    whereConditions.id_treinamento = id_treinamento;
+                }
+
+                whereConditions.deletado_em = null;
+
+                const findOptions: FindManyOptions = {
+                    where: whereConditions,
+                    relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos', 'turmasAlunos.id_aluno_fk'],
+                    order: {
+                        criado_em: 'DESC',
+                    },
+                    skip: (page - 1) * limit,
+                    take: limit,
+                };
+
+                console.log('Opções de busca:', JSON.stringify(findOptions, null, 2));
+
+                [turmas, total] = await this.uow.turmasRP.findAndCount(findOptions);
+            }
 
             console.log(`Encontradas ${turmas.length} turmas de um total de ${total}`);
 
@@ -221,9 +304,32 @@ export class TurmasService {
                 await this.verificarEAtualizarStatusTurma(turma);
             }
 
-            // Buscar contadores de pré-cadastrados para turmas de masterclass
-            const turmasIds = turmasFiltradas.map((t) => t.id);
-            const preCadastrosCount = await this.getPreCadastrosCountByTurmas(turmasIds);
+            // Debug: verificar turma 23
+            const turma23 = turmasFiltradas.find(t => t.id === 23);
+            if (turma23) {
+                console.log(`🎯 [DEBUG] Turma 23 encontrada:`);
+                console.log(`  - id_treinamento: ${turma23.id_treinamento}`);
+                console.log(`  - id_treinamento_fk: ${turma23.id_treinamento_fk ? 'EXISTS' : 'NULL'}`);
+                if (turma23.id_treinamento_fk) {
+                    console.log(`  - tipo_palestra: ${turma23.id_treinamento_fk.tipo_palestra}`);
+                    console.log(`  - tipo_treinamento: ${turma23.id_treinamento_fk.tipo_treinamento}`);
+                }
+            } else {
+                console.log(`⚠️ [DEBUG] Turma 23 NÃO encontrada nas turmas filtradas`);
+            }
+
+            // Buscar contadores de pré-cadastrados apenas para turmas de palestra/masterclass
+            const turmasPalestras = turmasFiltradas.filter((t) => {
+                const isPalestra = t.id_treinamento_fk?.tipo_palestra === true || 
+                                  t.id_treinamento_fk?.tipo_treinamento === false;
+                if (t.id === 23) {
+                    console.log(`🎯 [DEBUG] Turma 23 - tipo_palestra: ${t.id_treinamento_fk?.tipo_palestra}, tipo_treinamento: ${t.id_treinamento_fk?.tipo_treinamento}, isPalestra: ${isPalestra}`);
+                }
+                return isPalestra;
+            });
+            const turmasPalestrasIds = turmasPalestras.map((t) => t.id);
+            console.log(`🎯 [DEBUG] Turmas identificadas como palestras: ${turmasPalestrasIds.join(', ')}`);
+            const preCadastrosCount = await this.getPreCadastrosCountByTurmas(turmasPalestrasIds);
 
             // Transformar dados para o formato de resposta
             const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => {
@@ -284,7 +390,21 @@ export class TurmasService {
                               nome: turma.lider_evento_fk.nome,
                           }
                         : undefined,
-                    alunos_count: turma.turmasAlunos?.length || 0,
+                    // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
+                    alunos_count: (() => {
+                        const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || 
+                                          turma.id_treinamento_fk?.tipo_treinamento === false;
+                        if (turma.id === 23) {
+                            console.log(`🎯 [DEBUG] Turma 23 - Calculando alunos_count:`);
+                            console.log(`  - isPalestra: ${isPalestra}`);
+                            console.log(`  - preCadastrosCount[23]: ${JSON.stringify(preCadastrosCount[turma.id])}`);
+                            console.log(`  - alunos_count será: ${isPalestra ? (preCadastrosCount[turma.id]?.total || 0) : (turma.turmasAlunos?.length || 0)}`);
+                        }
+                        if (isPalestra) {
+                            return preCadastrosCount[turma.id]?.total || 0;
+                        }
+                        return turma.turmasAlunos?.length || 0;
+                    })(),
                     alunos_confirmados_count:
                         turma.turmasAlunos?.filter(
                             (ta) =>
@@ -333,8 +453,12 @@ export class TurmasService {
                 return null;
             }
 
-            // Buscar contadores de pré-cadastrados
-            const preCadastrosCount = await this.getPreCadastrosCountByTurmas([turma.id]);
+            // Buscar contadores de pré-cadastrados apenas se for palestra/masterclass
+            const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || 
+                               turma.id_treinamento_fk?.tipo_treinamento === false;
+            const preCadastrosCount = isPalestra 
+                ? await this.getPreCadastrosCountByTurmas([turma.id])
+                : {};
 
             return {
                 id: turma.id,
@@ -386,7 +510,13 @@ export class TurmasService {
                           nome: turma.lider_evento_fk.nome,
                       }
                     : undefined,
-                alunos_count: turma.turmasAlunos?.length || 0,
+                // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
+                alunos_count: (() => {
+                    if (isPalestra) {
+                        return preCadastrosCount[turma.id]?.total || 0;
+                    }
+                    return turma.turmasAlunos?.length || 0;
+                })(),
                 alunos_confirmados_count:
                     turma.turmasAlunos?.filter(
                         (ta) =>
@@ -431,12 +561,14 @@ export class TurmasService {
                 throw new NotFoundException('Treinamento não encontrado');
             }
 
-            // Verificar se líder existe
-            const lider = await this.uow.usuariosRP.findOne({
-                where: { id: createTurmaDto.lider_evento },
-            });
-            if (!lider) {
-                throw new NotFoundException('Líder do evento não encontrado');
+            // Verificar se líder existe (apenas se fornecido)
+            if (createTurmaDto.lider_evento) {
+                const lider = await this.uow.usuariosRP.findOne({
+                    where: { id: createTurmaDto.lider_evento },
+                });
+                if (!lider) {
+                    throw new NotFoundException('Líder do evento não encontrado');
+                }
             }
 
             // Processar endereço: se tiver id_endereco_evento, buscar o endereço predefinido
@@ -516,11 +648,23 @@ export class TurmasService {
             // Remover campos que não existem na entidade antes de criar
             const { bonus_treinamentos, ...createData } = createTurmaDto;
 
+            // Formatar datas para o formato YYYY-MM-DD
+            const dataInicioFormatada = this.formatDateToDateOnly(createTurmaDto.data_inicio);
+            const dataFinalFormatada = this.formatDateToDateOnly(createTurmaDto.data_final);
+
+            // Verificar se é palestra para definir turma_aberta como true por padrão
+            const isPalestra = treinamento.tipo_palestra === true;
+            const turmaAberta = createTurmaDto.turma_aberta !== undefined 
+                ? createTurmaDto.turma_aberta 
+                : (isPalestra ? true : false);
+
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
                 ...createData,
                 ...enderecoData,
-                turma_aberta: createTurmaDto.turma_aberta || false,
+                data_inicio: dataInicioFormatada,
+                data_final: dataFinalFormatada,
+                turma_aberta: turmaAberta,
                 id_turma_bonus: createTurmaDto.id_turma_bonus || null,
                 detalhamento_bonus,
                 criado_por: createTurmaDto.criado_por,
@@ -706,8 +850,8 @@ export class TurmasService {
                 .leftJoinAndSelect('mc.id_turma_fk', 'turma')
                 .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
                 .leftJoinAndSelect('turma.id_polo_fk', 'polo')
-                .where('CAST(mc.id_aluno_vinculado AS TEXT) = :idAluno', { idAluno: idAlunoString })
-                .orWhere('mc.id_aluno_vinculado = :idAlunoNum', { idAlunoNum: id_aluno })
+                .where('mc.deletado_em IS NULL')
+                .andWhere('(CAST(mc.id_aluno_vinculado AS TEXT) = :idAluno OR mc.id_aluno_vinculado = :idAlunoNum)', { idAluno: idAlunoString, idAlunoNum: id_aluno })
                 .orderBy('mc.criado_em', 'DESC')
                 .getMany();
 
@@ -718,7 +862,8 @@ export class TurmasService {
                     .leftJoinAndSelect('mc.id_turma_fk', 'turma')
                     .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
                     .leftJoinAndSelect('turma.id_polo_fk', 'polo')
-                    .where('mc.id_aluno_vinculado IS NULL'); // Apenas masterclass não vinculadas
+                    .where('mc.deletado_em IS NULL')
+                    .andWhere('mc.id_aluno_vinculado IS NULL'); // Apenas masterclass não vinculadas
 
                 const conditions: string[] = [];
                 const params: any = {};
@@ -1179,12 +1324,35 @@ export class TurmasService {
             // Remover campos que não existem na entidade antes de atualizar
             const { bonus_treinamentos, ...updateData } = updateTurmaDto;
 
+            // Formatar datas se fornecidas
+            const updateDataWithDates: any = { ...updateData };
+            console.log(`[DEBUG] Datas recebidas no update:`, {
+                data_inicio_original: updateTurmaDto.data_inicio,
+                data_final_original: updateTurmaDto.data_final,
+                data_inicio_undefined: updateTurmaDto.data_inicio === undefined,
+                data_final_undefined: updateTurmaDto.data_final === undefined,
+            });
+            
+            if (updateTurmaDto.data_inicio !== undefined && updateTurmaDto.data_inicio !== null && updateTurmaDto.data_inicio !== '') {
+                updateDataWithDates.data_inicio = this.formatDateToDateOnly(updateTurmaDto.data_inicio);
+                console.log(`[DEBUG] Data início formatada: ${updateDataWithDates.data_inicio}`);
+            }
+            if (updateTurmaDto.data_final !== undefined && updateTurmaDto.data_final !== null && updateTurmaDto.data_final !== '') {
+                updateDataWithDates.data_final = this.formatDateToDateOnly(updateTurmaDto.data_final);
+                console.log(`[DEBUG] Data final formatada: ${updateDataWithDates.data_final}`);
+            }
+            
+            console.log(`[DEBUG] Dados finais para update:`, {
+                data_inicio: updateDataWithDates.data_inicio,
+                data_final: updateDataWithDates.data_final,
+            });
+
             // Verificar se o status está sendo alterado manualmente
             const statusFoiAlteradoManualmente = updateTurmaDto.status_turma !== undefined && updateTurmaDto.status_turma !== turma.status_turma;
 
             // Atualizar turma
             await this.uow.turmasRP.update(id, {
-                ...updateData,
+                ...updateDataWithDates,
                 ...enderecoData,
                 detalhamento_bonus,
                 atualizado_por: updateTurmaDto.atualizado_por,
@@ -1671,17 +1839,21 @@ export class TurmasService {
             const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
             // Gerar mensagem
-            const message = `Olá ${aluno.nome}! 👋
+            const message = `Olá ${aluno.nome}! , parabéns por dizer SIM a essa jornada transformadora! ✨
 
-Você está confirmado(a) para o treinamento *${checkInData.treinamentoNome}*! 🎉
+Você garantiu o seu lugar no ${checkInData.treinamentoNome} e estamos muito animados pra te receber! 🤩
 
-📋 Para completar seu cadastro e confirmar sua presença, clique no link abaixo e preencha seus dados:
+Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
+
+Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
 ${formularioUrl}
 
-⚠️ *IMPORTANTE:* Preencha todos os dados solicitados para completar seu check-in.
+Assim que finalizar, sua presença será confirmada automaticamente.
 
-Nos vemos lá! 🚀`;
+Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
+
+Vamos Prosperar! 🙌`;
 
             // Enviar mensagem via WhatsApp
             const result = await this.whatsappService.sendMessage(aluno.telefone_um, message, aluno.nome);

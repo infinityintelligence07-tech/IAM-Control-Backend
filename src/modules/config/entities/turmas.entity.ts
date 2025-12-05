@@ -22,7 +22,7 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'id_treinamento', nullable: false })
     id_treinamento: number;
 
-    @Column({ type: 'int', name: 'lider_evento', nullable: false })
+    @Column({ type: 'int', name: 'lider_evento', nullable: true })
     lider_evento: number;
 
     @Column({ type: 'varchar', name: 'edicao_turma', nullable: true })
@@ -52,7 +52,7 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'id_endereco_evento', nullable: true })
     id_endereco_evento: number;
 
-    @Column({ type: 'enum', enum: EStatusTurmas, enumName: 'EStatusTurmas', name: 'status_turma', default: EStatusTurmas.INSCRICOES_ABERTAS, nullable: false })
+    @Column({ type: 'enum', enum: EStatusTurmas, enumName: 'EStatusTurmas', name: 'status_turma', default: EStatusTurmas.AGUARDANDO_LIBERACAO, nullable: false })
     status_turma: EStatusTurmas;
 
     @Column({ type: 'boolean', name: 'autorizar_bonus', default: false, nullable: false })

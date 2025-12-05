@@ -1126,11 +1126,17 @@ export class ContractTemplateService {
                                           valor: 0,
                                           forma: fp.forma,
                                           tipo: fp.tipo,
-                                          parcelas: 0,
+                                          parcelas: fp.parcelas || 0,
                                       };
                                   }
                                   formasParceladasAgrupadas[key].valor += fp.valor || 0;
-                                  formasParceladasAgrupadas[key].parcelas += 1;
+                                  // Usar o número de parcelas do objeto, não contar itens
+                                  if (fp.parcelas && fp.parcelas > formasParceladasAgrupadas[key].parcelas) {
+                                      formasParceladasAgrupadas[key].parcelas = fp.parcelas;
+                                  } else if (!formasParceladasAgrupadas[key].parcelas) {
+                                      // Se não tiver parcelas no objeto, incrementar (fallback)
+                                      formasParceladasAgrupadas[key].parcelas += 1;
+                                  }
                               }
                           });
 
@@ -1329,6 +1335,11 @@ export class ContractTemplateService {
      * Reestrutura os dados preparados pelo prepareTemplateDataFromSavedContract para o formato esperado pelo ModernContractPDF
      */
     private restructureDataForModernContract(data: any): any {
+        console.log('=== RESTRUCTURE DATA FOR MODERN CONTRACT ===');
+        console.log('Data recebida:', JSON.stringify(data, null, 2));
+        console.log('Formas pagamento:', JSON.stringify(data.pagamento?.formas_pagamento || data.formas_pagamento, null, 2));
+        console.log('Testemunhas:', JSON.stringify(data.testemunhas, null, 2));
+        
         return {
             aluno_nome: data.aluno?.nome || '',
             dados_contrato: {
@@ -1353,7 +1364,9 @@ export class ContractTemplateService {
                     url_logo_treinamento: data.treinamento?.url_logo_treinamento || '',
                 },
                 pagamento: {
-                    formas_pagamento: data.formas_pagamento || data.pagamento?.formas_pagamento || [],
+                    forma_pagamento: data.pagamento?.forma_pagamento || '',
+                    formas_pagamento: data.pagamento?.formas_pagamento || data.formas_pagamento || [],
+                    valores_formas_pagamento: data.pagamento?.valores_formas_pagamento || data.valores_formas_pagamento || {},
                 },
                 bonus: {
                     tipos_bonus: data.bonus_selecionados || [],
@@ -1363,16 +1376,20 @@ export class ContractTemplateService {
                         edicao_turma: '',
                     },
                 },
-                testemunhas: {
+                testemunhas: data.testemunhas ? {
                     testemunha_um: {
-                        nome: data.testemunhas?.testemunha_um?.nome || '',
-                        cpf: data.testemunhas?.testemunha_um?.cpf || '',
+                        nome: data.testemunhas.testemunha_um?.nome || '',
+                        cpf: data.testemunhas.testemunha_um?.cpf || '',
+                        email: data.testemunhas.testemunha_um?.email || '',
+                        telefone: data.testemunhas.testemunha_um?.telefone || '',
                     },
                     testemunha_dois: {
-                        nome: data.testemunhas?.testemunha_dois?.nome || '',
-                        cpf: data.testemunhas?.testemunha_dois?.cpf || '',
+                        nome: data.testemunhas.testemunha_dois?.nome || '',
+                        cpf: data.testemunhas.testemunha_dois?.cpf || '',
+                        email: data.testemunhas.testemunha_dois?.email || '',
+                        telefone: data.testemunhas.testemunha_dois?.telefone || '',
                     },
-                },
+                } : undefined,
                 campos_variaveis: {
                     'Cidade do Treinamento': data.campos_variaveis?.['Cidade do Treinamento'] || '',
                     'Data Prevista do Treinamento': data.campos_variaveis?.['Data Prevista do Treinamento'] || '',
@@ -1505,10 +1522,21 @@ export class ContractTemplateService {
             // Gerar HTML baseado no ModernContractPDF.tsx
             const html = this.generateModernContractHTML(contrato);
 
-            // Configurar o Puppeteer
+            // Configurar o Puppeteer com argumentos adicionais para ambientes Linux/Docker
             const browser = await puppeteer.launch({
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process',
+                    '--disable-gpu',
+                    '--disable-software-rasterizer',
+                ],
+                ignoreDefaultArgs: ['--disable-extensions'],
             });
 
             const page = await browser.newPage();
@@ -1531,8 +1559,18 @@ export class ContractTemplateService {
             await browser.close();
 
             return Buffer.from(pdfBuffer);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Erro ao gerar PDF do contrato:', error);
+            
+            // Verificar se é erro de dependências do sistema
+            if (error?.message?.includes('cannot open shared object file') || 
+                error?.message?.includes('Failed to launch the browser process')) {
+                const errorMessage = 'Erro ao iniciar o navegador. Dependências do sistema podem estar faltando. ' +
+                    'Execute: apt-get update && apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2';
+                console.error(errorMessage);
+                throw new Error('Erro ao gerar PDF do contrato: Dependências do sistema faltando. Verifique os logs do servidor.');
+            }
+            
             throw new Error('Erro ao gerar PDF do contrato');
         }
     }

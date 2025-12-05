@@ -155,11 +155,20 @@ export class DocumentosController {
     @Post('zapsign/criar-contrato')
     @UseGuards(JwtAuthGuard)
     async criarContratoZapSign(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
-        console.log('=== CRIANDO CONTRATO NO ZAPSIGN ===');
-        console.log('Dados recebidos:', JSON.stringify(criarContratoDto, null, 2));
-        console.log('Criando contrato no ZapSign para aluno:', criarContratoDto.id_aluno);
-        const userId = (req.user as any)?.sub;
-        return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
+        try {
+            console.log('=== CRIANDO CONTRATO NO ZAPSIGN ===');
+            console.log('Dados recebidos:', JSON.stringify(criarContratoDto, null, 2));
+            console.log('Formas de pagamento:', JSON.stringify(criarContratoDto.formas_pagamento, null, 2));
+            console.log('Criando contrato no ZapSign para aluno:', criarContratoDto.id_aluno);
+            const userId = (req.user as any)?.sub;
+            return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
+        } catch (error: any) {
+            console.error('Erro ao criar contrato:', error);
+            if (error.response) {
+                console.error('Erro de validação:', JSON.stringify(error.response, null, 2));
+            }
+            throw error;
+        }
     }
 
     @Post('zapsign/criar-termo')

@@ -286,31 +286,55 @@ export class DocumentosService {
                             preco_total_pago: 0,
                         });
                         turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
-                    } catch (error) {
-                        // Se houver erro de constraint única, tentar reativar registro deletado
+                    } catch (error: any) {
+                        // Verificar se é erro de constraint única
                         if (
                             typeof error === 'object' &&
                             error !== null &&
                             'code' in error &&
                             ((error as any).code === '23505' || (error as any).driverError?.code === '23505')
                         ) {
-                            const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
-                                where: {
+                            const constraint = error?.constraint || error?.driverError?.constraint;
+                            
+                            // Se for erro de sequência desincronizada (primary key)
+                            if (constraint === 'pk_turmas_alunos_trn') {
+                                console.warn('Sequência de IDs desincronizada detectada em turmas_alunos_treinamentos. Corrigindo...');
+                                
+                                // Corrigir a sequência
+                                await this.fixTurmasAlunosTreinamentosSequence();
+                                
+                                // Criar um novo objeto para garantir que não há ID pré-definido
+                                const novoRegistro = this.uow.turmasAlunosTreinamentosRP.create({
                                     id_turma_aluno: turmaAluno.id,
                                     id_treinamento: parseInt(criarContratoDto.id_treinamento),
-                                },
-                            });
-
-                            if (registroExistente && registroExistente.deletado_em) {
-                                // Reativar o registro deletado
-                                registroExistente.deletado_em = null;
-                                registroExistente.atualizado_em = new Date();
-                                if (userId) {
-                                    registroExistente.atualizado_por = userId;
-                                }
-                                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroExistente);
+                                    preco_treinamento: treinamento.preco_treinamento || 0,
+                                    forma_pgto: [],
+                                    preco_total_pago: 0,
+                                });
+                                
+                                // Tentar novamente
+                                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(novoRegistro);
+                                console.log('Registro criado com sucesso após correção da sequência');
                             } else {
-                                throw error;
+                                // Se for outro tipo de constraint única, tentar reativar registro deletado
+                                const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                                    where: {
+                                        id_turma_aluno: turmaAluno.id,
+                                        id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                                    },
+                                });
+
+                                if (registroExistente && registroExistente.deletado_em) {
+                                    // Reativar o registro deletado
+                                    registroExistente.deletado_em = null;
+                                    registroExistente.atualizado_em = new Date();
+                                    if (userId) {
+                                        registroExistente.atualizado_por = userId;
+                                    }
+                                    turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroExistente);
+                                } else {
+                                    throw error;
+                                }
                             }
                         } else {
                             throw error;
@@ -334,6 +358,25 @@ export class DocumentosService {
                 },
             ];
 
+            // Adicionar testemunhas aos signers se existirem
+            if (criarContratoDto.testemunha_um_nome && criarContratoDto.testemunha_um_cpf) {
+                signers.push({
+                    name: criarContratoDto.testemunha_um_nome,
+                    email: criarContratoDto.testemunha_um_email || '',
+                    phone: criarContratoDto.testemunha_um_telefone || '',
+                    action: 'sign' as const,
+                });
+            }
+
+            if (criarContratoDto.testemunha_dois_nome && criarContratoDto.testemunha_dois_cpf) {
+                signers.push({
+                    name: criarContratoDto.testemunha_dois_nome,
+                    email: criarContratoDto.testemunha_dois_email || '',
+                    phone: criarContratoDto.testemunha_dois_telefone || '',
+                    action: 'sign' as const,
+                });
+            }
+
             // Criar documento no ZapSign usando o PDF gerado
             const documentData = {
                 name: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
@@ -353,14 +396,24 @@ export class DocumentosService {
             bonusData.campos_variaveis = { ...bonusData.campos_variaveis, ...boletoData };
 
             // Preparar dados dos signers para o campo zapsign_signers_data
-            const signersData = signers.map((signer) => ({
-                name: signer.name,
-                email: signer.email || undefined,
-                telefone: signer.phone || undefined,
-                cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
-                status: 'pending',
-                signing_url: zapSignResponse.signers.find((s) => s.name === signer.name)?.sign_url || '',
-            }));
+            const signersData = signers.map((signer, index) => {
+                // Tentar encontrar o signer correspondente no ZapSign por índice ou nome
+                const zapSignSigner = zapSignResponse.signers[index] || 
+                                     zapSignResponse.signers.find((s) => s.name === signer.name);
+                
+                return {
+                    name: signer.name,
+                    email: signer.email || undefined,
+                    telefone: signer.phone || undefined,
+                    cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
+                    status: zapSignSigner?.status || 'pending',
+                    signing_url: zapSignSigner?.sign_url || '',
+                };
+            });
+            
+            console.log('=== SIGNERS DATA PREPARADO ===');
+            console.log('Total de signers:', signersData.length);
+            console.log('Signers data:', JSON.stringify(signersData, null, 2));
 
             // Preparar status do documento para o campo zapsign_document_status
             const documentStatus = {
@@ -415,36 +468,47 @@ export class DocumentosService {
                             estado: aluno.id_polo_fk?.estado,
                         },
                     },
-                    pagamento: {
-                        forma_pagamento: criarContratoDto.forma_pagamento,
-                        formas_pagamento: this.processPaymentMethods(criarContratoDto),
-                        valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
-                    },
+                    pagamento: (() => {
+                        const formasProcessadas = this.processPaymentMethods(criarContratoDto);
+                        console.log('=== FORMAS DE PAGAMENTO PROCESSADAS PARA SALVAR ===');
+                        console.log('Formas processadas:', JSON.stringify(formasProcessadas, null, 2));
+                        return {
+                            forma_pagamento: criarContratoDto.forma_pagamento,
+                            formas_pagamento: formasProcessadas,
+                            valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
+                        };
+                    })(),
                     formas_pagamento: this.processPaymentMethods(criarContratoDto),
                     valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
                     bonus_selecionados: criarContratoDto.tipos_bonus || [],
                     valores_bonus: bonusData.valores_bonus,
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
-                    testemunhas:
-                        criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome
-                            ? {
-                                  testemunha_um: {
-                                      nome: criarContratoDto.testemunha_um_nome || '',
-                                      cpf: criarContratoDto.testemunha_um_cpf || '',
-                                      email: criarContratoDto.testemunha_um_email || '',
-                                      telefone: criarContratoDto.testemunha_um_telefone || '',
-                                      id: criarContratoDto.testemunha_um_id || null,
-                                  },
-                                  testemunha_dois: {
-                                      nome: criarContratoDto.testemunha_dois_nome || '',
-                                      cpf: criarContratoDto.testemunha_dois_cpf || '',
-                                      email: criarContratoDto.testemunha_dois_email || '',
-                                      telefone: criarContratoDto.testemunha_dois_telefone || '',
-                                      id: criarContratoDto.testemunha_dois_id || null,
-                                  },
-                              }
-                            : undefined,
+                    testemunhas: (() => {
+                        const temTestemunhas = criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome;
+                        if (temTestemunhas) {
+                            const testemunhasData = {
+                                testemunha_um: {
+                                    nome: criarContratoDto.testemunha_um_nome || '',
+                                    cpf: criarContratoDto.testemunha_um_cpf || '',
+                                    email: criarContratoDto.testemunha_um_email || '',
+                                    telefone: criarContratoDto.testemunha_um_telefone || '',
+                                    id: criarContratoDto.testemunha_um_id || null,
+                                },
+                                testemunha_dois: {
+                                    nome: criarContratoDto.testemunha_dois_nome || '',
+                                    cpf: criarContratoDto.testemunha_dois_cpf || '',
+                                    email: criarContratoDto.testemunha_dois_email || '',
+                                    telefone: criarContratoDto.testemunha_dois_telefone || '',
+                                    id: criarContratoDto.testemunha_dois_id || null,
+                                },
+                            };
+                            console.log('=== TESTEMUNHAS PARA SALVAR ===');
+                            console.log('Testemunhas data:', JSON.stringify(testemunhasData, null, 2));
+                            return testemunhasData;
+                        }
+                        return undefined;
+                    })(),
                 },
                 criado_por: userId,
                 atualizado_por: userId,
@@ -452,17 +516,26 @@ export class DocumentosService {
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
 
+            // Mapear signers com informações completas incluindo testemunhas
+            const signersResponse = signers.map((signer, index) => {
+                const zapSignSigner = zapSignResponse.signers[index] || zapSignResponse.signers.find((s) => s.name === signer.name);
+                return {
+                    nome: signer.name,
+                    email: signer.email || '',
+                    telefone: signer.phone || '',
+                    cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
+                    status: zapSignSigner?.status || 'pending',
+                    tipo: 'sign' as const,
+                    signing_url: zapSignSigner?.sign_url || '',
+                };
+            });
+
             return {
                 id: zapSignResponse.token,
                 nome_documento: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
                 status: zapSignResponse.status,
                 url_assinatura: zapSignResponse.signers[0]?.sign_url || '',
-                signers: signers.map((signer) => ({
-                    nome: signer.name,
-                    email: signer.email,
-                    status: 'pending',
-                    tipo: 'sign' as const,
-                })),
+                signers: signersResponse,
                 created_at: zapSignResponse.created_at,
                 file_url: zapSignResponse.original_file,
             };
@@ -986,50 +1059,64 @@ export class DocumentosService {
         console.log('Formas pagamento:', JSON.stringify(criarContratoDto.formas_pagamento, null, 2));
 
         // Primeiro, verificar se há dados diretamente no campo formas_pagamento
-        if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento)) {
+        if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento) && criarContratoDto.formas_pagamento.length > 0) {
             console.log('Usando formas_pagamento diretas');
 
-            // Agrupar por forma e tipo para calcular valores corretos
-            const groupedPayments: { [key: string]: { valor: number; parcelas: number } } = {};
-
             criarContratoDto.formas_pagamento.forEach((forma: any) => {
-                if (forma.valor && typeof forma.valor === 'number') {
-                    const key = `${forma.forma}_${forma.tipo}`;
-                    if (!groupedPayments[key]) {
-                        groupedPayments[key] = { valor: 0, parcelas: 0 };
+                if (forma.valor && typeof forma.valor === 'number' && forma.valor > 0) {
+                    // Determinar tipo e forma baseado no nome da forma
+                    let tipo: string = 'A_VISTA';
+                    let formaPagamento: string = '';
+                    let parcelas: number = 1;
+
+                    const formaNome = forma.forma || '';
+                    
+                    // Verificar se é à vista ou parcelado
+                    if (formaNome.toLowerCase().includes('parcelado') || formaNome.toLowerCase().includes('parcela')) {
+                        tipo = 'PARCELADO';
+                        // Extrair número de parcelas da descrição se disponível
+                        if (forma.descricao) {
+                            const matchParcelas = forma.descricao.match(/(\d+)x/);
+                            if (matchParcelas) {
+                                parcelas = parseInt(matchParcelas[1]) || 1;
+                            }
+                        }
+                        // Extrair número de parcelas se estiver no objeto
+                        if (forma.parcelas) {
+                            parcelas = forma.parcelas;
+                        }
                     }
-                    groupedPayments[key].valor += forma.valor;
-                    groupedPayments[key].parcelas += 1;
-                }
-            });
 
-            // Converter grupos em formas de pagamento individuais
-            Object.entries(groupedPayments).forEach(([key, dados]) => {
-                const [forma, tipo] = key.split('_');
-                const valorTotal = dados.valor;
-                const numeroParcelas = dados.parcelas;
+                    // Mapear nome da forma para código
+                    if (formaNome.includes('Cartão de Crédito') || formaNome.includes('Cartão de Crédito')) {
+                        formaPagamento = 'CARTAO_CREDITO';
+                    } else if (formaNome.includes('Cartão de Débito') || formaNome.includes('Cartão de Débito')) {
+                        formaPagamento = 'CARTAO_DEBITO';
+                    } else if (formaNome.includes('PIX') || formaNome.includes('Transferência')) {
+                        formaPagamento = 'PIX';
+                    } else if (formaNome.includes('Espécie') || formaNome.includes('Dinheiro')) {
+                        formaPagamento = 'DINHEIRO';
+                    } else if (formaNome.includes('Boleto')) {
+                        formaPagamento = 'BOLETO';
+                    }
 
-                if (tipo === 'A_VISTA') {
-                    formasPagamento.push({
-                        tipo: 'A_VISTA',
-                        forma: forma,
-                        valor: valorTotal,
-                    });
-                    console.log(`Adicionado: ${forma} à vista - R$ ${valorTotal}`);
-                } else {
-                    // Para parcelados, criar uma entrada com o valor total
-                    formasPagamento.push({
-                        tipo: 'PARCELADO',
-                        forma: forma,
-                        valor: valorTotal,
-                        parcelas: numeroParcelas,
-                    });
-                    console.log(`Adicionado: ${forma} parcelado - R$ ${valorTotal} em ${numeroParcelas}x`);
+                    if (formaPagamento) {
+                        formasPagamento.push({
+                            tipo: tipo,
+                            forma: formaPagamento,
+                            valor: forma.valor,
+                            parcelas: tipo === 'PARCELADO' ? parcelas : undefined,
+                            descricao: forma.descricao || formaNome,
+                        });
+                        console.log(`Adicionado: ${formaPagamento} ${tipo} - R$ ${forma.valor}${tipo === 'PARCELADO' ? ` em ${parcelas}x` : ''}`);
+                    }
                 }
             });
 
             console.log('Formas processadas:', formasPagamento);
-            return formasPagamento;
+            if (formasPagamento.length > 0) {
+                return formasPagamento;
+            }
         }
 
         // Processar formas de pagamento baseado nos valores_formas_pagamento
@@ -2651,31 +2738,55 @@ export class DocumentosService {
                             preco_total_pago: 0,
                         });
                         turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
-                    } catch (error) {
-                        // Se houver erro de constraint única, tentar reativar registro deletado
+                    } catch (error: any) {
+                        // Verificar se é erro de constraint única
                         if (
                             typeof error === 'object' &&
                             error !== null &&
                             'code' in error &&
                             ((error as any).code === '23505' || (error as any).driverError?.code === '23505')
                         ) {
-                            const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
-                                where: {
+                            const constraint = error?.constraint || error?.driverError?.constraint;
+                            
+                            // Se for erro de sequência desincronizada (primary key)
+                            if (constraint === 'pk_turmas_alunos_trn') {
+                                console.warn('Sequência de IDs desincronizada detectada em turmas_alunos_treinamentos. Corrigindo...');
+                                
+                                // Corrigir a sequência
+                                await this.fixTurmasAlunosTreinamentosSequence();
+                                
+                                // Criar um novo objeto para garantir que não há ID pré-definido
+                                const novoRegistro = this.uow.turmasAlunosTreinamentosRP.create({
                                     id_turma_aluno: turmaAluno.id,
                                     id_treinamento: treinamentoParaTermo.id,
-                                },
-                            });
-
-                            if (registroExistente && registroExistente.deletado_em) {
-                                // Reativar o registro deletado
-                                registroExistente.deletado_em = null;
-                                registroExistente.atualizado_em = new Date();
-                                if (userId) {
-                                    registroExistente.atualizado_por = userId;
-                                }
-                                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroExistente);
+                                    preco_treinamento: 0,
+                                    forma_pgto: [],
+                                    preco_total_pago: 0,
+                                });
+                                
+                                // Tentar novamente
+                                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(novoRegistro);
+                                console.log('Registro criado com sucesso após correção da sequência');
                             } else {
-                                throw error;
+                                // Se for outro tipo de constraint única, tentar reativar registro deletado
+                                const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                                    where: {
+                                        id_turma_aluno: turmaAluno.id,
+                                        id_treinamento: treinamentoParaTermo.id,
+                                    },
+                                });
+
+                                if (registroExistente && registroExistente.deletado_em) {
+                                    // Reativar o registro deletado
+                                    registroExistente.deletado_em = null;
+                                    registroExistente.atualizado_em = new Date();
+                                    if (userId) {
+                                        registroExistente.atualizado_por = userId;
+                                    }
+                                    turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(registroExistente);
+                                } else {
+                                    throw error;
+                                }
                             }
                         } else {
                             throw error;
@@ -2987,5 +3098,63 @@ export class DocumentosService {
             atualizado_por: documento.atualizado_por,
             deletado_em: documento.deletado_em,
         };
+    }
+
+    /**
+     * Corrige a sequência de IDs da tabela turmas_alunos_treinamentos quando ela está desincronizada
+     * Isso pode acontecer quando dados são inseridos manualmente ou importados
+     */
+    private async fixTurmasAlunosTreinamentosSequence(): Promise<void> {
+        try {
+            const queryRunner = this.uow.turmasAlunosTreinamentosRP.manager.connection.createQueryRunner();
+            
+            // Obter o schema da tabela (pode ser 'public' ou outro)
+            const schema = this.uow.turmasAlunosTreinamentosRP.metadata.schema || 'public';
+            
+            // Obter o maior ID atual na tabela
+            const result = await queryRunner.query(
+                `SELECT COALESCE(MAX(id::bigint), 0) as max_id FROM ${schema}.turmas_alunos_treinamentos`
+            );
+            const maxId = parseInt(result[0]?.max_id || '0', 10);
+            
+            // Resetar a sequência para o próximo valor após o maior ID
+            const nextId = maxId + 1;
+            try {
+                // Tentar com schema
+                await queryRunner.query(
+                    `SELECT setval('${schema}.turmas_alunos_treinamentos_id_seq', $1, false)`,
+                    [nextId]
+                );
+            } catch (seqError) {
+                // Se falhar, tentar sem schema (sequência pode estar no schema padrão)
+                try {
+                    await queryRunner.query(
+                        `SELECT setval('turmas_alunos_treinamentos_id_seq', $1, false)`,
+                        [nextId]
+                    );
+                } catch (seqError2) {
+                    // Se ainda falhar, tentar encontrar o nome real da sequência
+                    const seqResult = await queryRunner.query(
+                        `SELECT pg_get_serial_sequence('${schema}.turmas_alunos_treinamentos', 'id') as seq_name`
+                    );
+                    const seqName = seqResult[0]?.seq_name;
+                    if (seqName) {
+                        await queryRunner.query(
+                            `SELECT setval($1, $2, false)`,
+                            [seqName, nextId]
+                        );
+                    } else {
+                        throw new Error('Não foi possível encontrar a sequência');
+                    }
+                }
+            }
+            
+            await queryRunner.release();
+            console.log(`Sequência de turmas_alunos_treinamentos corrigida. Próximo ID será: ${nextId}`);
+        } catch (error) {
+            console.error('Erro ao corrigir sequência de turmas_alunos_treinamentos:', error);
+            // Não relançar o erro, apenas logar
+            // Se a correção falhar, o erro original será relançado
+        }
     }
 }

@@ -382,10 +382,21 @@ export class TermTemplateService {
             // Gerar HTML baseado nos dados do termo
             const html = this.generateTermHTML(termoData);
 
-            // Configurar o Puppeteer
+            // Configurar o Puppeteer com argumentos adicionais para ambientes Linux/Docker
             const browser = await puppeteer.launch({
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process',
+                    '--disable-gpu',
+                    '--disable-software-rasterizer',
+                ],
+                ignoreDefaultArgs: ['--disable-extensions'],
             });
 
             const page = await browser.newPage();
@@ -408,8 +419,18 @@ export class TermTemplateService {
             await browser.close();
 
             return Buffer.from(pdfBuffer);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Erro ao gerar PDF do termo:', error);
+            
+            // Verificar se é erro de dependências do sistema
+            if (error?.message?.includes('cannot open shared object file') || 
+                error?.message?.includes('Failed to launch the browser process')) {
+                const errorMessage = 'Erro ao iniciar o navegador. Dependências do sistema podem estar faltando. ' +
+                    'Execute: apt-get update && apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2';
+                console.error(errorMessage);
+                throw new Error('Erro ao gerar PDF do termo: Dependências do sistema faltando. Verifique os logs do servidor.');
+            }
+            
             throw new Error('Erro ao gerar PDF do termo');
         }
     }

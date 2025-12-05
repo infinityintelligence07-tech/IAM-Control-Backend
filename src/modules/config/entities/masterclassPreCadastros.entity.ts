@@ -25,7 +25,7 @@ export class MasterclassPreCadastros extends BaseEntity {
     @Column({ type: 'date', name: 'data_evento', nullable: false })
     data_evento: Date;
 
-    @Column({ type: 'bigint', name: 'id_turma', nullable: false })
+    @Column({ type: 'int', name: 'id_turma', nullable: false })
     id_turma: number;
 
     @Column({ type: 'boolean', name: 'presente', default: false, nullable: false })

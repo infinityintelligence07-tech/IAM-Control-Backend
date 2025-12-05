@@ -269,41 +269,108 @@ export class AlunosService {
             Object.assign(novoAluno, createAlunoDto);
             novoAluno.criado_por = createAlunoDto.criado_por;
 
-            const alunoSalvo = await this.uow.alunosRP.save(novoAluno);
-            console.log('Aluno criado com sucesso:', alunoSalvo);
+            try {
+                const alunoSalvo = await this.uow.alunosRP.save(novoAluno);
+                console.log('Aluno criado com sucesso:', alunoSalvo);
 
-            return {
-                id: alunoSalvo.id,
-                id_polo: alunoSalvo.id_polo,
-                nome: alunoSalvo.nome,
-                nome_cracha: alunoSalvo.nome_cracha,
-                email: alunoSalvo.email,
-                genero: alunoSalvo.genero,
-                cpf: alunoSalvo.cpf,
-                data_nascimento: alunoSalvo.data_nascimento,
-                telefone_um: alunoSalvo.telefone_um,
-                telefone_dois: alunoSalvo.telefone_dois,
-                cep: alunoSalvo.cep,
-                logradouro: alunoSalvo.logradouro,
-                complemento: alunoSalvo.complemento,
-                numero: alunoSalvo.numero,
-                bairro: alunoSalvo.bairro,
-                cidade: alunoSalvo.cidade,
-                estado: alunoSalvo.estado,
-                profissao: alunoSalvo.profissao,
-                status_aluno_geral: alunoSalvo.status_aluno_geral,
-                possui_deficiencia: alunoSalvo.possui_deficiencia,
-                desc_deficiencia: alunoSalvo.desc_deficiencia,
-                url_foto_aluno: alunoSalvo.url_foto_aluno,
-                created_at: alunoSalvo.criado_em,
-                updated_at: alunoSalvo.atualizado_em,
-                polo: undefined, // Será carregado se necessário
-            };
+                return {
+                    id: alunoSalvo.id,
+                    id_polo: alunoSalvo.id_polo,
+                    nome: alunoSalvo.nome,
+                    nome_cracha: alunoSalvo.nome_cracha,
+                    email: alunoSalvo.email,
+                    genero: alunoSalvo.genero,
+                    cpf: alunoSalvo.cpf,
+                    data_nascimento: alunoSalvo.data_nascimento,
+                    telefone_um: alunoSalvo.telefone_um,
+                    telefone_dois: alunoSalvo.telefone_dois,
+                    cep: alunoSalvo.cep,
+                    logradouro: alunoSalvo.logradouro,
+                    complemento: alunoSalvo.complemento,
+                    numero: alunoSalvo.numero,
+                    bairro: alunoSalvo.bairro,
+                    cidade: alunoSalvo.cidade,
+                    estado: alunoSalvo.estado,
+                    profissao: alunoSalvo.profissao,
+                    status_aluno_geral: alunoSalvo.status_aluno_geral,
+                    possui_deficiencia: alunoSalvo.possui_deficiencia,
+                    desc_deficiencia: alunoSalvo.desc_deficiencia,
+                    url_foto_aluno: alunoSalvo.url_foto_aluno,
+                    created_at: alunoSalvo.criado_em,
+                    updated_at: alunoSalvo.atualizado_em,
+                    polo: undefined, // Será carregado se necessário
+                };
+            } catch (saveError: any) {
+                // Verificar se é erro de sequência desincronizada
+                const errorCode = saveError?.code || saveError?.driverError?.code;
+                const constraint = saveError?.constraint || saveError?.driverError?.constraint;
+                
+                if (errorCode === '23505' && constraint === 'pk_alunos') {
+                    console.warn('Sequência de IDs desincronizada detectada. Corrigindo...');
+                    
+                    // Corrigir a sequência
+                    await this.fixAlunosSequence();
+                    
+                    // Criar um novo objeto para garantir que não há ID pré-definido
+                    const novoAlunoRetry = new Alunos();
+                    Object.assign(novoAlunoRetry, createAlunoDto);
+                    novoAlunoRetry.criado_por = createAlunoDto.criado_por;
+                    
+                    // Tentar novamente
+                    const alunoSalvo = await this.uow.alunosRP.save(novoAlunoRetry);
+                    console.log('Aluno criado com sucesso após correção da sequência:', alunoSalvo);
+
+                    return {
+                        id: alunoSalvo.id,
+                        id_polo: alunoSalvo.id_polo,
+                        nome: alunoSalvo.nome,
+                        nome_cracha: alunoSalvo.nome_cracha,
+                        email: alunoSalvo.email,
+                        genero: alunoSalvo.genero,
+                        cpf: alunoSalvo.cpf,
+                        data_nascimento: alunoSalvo.data_nascimento,
+                        telefone_um: alunoSalvo.telefone_um,
+                        telefone_dois: alunoSalvo.telefone_dois,
+                        cep: alunoSalvo.cep,
+                        logradouro: alunoSalvo.logradouro,
+                        complemento: alunoSalvo.complemento,
+                        numero: alunoSalvo.numero,
+                        bairro: alunoSalvo.bairro,
+                        cidade: alunoSalvo.cidade,
+                        estado: alunoSalvo.estado,
+                        profissao: alunoSalvo.profissao,
+                        status_aluno_geral: alunoSalvo.status_aluno_geral,
+                        possui_deficiencia: alunoSalvo.possui_deficiencia,
+                        desc_deficiencia: alunoSalvo.desc_deficiencia,
+                        url_foto_aluno: alunoSalvo.url_foto_aluno,
+                        created_at: alunoSalvo.criado_em,
+                        updated_at: alunoSalvo.atualizado_em,
+                        polo: undefined, // Será carregado se necessário
+                    };
+                }
+                
+                // Se não for erro de sequência, relançar o erro
+                throw saveError;
+            }
         } catch (error) {
             console.error('Erro ao criar/atualizar aluno:', error);
             if (error instanceof BadRequestException) {
                 throw error;
             }
+            
+            // Verificar se é erro de email duplicado
+            if (typeof error === 'object' && error !== null) {
+                const errorObj = error as any;
+                const errorCode = errorObj.code || errorObj.driverError?.code;
+                const constraint = errorObj.constraint || errorObj.driverError?.constraint;
+                const detail = errorObj.detail || errorObj.driverError?.detail;
+
+                if (errorCode === '23505' && constraint?.includes('email')) {
+                    const email = detail?.match(/\(email\)=\(([^)]+)\)/)?.[1] || createAlunoDto.email;
+                    throw new BadRequestException(`O email ${email} já está cadastrado. Por favor, use outro email.`);
+                }
+            }
+            
             throw new Error('Erro interno do servidor ao criar aluno');
         }
     }
@@ -433,6 +500,65 @@ export class AlunosService {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao excluir aluno');
+        }
+    }
+
+    /**
+     * Corrige a sequência de IDs da tabela alunos quando ela está desincronizada
+     * Isso pode acontecer quando dados são inseridos manualmente ou importados
+     */
+    private async fixAlunosSequence(): Promise<void> {
+        try {
+            const queryRunner = this.uow.alunosRP.manager.connection.createQueryRunner();
+            
+            // Obter o schema da tabela (pode ser 'public' ou outro)
+            const schema = this.uow.alunosRP.metadata.schema || 'public';
+            
+            // Obter o maior ID atual na tabela
+            const result = await queryRunner.query(
+                `SELECT COALESCE(MAX(id), 0) as max_id FROM ${schema}.alunos`
+            );
+            const maxId = parseInt(result[0]?.max_id || '0', 10);
+            
+            // Resetar a sequência para o próximo valor após o maior ID
+            // Tentar diferentes formatos de nome de sequência
+            const nextId = maxId + 1;
+            try {
+                // Tentar com schema
+                await queryRunner.query(
+                    `SELECT setval('${schema}.alunos_id_seq', $1, false)`,
+                    [nextId]
+                );
+            } catch (seqError) {
+                // Se falhar, tentar sem schema (sequência pode estar no schema padrão)
+                try {
+                    await queryRunner.query(
+                        `SELECT setval('alunos_id_seq', $1, false)`,
+                        [nextId]
+                    );
+                } catch (seqError2) {
+                    // Se ainda falhar, tentar encontrar o nome real da sequência
+                    const seqResult = await queryRunner.query(
+                        `SELECT pg_get_serial_sequence('${schema}.alunos', 'id') as seq_name`
+                    );
+                    const seqName = seqResult[0]?.seq_name;
+                    if (seqName) {
+                        await queryRunner.query(
+                            `SELECT setval($1, $2, false)`,
+                            [seqName, nextId]
+                        );
+                    } else {
+                        throw new Error('Não foi possível encontrar a sequência');
+                    }
+                }
+            }
+            
+            await queryRunner.release();
+            console.log(`Sequência de alunos corrigida. Próximo ID será: ${nextId}`);
+        } catch (error) {
+            console.error('Erro ao corrigir sequência de alunos:', error);
+            // Não relançar o erro, apenas logar
+            // Se a correção falhar, o erro original será relançado
         }
     }
 }

@@ -25,6 +25,10 @@ export interface SendQRCodeDto {
 export class WhatsAppService {
     private readonly frontendUrl: string;
     private readonly jwtSecret: string;
+    // UUID do template aprovado na Gupshup (Gupshup temp ID)
+    // IMPORTANTE: A API da Gupshup funciona melhor com o UUID do template, não o nome!
+    private readonly CHECKIN_TEMPLATE_ID_GUPSHUP = '8ebafac1-29e5-4d10-9ebc-03ae51126a80';
+    private readonly CHECKIN_TEMPLATE_NAME: string;
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -32,6 +36,8 @@ export class WhatsAppService {
     ) {
         this.frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
         this.jwtSecret = process.env.JWT_SECRET;
+        // UUID do template na Gupshup - use GUPSHUP_TEMPLATE_NAME para sobrescrever
+        this.CHECKIN_TEMPLATE_NAME = process.env.GUPSHUP_TEMPLATE_NAME || this.CHECKIN_TEMPLATE_ID_GUPSHUP;
     }
 
     /**
@@ -67,6 +73,79 @@ export class WhatsAppService {
         } catch (error: unknown) {
             console.error('Erro ao enviar mensagem via ChatGuru:', error);
             const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar mensagem';
+            return {
+                success: false,
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
+     * Envia mensagem de template via ChatGuru/Gupshup
+     * Usa template aprovado para enviar para números desconhecidos
+     */
+    async sendTemplateMessage(
+        phone: string,
+        templateId: string,
+        templateParams: string[],
+        contactName?: string,
+    ): Promise<{ success: boolean; message?: string; error?: string; warning?: string; messageId?: string; destination?: string }> {
+        try {
+            // Formatar número de telefone (remover caracteres especiais)
+            let formattedPhone = phone.replace(/\D/g, '');
+
+            // Adicionar código do país (55) se não estiver presente
+            if (!formattedPhone.startsWith('55')) {
+                formattedPhone = '55' + formattedPhone;
+            }
+
+            console.log(`\n${'═'.repeat(80)}`);
+            console.log(`📱 WHATSAPP SERVICE - ENVIANDO TEMPLATE`);
+            console.log(`${'═'.repeat(80)}`);
+            console.log(`📱 Telefone original: ${phone}`);
+            console.log(`📱 Telefone formatado: ${formattedPhone}`);
+            console.log(`👤 Nome do contato: ${contactName || 'Não informado'}`);
+            console.log(`📋 Template ID: ${templateId}`);
+            console.log(`📝 Parâmetros: ${JSON.stringify(templateParams)}`);
+            console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+            console.log(`${'═'.repeat(80)}\n`);
+
+            // Usa o método createChatAndSendTemplate que cria o chat e envia o template
+            const result = await this.chatGuruService.createChatAndSendTemplate(formattedPhone, templateId, templateParams, contactName);
+
+            console.log(`\n${'─'.repeat(80)}`);
+            console.log(`📤 RESULTADO DO ENVIO:`);
+            console.log(`${'─'.repeat(80)}`);
+            console.log(`✅ Sucesso: ${result.success}`);
+            console.log(`🆔 Message ID: ${result.templateResult?.messageId || 'Não retornado'}`);
+            console.log(`📱 Destinatário: ${result.templateResult?.destination || formattedPhone}`);
+            console.log(`⚠️ Warning: ${result.warning || 'Nenhum'}`);
+            console.log(`${'─'.repeat(80)}\n`);
+
+            if (result.success) {
+                return {
+                    success: true,
+                    message: 'Template enviado com sucesso',
+                    warning: result.warning,
+                    messageId: result.templateResult?.messageId,
+                    destination: formattedPhone,
+                };
+            } else {
+                return {
+                    success: false,
+                    error: 'Falha ao enviar template via ChatGuru',
+                };
+            }
+        } catch (error: unknown) {
+            console.error(`\n${'X'.repeat(80)}`);
+            console.error(`❌ ERRO AO ENVIAR TEMPLATE VIA WHATSAPP SERVICE`);
+            console.error(`${'X'.repeat(80)}`);
+            console.error(`📱 Telefone: ${phone}`);
+            console.error(`📋 Template ID: ${templateId}`);
+            console.error(`📄 Erro:`, error);
+            console.error(`${'X'.repeat(80)}\n`);
+            
+            const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar template';
             return {
                 success: false,
                 error: errorMessage,
@@ -122,13 +201,30 @@ export class WhatsAppService {
                       })
                     : '';
 
-                // Gerar mensagem
-                const message = this.generateCheckInMessage(student.alunoNome, student.treinamentoNome, checkInUrl, poloNome, dataEvento);
+                // Preparar parâmetros do template
+                // Template espera: {{1}} = nome, {{2}} = treinamento, {{3}} = local, {{4}} = link
+                const templateParams = [
+                    student.alunoNome, // {{1}}
+                    student.treinamentoNome, // {{2}}
+                    poloNome && dataEvento ? `${poloNome} em ${dataEvento}` : poloNome || dataEvento || 'local e data a confirmar', // {{3}}
+                    checkInUrl, // {{4}}
+                ];
 
-                // Enviar mensagem
+                // Enviar template em vez de mensagem livre
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
                 const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
-                const sendResult = await this.sendMessage(phone, message, alunoNome);
+                
+                // Usa o UUID do template diretamente (formato mais confiável para Gupshup)
+                const templateId = this.CHECKIN_TEMPLATE_NAME;
+                console.log(`📋 Usando template UUID: ${templateId}`);
+                const sendResult = await this.sendTemplateMessage(phone, templateId, templateParams, alunoNome);
+                
+                if (sendResult.success) {
+                    console.log(`✅ Template enviado para ${alunoNome} (${phone})`);
+                    if (sendResult.warning) {
+                        console.log(`⚠️ Aviso: ${sendResult.warning}`);
+                    }
+                }
 
                 if (sendResult.success) {
                     // Atualizar status do aluno para AGUARDANDO_CHECKIN
@@ -634,23 +730,23 @@ export class WhatsAppService {
 • Apresente na entrada do evento`;
     }
 
-    private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string, local?: string, data?: string): string {
-        const localEData = local && data ? `${local} em ${data}` : local || data || 'local e data a confirmar';
+//     private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string, local?: string, data?: string): string {
+//         const localEData = local && data ? `${local} em ${data}` : local || data || 'local e data a confirmar';
 
-        return `${alunoNome}, parabéns por dizer SIM a essa jornada transformadora! ✨
+//         return `Olá ${alunoNome}, parabéns por dizer SIM a essa jornada transformadora! ✨
 
-Você garantiu o seu lugar no ${treinamentoNome} em ${localEData} e estamos muito animados pra te receber! 🤩
+// Você garantiu o seu lugar no ${treinamentoNome} em ${localEData} e estamos muito animados pra te receber! 🤩
 
-Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
+// Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
 
-Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
+// Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
-${checkInUrl}
+// ${checkInUrl}
 
-Assim que finalizar, sua presença será confirmada automaticamente.
+// Assim que finalizar, sua presença será confirmada automaticamente.
 
-Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
+// Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
 
-Vamos Prosperar! 🙌`;
-    }
+// Vamos Prosperar! 🙌`;
+//     }
 }

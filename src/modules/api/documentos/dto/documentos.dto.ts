@@ -156,7 +156,7 @@ export class CriarContratoZapSignDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => FormaPagamentoDto)
-    formas_pagamento?: FormaPagamentoDto[];
+    formas_pagamento?: (FormaPagamentoDto | any)[];
 
     @IsOptional()
     @IsString()
@@ -230,14 +230,22 @@ export class CriarContratoZapSignDto {
 export class FormaPagamentoDto {
     @IsString()
     @IsNotEmpty()
-    forma: string; // 'PIX', 'BOLETO', 'CARTAO_CREDITO', etc.
+    forma: string; // 'PIX', 'BOLETO', 'CARTAO_CREDITO', 'À Vista - Cartão de Crédito', etc.
 
-    @IsNotEmpty()
+    @IsNumber()
     valor: number;
 
     @IsOptional()
     @IsString()
     descricao?: string;
+
+    @IsOptional()
+    @IsString()
+    tipo?: string; // 'A_VISTA' | 'PARCELADO'
+
+    @IsOptional()
+    @IsNumber()
+    parcelas?: number;
 }
 
 export class RespostaContratoZapSignDto {

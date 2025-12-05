@@ -28,6 +28,16 @@ export class GetTurmasDto {
     tipo_treinamento?: string; // 'palestra' ou 'treinamento'
 
     @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    data_inicio?: string; // Formato: YYYY-MM-DD
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    data_final?: string; // Formato: YYYY-MM-DD
+
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value))
     page?: number = 1;
@@ -45,8 +55,9 @@ export class CreateTurmaDto {
     @IsNumber()
     id_treinamento: number;
 
+    @IsOptional()
     @IsNumber()
-    lider_evento: number;
+    lider_evento?: number;
 
     @IsOptional()
     @IsString()
@@ -87,7 +98,7 @@ export class CreateTurmaDto {
 
     @IsOptional()
     @IsEnum(EStatusTurmas)
-    status_turma?: EStatusTurmas = EStatusTurmas.INSCRICOES_ABERTAS;
+    status_turma?: EStatusTurmas = EStatusTurmas.AGUARDANDO_LIBERACAO;
 
     @IsOptional()
     @IsBoolean()
@@ -277,7 +288,7 @@ export class TurmaResponseDto {
     id: number;
     id_polo: number;
     id_treinamento: number;
-    lider_evento: number;
+    lider_evento?: number;
     edicao_turma?: string;
     id_endereco_evento?: number;
     cep: string;

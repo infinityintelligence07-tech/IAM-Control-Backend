@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { In } from 'typeorm';
+import { In, LessThanOrEqual } from 'typeorm';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EStatusAlunosGeral } from '../../config/entities/enum';
+import { EStatusAlunosGeral, EStatusTurmas } from '../../config/entities/enum';
 import { MasterclassPreCadastros } from '../../config/entities/masterclassPreCadastros.entity';
 import {
     CreateMasterclassEventoDto,
@@ -92,7 +92,7 @@ export class MasterclassService {
                 }
             }
         } else if (extension === 'xls' || extension === 'xlsx') {
-            // Processar Excel - sempre usar linha 2 como cabeçalho
+            // Processar Excel - detectar automaticamente onde está o cabeçalho
             const workbook = XLSX.read(buffer, {
                 type: 'buffer',
                 cellText: false,
@@ -107,17 +107,63 @@ export class MasterclassService {
             console.log('Dados brutos do Excel (primeiras 5 linhas):', arrayData.slice(0, 5));
             console.log('Total de linhas brutas do Excel:', arrayData.length);
 
-            // Verificar se há pelo menos 3 linhas (linha 1: logos, linha 2: cabeçalho, linha 3: separador)
-            if (arrayData.length < 3) {
-                throw new Error('Arquivo Excel deve ter pelo menos 3 linhas (logo, cabeçalho e dados)');
+            if (arrayData.length < 2) {
+                throw new Error('Arquivo Excel deve ter pelo menos 2 linhas (cabeçalho e dados)');
             }
 
-            // Linha 2 é sempre o cabeçalho
-            const headers = arrayData[1].map((header: any) => header?.toString().trim() || '');
-            console.log('Cabeçalho da linha 2:', headers);
+            // Detectar onde está o cabeçalho procurando por palavras-chave
+            let headerRowIndex = 0;
+            let dataStartRowIndex = 1;
 
-            // Processar dados a partir da linha 4 (pular linha 3 que é separador)
-            for (let i = 3; i < arrayData.length; i++) {
+            // Verificar se a linha 1 tem cabeçalhos válidos (nome, email, telefone, whatsapp)
+            const linha1 = arrayData[0] || [];
+            const linha1Str = linha1.map((cell: any) => cell?.toString().toLowerCase().trim() || '').join(' ');
+            const temCamposObrigatorios = 
+                (linha1Str.includes('nome') || linha1Str.includes('name')) &&
+                (linha1Str.includes('email') || linha1Str.includes('e-mail')) &&
+                (linha1Str.includes('telefone') || linha1Str.includes('whatsapp') || linha1Str.includes('phone'));
+
+            if (temCamposObrigatorios) {
+                // Cabeçalho está na linha 1, dados começam na linha 2
+                headerRowIndex = 0;
+                dataStartRowIndex = 1;
+                console.log('✅ Cabeçalho detectado na linha 1');
+            } else if (arrayData.length >= 2) {
+                // Verificar linha 2
+                const linha2 = arrayData[1] || [];
+                const linha2Str = linha2.map((cell: any) => cell?.toString().toLowerCase().trim() || '').join(' ');
+                const temCamposObrigatoriosLinha2 = 
+                    (linha2Str.includes('nome') || linha2Str.includes('name')) &&
+                    (linha2Str.includes('email') || linha2Str.includes('e-mail')) &&
+                    (linha2Str.includes('telefone') || linha2Str.includes('whatsapp') || linha2Str.includes('phone'));
+
+                if (temCamposObrigatoriosLinha2) {
+                    // Cabeçalho está na linha 2, dados começam na linha 3 ou 4
+                    headerRowIndex = 1;
+                    // Se linha 3 parece ser um separador (vazia ou com caracteres especiais), pular
+                    if (arrayData.length > 2) {
+                        const linha3 = arrayData[2] || [];
+                        const linha3Str = linha3.map((cell: any) => cell?.toString().trim() || '').join('');
+                        const ehSeparador = linha3Str.length === 0 || linha3Str.match(/^[-=_]+$/);
+                        dataStartRowIndex = ehSeparador ? 3 : 2;
+                    } else {
+                        dataStartRowIndex = 2;
+                    }
+                    console.log('✅ Cabeçalho detectado na linha 2');
+                } else {
+                    // Tentar usar linha 1 como cabeçalho mesmo sem detectar campos obrigatórios
+                    headerRowIndex = 0;
+                    dataStartRowIndex = 1;
+                    console.log('⚠️ Não foi possível detectar campos obrigatórios, usando linha 1 como cabeçalho');
+                }
+            }
+
+            const headers = arrayData[headerRowIndex].map((header: any) => header?.toString().trim() || '');
+            console.log(`Cabeçalho detectado na linha ${headerRowIndex + 1}:`, headers);
+            console.log(`Dados começam na linha ${dataStartRowIndex + 1}`);
+
+            // Processar dados a partir da linha detectada
+            for (let i = dataStartRowIndex; i < arrayData.length; i++) {
                 const row = arrayData[i];
                 if (row && row.some((cell: any) => cell && cell.toString().trim())) {
                     const rowData: any = {};
@@ -216,7 +262,10 @@ export class MasterclassService {
 
             // Buscar pré-cadastros existentes para esta turma
             const preCadastrosExistentes = await this.uow.masterclassPreCadastrosRP.find({
-                where: { id_turma },
+                where: { 
+                    id_turma,
+                    deletado_em: null,
+                },
                 select: ['email', 'telefone', 'nome_aluno'],
             });
 
@@ -230,12 +279,23 @@ export class MasterclassService {
             const preCadastros: MasterclassPreCadastroDto[] = [];
             let duplicadosEncontrados = 0;
 
+            console.log(`📊 Total de linhas no arquivo processado: ${fileData.length}`);
+            console.log(`📋 Primeira linha de dados:`, fileData[0]);
+            console.log(`📋 Segunda linha de dados:`, fileData[1]);
+
             // Processar cada linha do arquivo
             for (const row of fileData) {
                 try {
+                    console.log(`🔍 Processando linha:`, row);
+                    
                     // Validar dados obrigatórios
                     if (!row.nome || !row.email || !row.telefone) {
-                        erros.push(`Linha inválida: ${JSON.stringify(row)} - Campos obrigatórios faltando`);
+                        const camposFaltando = [];
+                        if (!row.nome) camposFaltando.push('nome');
+                        if (!row.email) camposFaltando.push('email');
+                        if (!row.telefone) camposFaltando.push('telefone');
+                        console.log(`❌ Linha inválida - campos faltando: ${camposFaltando.join(', ')}`);
+                        erros.push(`Linha inválida: ${JSON.stringify(row)} - Campos obrigatórios faltando: ${camposFaltando.join(', ')}`);
                         continue;
                     }
 
@@ -387,24 +447,54 @@ export class MasterclassService {
         try {
             console.log('🔍 Iniciando listagem de eventos de masterclass...');
 
+            // Data atual para filtrar apenas masterclasses encerradas
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
+
             // NOVA ABORDAGEM: Buscar primeiro as turmas de palestra/masterclass
+            // Filtrar apenas turmas encerradas (data_final < hoje OU status = ENCERRADA)
             const turmasMasterclass = await this.uow.turmasRP.find({
                 relations: ['id_treinamento_fk', 'id_polo_fk'],
                 where: {
                     id_treinamento_fk: {
                         tipo_treinamento: false, // Palestras/Masterclass
                     },
+                    deletado_em: null,
                 },
                 order: { criado_em: 'DESC' },
             });
 
+            // Filtrar apenas turmas encerradas
+            const turmasEncerradas = turmasMasterclass.filter((turma) => {
+                // Verificar se status é ENCERRADA
+                if (turma.status_turma === EStatusTurmas.ENCERRADA) {
+                    return true;
+                }
+
+                // Verificar se data_final é anterior ou igual à data atual
+                if (turma.data_final) {
+                    let dataFinal: Date;
+                    if (typeof turma.data_final === 'string') {
+                        const [year, month, day] = turma.data_final.split('-').map(Number);
+                        dataFinal = new Date(year, month - 1, day);
+                    } else {
+                        dataFinal = turma.data_final;
+                    }
+                    dataFinal.setHours(0, 0, 0, 0);
+                    return dataFinal <= hoje;
+                }
+
+                return false;
+            });
+
             console.log('🏫 Turmas de masterclass encontradas:', turmasMasterclass.length);
+            console.log('🏫 Turmas encerradas:', turmasEncerradas.length);
 
             // Agrupar por evento (nome + data)
             const eventosMap = new Map<string, MasterclassEventoResponseDto>();
 
-            // Primeiro, adicionar todas as turmas como eventos
-            for (const turma of turmasMasterclass) {
+            // Primeiro, adicionar todas as turmas encerradas como eventos
+            for (const turma of turmasEncerradas) {
                 const eventoNome = turma.id_treinamento_fk?.treinamento || 'Evento sem nome';
 
                 // Usar a data de início da turma como data do evento
@@ -443,11 +533,12 @@ export class MasterclassService {
 
             console.log('📊 Eventos agrupados:', eventosMap.size);
 
-            // Agora buscar pré-cadastros APENAS para as turmas que já temos
-            const turmasIds = turmasMasterclass.map((t) => t.id);
+            // Agora buscar pré-cadastros APENAS para as turmas encerradas que já temos
+            const turmasIds = turmasEncerradas.map((t) => t.id);
             const [preCadastros, total] = await this.uow.masterclassPreCadastrosRP.findAndCount({
                 where: {
                     id_turma: In(turmasIds), // Só buscar pré-cadastros das turmas existentes
+                    deletado_em: null,
                 },
                 order: { data_evento: 'DESC', criado_em: 'DESC' },
             });
@@ -460,7 +551,7 @@ export class MasterclassService {
                 const dataEventoPC = typeof pc.data_evento === 'string' ? new Date(pc.data_evento) : pc.data_evento;
 
                 // Buscar a turma correspondente ao pré-cadastro
-                const turmaCorrespondente = turmasMasterclass.find((t) => t.id === pc.id_turma);
+                const turmaCorrespondente = turmasEncerradas.find((t) => t.id === pc.id_turma);
                 if (!turmaCorrespondente) continue; // Pular se não encontrar a turma
 
                 // Usar o nome da turma, não do pré-cadastro
@@ -506,6 +597,21 @@ export class MasterclassService {
             });
 
             const eventos = Array.from(eventosMap.values());
+            
+            // Ordenar eventos: primeiro por data (mais recente primeiro), depois por cidade
+            eventos.sort((a, b) => {
+                // Comparar por data (mais recente primeiro)
+                const dataA = new Date(a.data_evento).getTime();
+                const dataB = new Date(b.data_evento).getTime();
+                if (dataA !== dataB) {
+                    return dataB - dataA; // Ordem decrescente (mais recente primeiro)
+                }
+                // Se as datas forem iguais, ordenar por cidade
+                const cidadeA = (a.cidade || '').toLowerCase();
+                const cidadeB = (b.cidade || '').toLowerCase();
+                return cidadeA.localeCompare(cidadeB);
+            });
+            
             console.log('✅ Total de eventos retornados:', eventos.length);
 
             const totalPages = Math.ceil(total / limit);
@@ -528,6 +634,8 @@ export class MasterclassService {
      */
     async buscarEvento(id_turma: number): Promise<MasterclassEventoResponseDto> {
         try {
+            console.log(`🔍 [buscarEvento] Buscando evento para turma ID: ${id_turma} (tipo: ${typeof id_turma})`);
+
             // Buscar dados da turma
             const turma = await this.uow.turmasRP.findOne({
                 where: { id: id_turma },
@@ -538,13 +646,58 @@ export class MasterclassService {
                 throw new NotFoundException(`Turma com ID ${id_turma} não encontrada`);
             }
 
-            const preCadastros = await this.uow.masterclassPreCadastrosRP.find({
+            console.log(`✅ [buscarEvento] Turma encontrada: ${turma.id} - ${turma.id_treinamento_fk?.treinamento || 'N/A'}`);
+
+            // Primeiro, buscar TODOS os pré-cadastros para esta turma (incluindo deletados) para debug
+            const todosPreCadastros = await this.uow.masterclassPreCadastrosRP.find({
                 where: {
                     id_turma,
+                },
+            });
+
+            console.log(`📊 [buscarEvento] Total de pré-cadastros encontrados (incluindo deletados): ${todosPreCadastros.length}`);
+            if (todosPreCadastros.length > 0) {
+                console.log(`📋 [buscarEvento] Primeiros 3 pré-cadastros encontrados:`, todosPreCadastros.slice(0, 3).map(pc => ({
+                    id: pc.id,
+                    nome: pc.nome_aluno,
+                    id_turma: pc.id_turma,
+                    deletado_em: pc.deletado_em,
+                })));
+            }
+
+            // Agora buscar apenas os não deletados
+            console.log(`🔍 [buscarEvento] Buscando pré-cadastros para turma ID: ${id_turma} (tipo: ${typeof id_turma})`);
+            const preCadastros = await this.uow.masterclassPreCadastrosRP.find({
+                where: {
+                    id_turma: Number(id_turma), // Garantir que é número
+                    deletado_em: null,
                 },
                 relations: ['aluno_vinculado', 'aluno_vinculado.id_polo_fk'],
                 order: { nome_aluno: 'ASC' },
             });
+
+            console.log(`✅ [buscarEvento] Pré-cadastros não deletados encontrados: ${preCadastros.length}`);
+            if (preCadastros.length > 0) {
+                console.log(`📋 [buscarEvento] Primeiros 3 pré-cadastros não deletados:`, preCadastros.slice(0, 3).map(pc => ({
+                    id: pc.id,
+                    nome: pc.nome_aluno,
+                    id_turma: pc.id_turma,
+                    deletado_em: pc.deletado_em,
+                })));
+            } else {
+                console.log(`⚠️ [buscarEvento] NENHUM pré-cadastro não deletado encontrado para turma ${id_turma}`);
+                // Tentar buscar novamente sem o filtro de deletado para debug
+                const todosParaDebug = await this.uow.masterclassPreCadastrosRP.find({
+                    where: {
+                        id_turma: Number(id_turma),
+                    },
+                });
+                console.log(`🔍 [buscarEvento] Total de pré-cadastros (incluindo deletados) para turma ${id_turma}: ${todosParaDebug.length}`);
+                if (todosParaDebug.length > 0) {
+                    const deletados = todosParaDebug.filter(pc => pc.deletado_em !== null);
+                    console.log(`📊 [buscarEvento] Deletados: ${deletados.length}, Não deletados: ${todosParaDebug.length - deletados.length}`);
+                }
+            }
 
             const evento: MasterclassEventoResponseDto = {
                 evento_nome: `${turma.id_treinamento_fk?.treinamento || 'Masterclass'} - ${turma.cidade}`,
@@ -558,6 +711,9 @@ export class MasterclassService {
             };
 
             evento.taxa_presenca = evento.total_inscritos > 0 ? Math.round((evento.total_presentes / evento.total_inscritos) * 100 * 100) / 100 : 0;
+
+            console.log(`✅ [buscarEvento] Retornando evento com ${evento.pre_cadastros.length} pré-cadastros`);
+            console.log(`📊 [buscarEvento] Resumo: Total=${evento.total_inscritos}, Presentes=${evento.total_presentes}, Ausentes=${evento.total_ausentes}`);
 
             return evento;
         } catch (error) {
@@ -575,7 +731,10 @@ export class MasterclassService {
     async confirmarPresenca(confirmarDto: ConfirmarPresencaDto): Promise<MasterclassPreCadastroResponseDto> {
         try {
             const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
-                where: { id: confirmarDto.id_pre_cadastro },
+                where: { 
+                    id: confirmarDto.id_pre_cadastro,
+                    deletado_em: null,
+                },
                 relations: ['aluno_vinculado', 'aluno_vinculado.id_polo_fk'],
             });
 
@@ -623,7 +782,10 @@ export class MasterclassService {
     async vincularAluno(vincularDto: VincularAlunoDto): Promise<MasterclassPreCadastroResponseDto> {
         try {
             const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
-                where: { id: vincularDto.id_pre_cadastro },
+                where: { 
+                    id: vincularDto.id_pre_cadastro,
+                    deletado_em: null,
+                },
                 relations: ['aluno_vinculado', 'aluno_vinculado.id_polo_fk'],
             });
 
@@ -682,7 +844,10 @@ export class MasterclassService {
     async alterarInteresse(alterarDto: AlterarInteresseDto): Promise<MasterclassPreCadastroResponseDto> {
         try {
             const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
-                where: { id: alterarDto.id_pre_cadastro },
+                where: { 
+                    id: alterarDto.id_pre_cadastro,
+                    deletado_em: null,
+                },
                 relations: ['aluno_vinculado', 'aluno_vinculado.id_polo_fk'],
             });
 
@@ -727,6 +892,7 @@ export class MasterclassService {
         try {
             const whereCondition: any = {
                 presente: false, // Apenas ausentes
+                deletado_em: null,
             };
 
             if (evento_nome) {

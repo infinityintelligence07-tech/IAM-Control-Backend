@@ -521,46 +521,238 @@ export class ChatGuruService {
 
     /**
      * Cria chat e envia mensagem com QR code
+     * Usa Gupshup diretamente para enviar mensagem de sessão + imagem
      */
     async createChatAndSendMessageWithQRCode(phoneNumber: string, message: string, qrCodeData: any, contactName?: string): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
-            this.logger.log(`Iniciando processo com QR code para ${normalizedNumber}${contactName ? ` (${contactName})` : ''}`);
+            this.logger.log(`\n${'='.repeat(80)}`);
+            this.logger.log(`📱 INICIANDO ENVIO DE QR CODE VIA GUPSHUP`);
+            this.logger.log(`${'='.repeat(80)}`);
+            this.logger.log(`📱 Destinatário: ${normalizedNumber}${contactName ? ` (${contactName})` : ''}`);
 
-            // Primeiro, cria o chat e envia a mensagem
-            const chatResult = await this.createChatAndSendMessage(normalizedNumber, message, contactName);
-
-            // Gera e envia o QR code
-            try {
-                this.logger.log(`Gerando QR code...`);
-                const qrCodeImage = await this.generateQRCode(qrCodeData);
-                this.logger.log(`Enviando QR code para ${normalizedNumber}...`);
-                await this.delay(1000); // Pequeno delay entre mensagem e imagem
-                const qrResult = await this.sendImage(normalizedNumber, qrCodeImage, 'QR Code do evento');
-                this.logger.log(`QR code enviado com sucesso!`);
-
-                return {
-                    ...chatResult,
-                    qrCodeSent: true,
-                    result: {
-                        ...chatResult.result,
-                        qrCodeSend: qrResult,
-                    },
-                };
-            } catch (qrError: any) {
-                this.logger.warn(`Erro ao enviar QR code: ${qrError.message}. Mas mensagem já foi enviada.`);
-                return {
-                    ...chatResult,
-                    qrCodeSent: false,
-                    warning: `QR code não pôde ser enviado: ${qrError.message}`,
-                };
+            // Formata o número para Gupshup
+            let destination = normalizedNumber;
+            if (!destination.startsWith('55')) {
+                destination = '55' + destination;
             }
+
+            let messageSent = false;
+            let qrCodeSent = false;
+            let messageResult: any = null;
+            let qrResult: any = null;
+
+            // 1. Primeiro envia a mensagem de texto via Gupshup
+            try {
+                this.logger.log(`📝 Enviando mensagem de texto...`);
+                messageResult = await this.sendMessageViaGupshup(destination, message);
+                messageSent = messageResult.success;
+                if (messageSent) {
+                    this.logger.log(`✅ Mensagem de texto enviada com sucesso!`);
+                }
+            } catch (msgError: any) {
+                this.logger.warn(`⚠️ Erro ao enviar mensagem de texto: ${msgError.message}`);
+            }
+
+            // 2. Gera e envia o QR code como imagem
+            try {
+                this.logger.log(`🔲 Gerando QR code...`);
+                const qrCodeImage = await this.generateQRCode(qrCodeData);
+                this.logger.log(`📤 Enviando imagem do QR code...`);
+                await this.delay(1000); // Pequeno delay entre mensagem e imagem
+                qrResult = await this.sendImageViaGupshup(destination, qrCodeImage, 'QR Code de Credenciamento');
+                qrCodeSent = qrResult.success;
+                if (qrCodeSent) {
+                    this.logger.log(`✅ QR code enviado com sucesso!`);
+                }
+            } catch (qrError: any) {
+                this.logger.warn(`⚠️ Erro ao enviar QR code: ${qrError.message}`);
+            }
+
+            this.logger.log(`${'='.repeat(80)}`);
+            this.logger.log(`📊 RESULTADO: Mensagem=${messageSent ? '✅' : '❌'} | QR Code=${qrCodeSent ? '✅' : '❌'}`);
+            this.logger.log(`${'='.repeat(80)}\n`);
+
+            return {
+                success: messageSent || qrCodeSent,
+                messageSent,
+                qrCodeSent,
+                result: {
+                    message: messageResult,
+                    qrCode: qrResult,
+                },
+                warning: !qrCodeSent ? 'QR code não pôde ser enviado' : undefined,
+            };
         } catch (error: any) {
-            this.logger.error(`Erro no processo completo com QR code: ${error.message}`, {
+            this.logger.error(`❌ Erro no processo completo com QR code: ${error.message}`, {
                 stack: error.stack,
             });
             throw error;
+        }
+    }
+
+    /**
+     * Envia uma mensagem de texto via Gupshup (mensagem de sessão, não template)
+     * Funciona apenas se houver uma conversa aberta nas últimas 24h
+     */
+    async sendMessageViaGupshup(phoneNumber: string, message: string): Promise<any> {
+        try {
+            const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
+
+            // Verifica se as credenciais da Gupshup estão configuradas
+            if (!this.gupshupApiKey || !this.gupshupSource) {
+                throw new Error('Credenciais da Gupshup não configuradas');
+            }
+
+            let destination = normalizedNumber;
+            if (!destination.startsWith('55')) {
+                destination = '55' + destination;
+            }
+
+            this.logger.log(`📤 Enviando mensagem via Gupshup para ${destination}`);
+
+            // Endpoint para mensagens de sessão
+            const gupshupEndpoint = 'https://api.gupshup.io/wa/api/v1/msg';
+
+            // Payload para mensagem de texto
+            const formData = new URLSearchParams();
+            formData.append('channel', 'whatsapp');
+            formData.append('source', this.gupshupSource);
+            formData.append('destination', destination);
+            formData.append('message', JSON.stringify({
+                type: 'text',
+                text: message,
+            }));
+            
+            if (this.gupshupAppName) {
+                formData.append('src.name', this.gupshupAppName);
+            }
+
+            const response = await firstValueFrom(
+                this.http.post<any>(
+                    gupshupEndpoint,
+                    formData.toString(),
+                    {
+                        headers: {
+                            'apikey': this.gupshupApiKey,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cache-Control': 'no-cache',
+                        },
+                    },
+                ),
+            );
+
+            const responseData = response.data || response;
+            const hasMessageId = !!(responseData?.messageId || responseData?.id);
+            const status = responseData?.status?.toLowerCase();
+            const isSuccess = status === 'submitted' || status === 'success' || hasMessageId;
+
+            if (isSuccess) {
+                this.logger.log(`✅ Mensagem enviada via Gupshup: ${responseData?.messageId || 'sem messageId'}`);
+                return {
+                    success: true,
+                    messageId: responseData?.messageId || responseData?.id,
+                    result: responseData,
+                };
+            }
+
+            throw new Error(responseData?.message || responseData?.error || 'Erro ao enviar mensagem');
+        } catch (error: any) {
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error.message;
+            this.logger.error(`❌ Erro ao enviar mensagem via Gupshup: ${errorMessage}`);
+            return {
+                success: false,
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
+     * Envia uma imagem via Gupshup (mensagem de sessão, não template)
+     * Funciona apenas se houver uma conversa aberta nas últimas 24h
+     */
+    async sendImageViaGupshup(phoneNumber: string, imageBase64: string, caption?: string): Promise<any> {
+        try {
+            const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
+
+            // Verifica se as credenciais da Gupshup estão configuradas
+            if (!this.gupshupApiKey || !this.gupshupSource) {
+                throw new Error('Credenciais da Gupshup não configuradas');
+            }
+
+            let destination = normalizedNumber;
+            if (!destination.startsWith('55')) {
+                destination = '55' + destination;
+            }
+
+            this.logger.log(`📤 Enviando imagem via Gupshup para ${destination}`);
+
+            // Primeiro, faz upload da imagem para obter uma URL pública
+            let imageUrl: string;
+            try {
+                imageUrl = await this.uploadImageToHosting(imageBase64);
+                this.logger.log(`✅ Imagem enviada para hosting: ${imageUrl}`);
+            } catch (uploadError: any) {
+                this.logger.error(`❌ Erro ao fazer upload da imagem: ${uploadError.message}`);
+                throw new Error(`Falha ao fazer upload da imagem: ${uploadError.message}`);
+            }
+
+            // Endpoint para mensagens de sessão
+            const gupshupEndpoint = 'https://api.gupshup.io/wa/api/v1/msg';
+
+            // Payload para mensagem de imagem
+            const formData = new URLSearchParams();
+            formData.append('channel', 'whatsapp');
+            formData.append('source', this.gupshupSource);
+            formData.append('destination', destination);
+            formData.append('message', JSON.stringify({
+                type: 'image',
+                originalUrl: imageUrl,
+                previewUrl: imageUrl,
+                caption: caption || '',
+            }));
+            
+            if (this.gupshupAppName) {
+                formData.append('src.name', this.gupshupAppName);
+            }
+
+            const response = await firstValueFrom(
+                this.http.post<any>(
+                    gupshupEndpoint,
+                    formData.toString(),
+                    {
+                        headers: {
+                            'apikey': this.gupshupApiKey,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cache-Control': 'no-cache',
+                        },
+                    },
+                ),
+            );
+
+            const responseData = response.data || response;
+            const hasMessageId = !!(responseData?.messageId || responseData?.id);
+            const status = responseData?.status?.toLowerCase();
+            const isSuccess = status === 'submitted' || status === 'success' || hasMessageId;
+
+            if (isSuccess) {
+                this.logger.log(`✅ Imagem enviada via Gupshup: ${responseData?.messageId || 'sem messageId'}`);
+                return {
+                    success: true,
+                    messageId: responseData?.messageId || responseData?.id,
+                    result: responseData,
+                };
+            }
+
+            throw new Error(responseData?.message || responseData?.error || 'Erro ao enviar imagem');
+        } catch (error: any) {
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error.message;
+            this.logger.error(`❌ Erro ao enviar imagem via Gupshup: ${errorMessage}`);
+            return {
+                success: false,
+                error: errorMessage,
+            };
         }
     }
 

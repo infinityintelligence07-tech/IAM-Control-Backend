@@ -268,6 +268,14 @@ export class ChatGuruService {
     }
 
     /**
+     * Faz upload da imagem para usar em templates de mídia
+     * Retorna a URL pública da imagem
+     */
+    async uploadImageForTemplate(imageBase64: string): Promise<string> {
+        return this.uploadImageToHosting(imageBase64);
+    }
+
+    /**
      * Faz upload da imagem para um serviço de hospedagem e retorna a URL pública
      * Usa ImgBB (gratuito, aceita base64 sem necessidade de autenticação)
      */
@@ -358,12 +366,27 @@ export class ChatGuruService {
                 }),
             );
 
+            // Log completo da resposta para diagnóstico
+            this.logger.debug(`📥 Resposta completa do envio de imagem:`, JSON.stringify(response.data, null, 2));
+            
             if (response.data?.result === 'success') {
-                this.logger.log(`Imagem enviada com sucesso para ${normalizedNumber}`);
-                return response.data;
+                this.logger.log(`✅ Imagem enviada com sucesso para ${normalizedNumber}`);
+                this.logger.log(`   📋 Descrição: ${response.data?.description || 'N/A'}`);
+                this.logger.log(`   📋 Chat ID: ${response.data?.chat_id || response.data?.chatId || 'N/A'}`);
+                // Retorna tanto o formato antigo (compatibilidade) quanto o novo
+                return {
+                    ...response.data,
+                    success: true,
+                    result: response.data,
+                };
             }
+            
+            // Se não retornou success, loga detalhes
+            this.logger.warn(`⚠️ Resposta não indica sucesso claro:`, JSON.stringify(response.data, null, 2));
 
-            throw new Error(response.data?.description || 'Erro ao enviar imagem');
+            const errorMsg = response.data?.description || 'Erro ao enviar imagem';
+            this.logger.error(`❌ Falha ao enviar imagem: ${errorMsg}`);
+            throw new Error(errorMsg);
         } catch (error: any) {
             const errorMessage = error?.response?.data?.description || error.message;
             const statusCode = error?.response?.status;
@@ -574,16 +597,16 @@ export class ChatGuruService {
             this.logger.log(`📊 RESULTADO: Mensagem=${messageSent ? '✅' : '❌'} | QR Code=${qrCodeSent ? '✅' : '❌'}`);
             this.logger.log(`${'='.repeat(80)}\n`);
 
-            return {
+                return {
                 success: messageSent || qrCodeSent,
                 messageSent,
                 qrCodeSent,
-                result: {
+                    result: {
                     message: messageResult,
                     qrCode: qrResult,
-                },
+                    },
                 warning: !qrCodeSent ? 'QR code não pôde ser enviado' : undefined,
-            };
+                };
         } catch (error: any) {
             this.logger.error(`❌ Erro no processo completo com QR code: ${error.message}`, {
                 stack: error.stack,
@@ -877,6 +900,384 @@ export class ChatGuruService {
             }
 
             throw new Error(`Falha ao enviar template: ${errorMessage}`);
+        }
+    }
+
+    /**
+     * Envia uma mensagem de template com imagem (header de mídia) via Gupshup
+     * Usado para templates do tipo "Media" que incluem imagem
+     * @param phoneNumber Número do telefone do destinatário
+     * @param templateId ID do template na Gupshup (Gupshup temp ID)
+     * @param templateParams Array de parâmetros para os campos variáveis do template (body)
+     * @param imageUrl URL pública da imagem para o header do template
+     * @param contactName Nome do contato (opcional)
+     */
+    async sendTemplateWithImage(
+        phoneNumber: string,
+        templateId: string,
+        templateParams: string[],
+        imageUrl: string,
+        contactName?: string,
+    ): Promise<any> {
+        try {
+            const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
+
+            // Verifica se as credenciais da Gupshup estão configuradas
+            if (!this.gupshupApiKey || !this.gupshupSource) {
+                throw new Error('Credenciais da Gupshup não configuradas');
+            }
+
+            let destination = normalizedNumber;
+            if (!destination.startsWith('55')) {
+                destination = '55' + destination;
+            }
+
+            this.logger.log(`\n${'='.repeat(80)}`);
+            this.logger.log(`📤 ENVIANDO TEMPLATE COM IMAGEM VIA GUPSHUP`);
+            this.logger.log(`${'='.repeat(80)}`);
+            this.logger.log(`📱 Destinatário: ${destination}${contactName ? ` (${contactName})` : ''}`);
+            this.logger.log(`📋 Template ID: ${templateId}`);
+            this.logger.log(`📝 Parâmetros: ${JSON.stringify(templateParams)}`);
+            this.logger.log(`🖼️ URL da Imagem: ${imageUrl}`);
+            this.logger.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+            this.logger.log(`${'='.repeat(80)}`);
+
+            // Endpoint para templates
+            const gupshupEndpoint = 'https://api.gupshup.io/wa/api/v1/template/msg';
+
+            // Formato correto da Gupshup para templates com header de imagem:
+            // - 'template': objeto com id e params (SEM a mídia)
+            // - 'message': objeto com type e image.link (mídia vai aqui!)
+            const templatePayload = {
+                id: templateId,
+                params: templateParams,
+            };
+
+            // Objeto de mensagem com a imagem do header
+            // Formato correto: {"type":"image","image":{"link":"URL"}}
+            const messagePayload = {
+                type: 'image',
+                image: {
+                    link: imageUrl,
+                },
+            };
+
+            // Verifica se src.name está configurado (OBRIGATÓRIO segundo documentação Gupshup)
+            if (!this.gupshupAppName) {
+                this.logger.error('❌ ERRO: GUPSHUP_APP_NAME ou GUPSHUP_DISPLAY_NAME não configurado!');
+                this.logger.error('Este campo é OBRIGATÓRIO para envio de templates.');
+                throw new Error('src.name (GUPSHUP_APP_NAME) não configurado - campo obrigatório');
+            }
+
+            // Formata o payload conforme documentação:
+            // https://docs.gupshup.io/reference/sending-image-template
+            const formData = new URLSearchParams();
+            formData.append('channel', 'whatsapp');
+            formData.append('source', this.gupshupSource);
+            formData.append('destination', destination);
+            formData.append('src.name', this.gupshupAppName);  // OBRIGATÓRIO!
+            formData.append('template', JSON.stringify(templatePayload));
+            formData.append('message', JSON.stringify(messagePayload));
+
+            this.logger.debug('Payload COMPLETO do template com imagem:', {
+                channel: 'whatsapp',
+                source: this.gupshupSource,
+                destination: destination,
+                'src.name': this.gupshupAppName,
+                template: JSON.stringify(templatePayload),
+                message: JSON.stringify(messagePayload),
+            });
+
+            const response = await firstValueFrom(
+                this.http.post<any>(
+                    gupshupEndpoint,
+                    formData.toString(),
+                    {
+                        headers: {
+                            'apikey': this.gupshupApiKey,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cache-Control': 'no-cache',
+                        },
+                    },
+                ),
+            );
+
+            const responseData = response.data || response;
+            const status = responseData?.status?.toLowerCase();
+            const hasMessageId = !!(responseData?.messageId || responseData?.id);
+            const isSuccess = status === 'submitted' || status === 'success' || hasMessageId;
+
+            this.logger.log(`📥 Resposta da Gupshup:`, JSON.stringify(responseData, null, 2));
+            
+            // Verifica se há avisos ou erros na resposta
+            if (responseData?.warning) {
+                this.logger.warn(`⚠️ Aviso da Gupshup: ${responseData.warning}`);
+            }
+            if (responseData?.error) {
+                this.logger.error(`❌ Erro na resposta da Gupshup: ${responseData.error}`);
+            }
+
+            if (isSuccess) {
+                const messageId = responseData?.messageId || responseData?.id;
+                this.logger.log(`\n${'='.repeat(80)}`);
+                this.logger.log(`✅ TEMPLATE COM IMAGEM ACEITO PELA GUPSHUP`);
+                this.logger.log(`${'='.repeat(80)}`);
+                this.logger.log(`📱 Destinatário: ${destination}`);
+                this.logger.log(`📋 Template ID: ${templateId}`);
+                this.logger.log(`🆔 Message ID: ${messageId || 'não retornado'}`);
+                this.logger.log(`📊 Status Gupshup: ${status || 'N/A'}`);
+                this.logger.log(`\n⚠️ IMPORTANTE:`);
+                this.logger.log(`   "submitted" significa que a Gupshup ACEITOU a mensagem.`);
+                this.logger.log(`   Isso NÃO garante que o WhatsApp entregará a mensagem.`);
+                this.logger.log(`   O WhatsApp pode rejeitar se:`);
+                this.logger.log(`   - O template não estiver aprovado no WhatsApp`);
+                this.logger.log(`   - O template foi rejeitado pelo WhatsApp`);
+                this.logger.log(`   - O número do destinatário estiver bloqueado`);
+                this.logger.log(`   - A conta WhatsApp Business tiver problemas`);
+                this.logger.log(`\n🔍 SE A MENSAGEM NÃO CHEGAR:`);
+                this.logger.log(`   1. Verifique no Meta Business Manager se o template está APROVADO`);
+                this.logger.log(`   2. Tente usar o NOME do template ao invés do ID`);
+                this.logger.log(`   3. Verifique se o template não foi desaprovado recentemente`);
+                this.logger.log(`   4. O nome do template geralmente funciona melhor que IDs`);
+                this.logger.log(`\n   Verifique o status real no painel da Gupshup usando o Message ID.`);
+                this.logger.log(`${'='.repeat(80)}\n`);
+
+                // Aguarda alguns segundos e verifica o status real da mensagem
+                // NOTA: A verificação de status pode falhar, mas isso não significa que a mensagem não foi enviada
+                if (messageId) {
+                    this.logger.log(`⏳ Aguardando 5 segundos para verificar status real da mensagem...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    
+                    try {
+                        const statusResult = await this.checkMessageStatus(messageId);
+                        if (statusResult.success && statusResult.status) {
+                            this.logger.log(`📊 Status real da mensagem:`, JSON.stringify(statusResult.status, null, 2));
+                            
+                            // Verifica se há erros no status
+                            const statusStr = JSON.stringify(statusResult.status).toLowerCase();
+                            if (statusStr.includes('failed') || statusStr.includes('error') || statusStr.includes('rejected')) {
+                                this.logger.warn(`\n${'!'.repeat(80)}`);
+                                this.logger.warn(`⚠️ ATENÇÃO: A mensagem foi rejeitada ou falhou!`);
+                                this.logger.warn(`⚠️ Verifique o status completo no painel da Gupshup`);
+                                this.logger.warn(`⚠️ Message ID: ${messageId}`);
+                                this.logger.warn(`⚠️ Possíveis causas:`);
+                                this.logger.warn(`⚠️   1. Template não está aprovado no WhatsApp`);
+                                this.logger.warn(`⚠️   2. Template foi rejeitado pelo WhatsApp`);
+                                this.logger.warn(`⚠️   3. Número do destinatário inválido ou bloqueado`);
+                                this.logger.warn(`⚠️   4. Conta WhatsApp Business não está ativa`);
+                                this.logger.warn(`${'!'.repeat(80)}\n`);
+                            } else {
+                                this.logger.log(`✅ Status da mensagem verificado com sucesso`);
+                            }
+                        } else {
+                            this.logger.warn(`⚠️ Não foi possível obter o status da mensagem, mas a Gupshup aceitou o envio`);
+                            this.logger.warn(`   Isso é comum - a verificação de status pode não estar disponível imediatamente`);
+                            this.logger.warn(`   Verifique manualmente no painel da Gupshup: Message ID ${messageId}`);
+                        }
+                    } catch (statusError: any) {
+                        this.logger.warn(`\n${'─'.repeat(80)}`);
+                        this.logger.warn(`⚠️ Não foi possível verificar o status da mensagem: ${statusError.message}`);
+                        this.logger.warn(`⚠️ IMPORTANTE: Isso NÃO significa que a mensagem não foi enviada!`);
+                        this.logger.warn(`⚠️ A Gupshup aceitou a mensagem (status: submitted, messageId: ${messageId})`);
+                        this.logger.warn(`⚠️ Verifique manualmente no painel da Gupshup se a mensagem foi entregue`);
+                        this.logger.warn(`⚠️ Possíveis razões para o erro de verificação:`);
+                        this.logger.warn(`⚠️   - Endpoint de status pode não estar disponível para este tipo de conta`);
+                        this.logger.warn(`⚠️   - Message ID pode precisar de mais tempo para estar disponível`);
+                        this.logger.warn(`⚠️   - API de status pode ter limitações`);
+                        this.logger.warn(`${'─'.repeat(80)}\n`);
+                    }
+                }
+
+                return {
+                    success: true,
+                    messageId,
+                    templateId: templateId,
+                    result: responseData,
+                };
+            }
+
+            const errorMsg = responseData?.message || responseData?.error || 'Erro desconhecido';
+            throw new Error(errorMsg);
+
+        } catch (error: any) {
+            const errorMessage = error?.response?.data?.message || 
+                                error?.response?.data?.error || 
+                                error.message;
+            const statusCode = error?.response?.status;
+
+            this.logger.error(`\n${'X'.repeat(80)}`);
+            this.logger.error(`❌ ERRO AO ENVIAR TEMPLATE COM IMAGEM`);
+            this.logger.error(`${'X'.repeat(80)}`);
+            this.logger.error(`📱 Destinatário: ${phoneNumber}`);
+            this.logger.error(`📋 Template ID: ${templateId}`);
+            this.logger.error(`📊 Status HTTP: ${statusCode}`);
+            this.logger.error(`📄 Erro: ${errorMessage}`);
+            this.logger.error(`${'X'.repeat(80)}\n`);
+
+            return {
+                success: false,
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
+     * Envia uma mensagem de sessão com texto e imagem via Gupshup
+     * Usado quando já existe uma conversa ativa (janela de 24h)
+     * @param phoneNumber Número do telefone do destinatário
+     * @param message Texto da mensagem
+     * @param imageBase64 Imagem em base64
+     * @param contactName Nome do contato (opcional)
+     */
+    async sendSessionMessageWithImage(
+        phoneNumber: string,
+        message: string,
+        imageBase64: string,
+        contactName?: string,
+    ): Promise<any> {
+        try {
+            const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
+
+            // Verifica se as credenciais da Gupshup estão configuradas
+            if (!this.gupshupApiKey || !this.gupshupSource) {
+                throw new Error('Credenciais da Gupshup não configuradas');
+            }
+
+            let destination = normalizedNumber;
+            if (!destination.startsWith('55')) {
+                destination = '55' + destination;
+            }
+
+            this.logger.log(`\n${'='.repeat(80)}`);
+            this.logger.log(`📤 ENVIANDO MENSAGEM DE SESSÃO COM IMAGEM VIA GUPSHUP`);
+            this.logger.log(`${'='.repeat(80)}`);
+            this.logger.log(`📱 Destinatário: ${destination}${contactName ? ` (${contactName})` : ''}`);
+            this.logger.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+            this.logger.log(`${'='.repeat(80)}`);
+
+            // Endpoint para mensagens de sessão
+            const gupshupEndpoint = 'https://api.gupshup.io/wa/api/v1/msg';
+
+            // 1. Primeiro envia a mensagem de texto
+            const textFormData = new URLSearchParams();
+            textFormData.append('channel', 'whatsapp');
+            textFormData.append('source', this.gupshupSource);
+            textFormData.append('destination', destination);
+            textFormData.append('message', JSON.stringify({
+                type: 'text',
+                text: message,
+            }));
+            
+            if (this.gupshupAppName) {
+                textFormData.append('src.name', this.gupshupAppName);
+            }
+
+            this.logger.debug('Enviando mensagem de texto...');
+
+            const textResponse = await firstValueFrom(
+                this.http.post<any>(
+                    gupshupEndpoint,
+                    textFormData.toString(),
+                    {
+                        headers: {
+                            'apikey': this.gupshupApiKey,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cache-Control': 'no-cache',
+                        },
+                    },
+                ),
+            );
+
+            const textResult = textResponse.data || textResponse;
+            this.logger.log(`📥 Resposta do texto: ${JSON.stringify(textResult)}`);
+
+            // Verifica se a mensagem de texto foi enviada (se falhar, provavelmente está fora da janela de 24h)
+            if (textResult?.status?.toLowerCase() !== 'submitted' && !textResult?.messageId) {
+                this.logger.warn(`⚠️ Mensagem de texto não foi aceita - provavelmente fora da janela de 24h`);
+                return {
+                    success: false,
+                    error: 'Fora da janela de 24h para mensagens de sessão',
+                };
+            }
+
+            // 2. Faz upload da imagem para obter URL pública
+            this.logger.debug('Fazendo upload da imagem...');
+            const imageUrl = await this.uploadImageToHosting(imageBase64);
+            this.logger.log(`🖼️ Imagem hospedada em: ${imageUrl}`);
+
+            // 3. Envia a imagem
+            const imageFormData = new URLSearchParams();
+            imageFormData.append('channel', 'whatsapp');
+            imageFormData.append('source', this.gupshupSource);
+            imageFormData.append('destination', destination);
+            imageFormData.append('message', JSON.stringify({
+                type: 'image',
+                originalUrl: imageUrl,
+                previewUrl: imageUrl,
+                caption: '📲 QR Code de Credenciamento',
+            }));
+            
+            if (this.gupshupAppName) {
+                imageFormData.append('src.name', this.gupshupAppName);
+            }
+
+            this.logger.debug('Enviando imagem...');
+
+            const imageResponse = await firstValueFrom(
+                this.http.post<any>(
+                    gupshupEndpoint,
+                    imageFormData.toString(),
+                    {
+                        headers: {
+                            'apikey': this.gupshupApiKey,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cache-Control': 'no-cache',
+                        },
+                    },
+                ),
+            );
+
+            const imageResult = imageResponse.data || imageResponse;
+            this.logger.log(`📥 Resposta da imagem: ${JSON.stringify(imageResult)}`);
+
+            const imageSuccess = imageResult?.status?.toLowerCase() === 'submitted' || imageResult?.messageId;
+
+            if (imageSuccess) {
+                this.logger.log(`\n${'='.repeat(80)}`);
+                this.logger.log(`✅ MENSAGEM DE SESSÃO COM IMAGEM ENVIADA COM SUCESSO`);
+                this.logger.log(`${'='.repeat(80)}`);
+                this.logger.log(`📱 Destinatário: ${destination}`);
+                this.logger.log(`🆔 Message ID (texto): ${textResult?.messageId || 'N/A'}`);
+                this.logger.log(`🆔 Message ID (imagem): ${imageResult?.messageId || 'N/A'}`);
+                this.logger.log(`${'='.repeat(80)}\n`);
+
+                return {
+                    success: true,
+                    textMessageId: textResult?.messageId,
+                    imageMessageId: imageResult?.messageId,
+                };
+            }
+
+            throw new Error(imageResult?.message || 'Falha ao enviar imagem');
+
+        } catch (error: any) {
+            const errorMessage = error?.response?.data?.message || 
+                                error?.response?.data?.error || 
+                                error.message;
+            const statusCode = error?.response?.status;
+
+            this.logger.error(`\n${'X'.repeat(80)}`);
+            this.logger.error(`❌ ERRO AO ENVIAR MENSAGEM DE SESSÃO COM IMAGEM`);
+            this.logger.error(`${'X'.repeat(80)}`);
+            this.logger.error(`📱 Destinatário: ${phoneNumber}`);
+            this.logger.error(`📊 Status HTTP: ${statusCode}`);
+            this.logger.error(`📄 Erro: ${errorMessage}`);
+            this.logger.error(`${'X'.repeat(80)}\n`);
+
+            return {
+                success: false,
+                error: errorMessage,
+            };
         }
     }
 
@@ -1367,8 +1768,10 @@ export class ChatGuruService {
         } catch (error: any) {
             const errorMessage = error?.response?.data?.message || 
                                 error?.response?.data?.error || 
+                                (typeof error?.response?.data === 'object' ? JSON.stringify(error?.response?.data) : error?.response?.data) ||
                                 error.message;
             const statusCode = error?.response?.status;
+            const errorData = error?.response?.data;
 
             this.logger.error(`\n${'X'.repeat(80)}`);
             this.logger.error(`❌ ERRO AO CONSULTAR STATUS DA MENSAGEM`);
@@ -1376,6 +1779,12 @@ export class ChatGuruService {
             this.logger.error(`🆔 Message ID: ${messageId}`);
             this.logger.error(`📊 Status HTTP: ${statusCode}`);
             this.logger.error(`📄 Erro: ${errorMessage}`);
+            if (errorData) {
+                this.logger.error(`📄 Dados do erro: ${JSON.stringify(errorData, null, 2)}`);
+            }
+            this.logger.error(`\n⚠️ NOTA: O erro na verificação de status NÃO significa que a mensagem não foi enviada.`);
+            this.logger.error(`   A Gupshup aceitou a mensagem (status: submitted).`);
+            this.logger.error(`   Verifique no painel da Gupshup se a mensagem foi realmente entregue.`);
             this.logger.error(`${'X'.repeat(80)}\n`);
 
             return {

@@ -1,4 +1,4 @@
-import { IsEmail, IsString, IsOptional, IsEnum, MinLength, MaxLength, Matches } from 'class-validator';
+import { IsEmail, IsString, IsOptional, IsEnum, MinLength, MaxLength, Matches, ValidateIf } from 'class-validator';
 import { ESetores, EFuncoes } from '../../modules/config/entities/enum';
 
 export class SignupDto {
@@ -80,4 +80,36 @@ export class ResetPasswordDto {
         message: 'Senha deve conter ao menos uma letra minúscula, uma maiúscula, um número e um caractere especial',
     })
     senha: string;
+}
+
+export class ChangePasswordDto {
+    @IsString()
+    @MinLength(8, { message: 'Senha atual é obrigatória' })
+    senha_atual: string;
+
+    @IsString()
+    @MinLength(8, { message: 'Nova senha deve ter no mínimo 8 caracteres' })
+    @MaxLength(16, { message: 'Nova senha deve ter no máximo 16 caracteres' })
+    @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,16}$/, {
+        message: 'Nova senha deve conter ao menos uma letra minúscula, uma maiúscula, um número e um caractere especial',
+    })
+    nova_senha: string;
+}
+
+export class ResetPasswordDirectDto {
+    @ValidateIf((o) => !o.telefone || o.telefone.length === 0)
+    @IsEmail({}, { message: 'E-mail inválido' })
+    email?: string;
+
+    @ValidateIf((o) => !o.email || o.email.length === 0)
+    @IsString({ message: 'Telefone é obrigatório quando email não é informado' })
+    telefone?: string;
+
+    @IsString()
+    @MinLength(8, { message: 'Senha deve ter no mínimo 8 caracteres' })
+    @MaxLength(16, { message: 'Senha deve ter no máximo 16 caracteres' })
+    @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,16}$/, {
+        message: 'Senha deve conter ao menos uma letra minúscula, uma maiúscula, um número e um caractere especial',
+    })
+    nova_senha: string;
 }

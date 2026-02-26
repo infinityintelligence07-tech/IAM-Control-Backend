@@ -22,7 +22,22 @@ export class Usuarios extends BaseEntity {
     sobrenome: string;
 
     @Column({ type: 'varchar', name: 'cpf', nullable: true })
-    cpf: string;
+    cpf?: string;
+
+    @Column({ type: 'varchar', name: 'cnpj', nullable: true })
+    cnpj?: string;
+
+    @Column({ type: 'varchar', name: 'chave_pix', nullable: true })
+    chave_pix?: string;
+
+    @Column({ type: 'varchar', name: 'rg', nullable: true })
+    rg?: string;
+    
+    @Column({ type: 'varchar', name: 'pis', nullable: true })
+    pis?: string;
+
+    @Column({ type: 'varchar', name: 'ctps', nullable: true })
+    ctps?: string;
 
     @Column({ type: 'varchar', name: 'email', nullable: false, unique: true })
     email: string;
@@ -40,7 +55,43 @@ export class Usuarios extends BaseEntity {
     telefone: string;
 
     @Column({ type: 'varchar', name: 'url_foto', nullable: true })
-    url_foto: string;
+    url_foto?: string;
+
+    @Column({ type: 'varchar', name: 'provider', nullable: true, default: 'credentials' })
+    provider?: string;
+
+    @Column({ type: 'varchar', name: 'cep', nullable: true })
+    cep?: string;
+
+    @Column({ type: 'varchar', name: 'logradouro', nullable: true })
+    logradouro?: string;
+
+    @Column({ type: 'varchar', name: 'complemento', nullable: true })
+    complemento?: string;
+
+    @Column({ type: 'varchar', name: 'numero', nullable: true })
+    numero?: string;
+
+    @Column({ type: 'varchar', name: 'bairro', nullable: true })
+    bairro?: string;
+
+    @Column({ type: 'varchar', name: 'cidade', nullable: true })
+    cidade?: string;
+
+    @Column({ type: 'varchar', name: 'estado', nullable: true })
+    estado?: string;
+
+    @Column({ type: 'varchar', name: 'tipo_colaborador', nullable: true })
+    tipo_colaborador?: string;
+
+    @Column({ type: 'timestamp', name: 'data_nascimento', nullable: true })
+    data_nascimento?: Date;
+
+    @Column({ type: 'timestamp', name: 'data_admissao', nullable: true })
+    data_admissao?: Date;
+
+    @Column({ type: 'timestamp', name: 'data_demissao', nullable: true })
+    data_demissao?: Date;
 
     @OneToMany(() => Turmas, (turmas) => turmas.lider_evento_fk)
     turmas: Turmas[];

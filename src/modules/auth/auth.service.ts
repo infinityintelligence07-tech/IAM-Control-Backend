@@ -64,6 +64,7 @@ export class AuthService {
             setor,
             funcao: funcao || [EFuncoes.COLABORADOR],
             url_foto: picture,
+            provider: provider,
         });
         await this.uow.usuariosRP.save(user);
 
@@ -81,6 +82,7 @@ export class AuthService {
                 setor: user.setor,
                 funcao: user.funcao,
                 url_foto: user.url_foto,
+                provider: user.provider || provider,
             },
         };
     }
@@ -94,8 +96,16 @@ export class AuthService {
             if (!match) {
                 // Atualiza a senha com o novo providerId
                 exists.senha = await bcrypt.hash(providerId, 10);
-                await this.uow.usuariosRP.save(exists);
             }
+            // Garante que o provider está definido como 'google'
+            if (exists.provider !== 'google') {
+                exists.provider = 'google';
+            }
+            // Atualiza a foto se fornecida
+            if (picture) {
+                exists.url_foto = picture;
+            }
+            await this.uow.usuariosRP.save(exists);
 
             const token = await this.signToken(exists.id, exists.email, exists.nome);
             return {
@@ -110,6 +120,7 @@ export class AuthService {
                     telefone: exists.telefone,
                     setor: exists.setor,
                     url_foto: exists.url_foto,
+                    provider: exists.provider || 'google',
                 },
             };
         } else {
@@ -161,7 +172,7 @@ export class AuthService {
     async me(userId: number) {
         const user = await this.uow.usuariosRP.findOne({
             where: { id: userId },
-            select: ['id', 'nome', 'email', 'primeiro_nome', 'sobrenome', 'telefone', 'setor', 'funcao', 'url_foto'] as any,
+            select: ['id', 'nome', 'email', 'primeiro_nome', 'sobrenome', 'telefone', 'setor', 'funcao', 'url_foto', 'provider', 'cep', 'logradouro', 'complemento', 'numero', 'bairro', 'cidade', 'estado', 'cpf', 'cnpj', 'rg', 'ctps', 'chave_pix', 'tipo_colaborador', 'data_nascimento', 'data_admissao'] as any,
         });
         return user;
     }
@@ -194,8 +205,75 @@ export class AuthService {
         return { ok: true };
     }
 
-    async updateProfile(userId: number, primeiro_nome: string, sobrenome: string, email: string, telefone: string, setor: ESetores, funcao: EFuncoes[]) {
-        console.log('updateProfile chamado com:', { userId, primeiro_nome, sobrenome, email, telefone, setor, funcao });
+    async resetPasswordDirect(email?: string, telefone?: string, novaSenha?: string) {
+        if (!email && !telefone) {
+            throw new BadRequestException('Email ou telefone é obrigatório');
+        }
+
+        if (!novaSenha) {
+            throw new BadRequestException('Nova senha é obrigatória');
+        }
+
+        // Validar senha
+        PasswordValidator.validate(novaSenha);
+
+        let user;
+        if (email) {
+            user = await this.uow.usuariosRP.findOne({ where: { email } });
+            if (!user) {
+                throw new BadRequestException('Usuário não encontrado com este email');
+            }
+        } else if (telefone) {
+            user = await this.uow.usuariosRP.findOne({ where: { telefone } });
+            if (!user) {
+                throw new BadRequestException('Usuário não encontrado com este telefone');
+            }
+        }
+
+        if (!user) {
+            throw new BadRequestException('Usuário não encontrado');
+        }
+
+        user.senha = await bcrypt.hash(novaSenha, 10);
+        await this.uow.usuariosRP.save(user);
+
+        return { ok: true, message: 'Senha redefinida com sucesso' };
+    }
+
+    async changePassword(userId: number, senhaAtual: string, novaSenha: string) {
+        const user = await this.uow.usuariosRP.findOne({ where: { id: userId } });
+        if (!user) {
+            throw new BadRequestException('Usuário não encontrado');
+        }
+
+        // Valida a nova senha
+        PasswordValidator.validate(novaSenha);
+
+        // Verifica se a senha atual está correta
+        const senhaAtualValida = await bcrypt.compare(senhaAtual, user.senha);
+        if (!senhaAtualValida) {
+            throw new UnauthorizedException('Senha atual incorreta');
+        }
+
+        // Verifica se a nova senha é diferente da atual
+        const mesmaSenha = await bcrypt.compare(novaSenha, user.senha);
+        if (mesmaSenha) {
+            throw new BadRequestException('A nova senha deve ser diferente da senha atual');
+        }
+
+        // Criptografa a nova senha usando o mesmo método da criação (bcrypt.hash com salt 10)
+        const hash = await bcrypt.hash(novaSenha, 10);
+        user.senha = hash;
+        await this.uow.usuariosRP.save(user);
+
+        return {
+            ok: true,
+            message: 'Senha alterada com sucesso',
+        };
+    }
+
+    async updateProfile(userId: number, primeiro_nome: string, sobrenome: string, email: string, telefone: string, setor: ESetores, funcao: EFuncoes[], cep?: string, logradouro?: string, complemento?: string, numero?: string, bairro?: string, cidade?: string, estado?: string, cpf?: string, cnpj?: string, rg?: string, ctps?: string, chave_pix?: string, tipo_colaborador?: string, data_nascimento?: string, data_admissao?: string) {
+        console.log('updateProfile chamado com:', { userId, primeiro_nome, sobrenome, email, telefone, setor, funcao, cep, logradouro, complemento, numero, bairro, cidade, estado, cpf, cnpj, rg, ctps, chave_pix, tipo_colaborador, data_nascimento, data_admissao });
 
         try {
             const user = await this.uow.usuariosRP.findOne({ where: { id: userId } });
@@ -236,18 +314,67 @@ export class AuthService {
             }
 
             // Usar updateQueryBuilder para atualizar apenas os campos necessários
+            const updateData: any = {
+                primeiro_nome,
+                sobrenome,
+                nome: `${primeiro_nome} ${sobrenome}`,
+                telefone,
+                setor,
+                funcao,
+                atualizado_em: new Date(),
+            };
+
+            // Adicionar campos de endereço se fornecidos
+            if (cep !== undefined) updateData.cep = cep;
+            if (logradouro !== undefined) updateData.logradouro = logradouro;
+            if (complemento !== undefined) updateData.complemento = complemento;
+            if (numero !== undefined) updateData.numero = numero;
+            if (bairro !== undefined) updateData.bairro = bairro;
+            if (cidade !== undefined) updateData.cidade = cidade;
+            if (estado !== undefined) updateData.estado = estado;
+
+            // Adicionar novos campos se fornecidos
+            if (cpf !== undefined) updateData.cpf = cpf;
+            if (cnpj !== undefined) updateData.cnpj = cnpj;
+            if (rg !== undefined) updateData.rg = rg;
+            if (ctps !== undefined) updateData.ctps = ctps;
+            if (chave_pix !== undefined) updateData.chave_pix = chave_pix;
+            if (tipo_colaborador !== undefined) updateData.tipo_colaborador = tipo_colaborador;
+            if (data_nascimento !== undefined) {
+                // Converter AAAA-MM-DD para Date sem problemas de timezone
+                // Usar new Date(ano, mês - 1, dia) para criar data local às 00:00:00
+                if (data_nascimento) {
+                    const dateMatch = data_nascimento.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                    if (dateMatch) {
+                        const [, year, month, day] = dateMatch;
+                        updateData.data_nascimento = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                    } else {
+                        updateData.data_nascimento = new Date(data_nascimento);
+                    }
+                } else {
+                    updateData.data_nascimento = null;
+                }
+            }
+            if (data_admissao !== undefined) {
+                // Converter AAAA-MM-DD para Date sem problemas de timezone
+                // Usar new Date(ano, mês - 1, dia) para criar data local às 00:00:00
+                if (data_admissao) {
+                    const dateMatch = data_admissao.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                    if (dateMatch) {
+                        const [, year, month, day] = dateMatch;
+                        updateData.data_admissao = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                    } else {
+                        updateData.data_admissao = new Date(data_admissao);
+                    }
+                } else {
+                    updateData.data_admissao = null;
+                }
+            }
+
             const updateQuery = this.uow.usuariosRP
                 .createQueryBuilder()
                 .update('Usuarios')
-                .set({
-                    primeiro_nome,
-                    sobrenome,
-                    nome: `${primeiro_nome} ${sobrenome}`,
-                    telefone,
-                    setor,
-                    funcao,
-                    atualizado_em: new Date(),
-                })
+                .set(updateData)
                 .where('id = :userId', { userId });
 
             // Só atualizar email se realmente mudou
@@ -277,6 +404,21 @@ export class AuthService {
                     setor: updatedUser.setor,
                     funcao: updatedUser.funcao,
                     url_foto: updatedUser.url_foto,
+                    cep: updatedUser.cep,
+                    logradouro: updatedUser.logradouro,
+                    complemento: updatedUser.complemento,
+                    numero: updatedUser.numero,
+                    bairro: updatedUser.bairro,
+                    cidade: updatedUser.cidade,
+                    estado: updatedUser.estado,
+                    cpf: updatedUser.cpf,
+                    cnpj: updatedUser.cnpj,
+                    rg: updatedUser.rg,
+                    ctps: updatedUser.ctps,
+                    chave_pix: updatedUser.chave_pix,
+                    tipo_colaborador: updatedUser.tipo_colaborador,
+                    data_nascimento: updatedUser.data_nascimento,
+                    data_admissao: updatedUser.data_admissao,
                 },
             };
         } catch (error) {

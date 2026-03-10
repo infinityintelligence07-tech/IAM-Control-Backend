@@ -220,7 +220,7 @@ export class WhatsAppService {
                 // Buscar dados do aluno na turma
                 const alunoTurma = await this.uow.turmasAlunosRP.findOne({
                     where: { id: student.alunoTurmaId },
-                    relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk'],
+                    relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_endereco_evento_fk'],
                 });
 
                 if (!alunoTurma || !alunoTurma.id_aluno_fk) {
@@ -242,24 +242,61 @@ export class WhatsAppService {
                 // Gerar URL de check-in - link para formulário de preenchimento de dados
                 const checkInUrl = `${this.frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
-                // Obter dados da turma para local e data
+                // Obter dados da turma para data, local e endereço
                 const turma = alunoTurma.id_turma_fk;
-                const poloNome = turma?.id_polo_fk?.polo || '';
-                const dataEvento = turma?.data_inicio
-                    ? new Date(turma.data_inicio).toLocaleDateString('pt-BR', {
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
-                      })
-                    : '';
+                const polo = turma?.id_polo_fk;
+                const enderecoEvento = turma?.id_endereco_evento_fk;
 
-                // Preparar parâmetros do template
-                // Template espera: {{1}} = nome, {{2}} = treinamento, {{3}} = local, {{4}} = link
+                // DATA: usar exatamente o valor do banco (YYYY-MM-DD), sem fuso horário
+                // Ex: "2026-03-10" e "2026-03-12" -> "10/03/2026 à 12/03/2026"
+                const formatDateOnly = (dateStr: string): string => {
+                    if (!dateStr || typeof dateStr !== 'string') return 'A confirmar';
+                    const datePart = dateStr.trim().split('T')[0];
+                    const parts = datePart.split(/[-/]/);
+                    if (parts.length < 3) return 'A confirmar';
+                    const d = parts[2].padStart(2, '0');
+                    const m = parts[1].padStart(2, '0');
+                    const y = parts[0];
+                    return `${d}/${m}/${y}`;
+                };
+                const dataInicioStr = turma?.data_inicio;
+                const dataFinalStr = turma?.data_final;
+                let dataStr = 'A confirmar';
+                if (dataInicioStr) {
+                    if (dataFinalStr && dataInicioStr !== dataFinalStr) {
+                        dataStr = `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`;
+                    } else {
+                        dataStr = formatDateOnly(dataInicioStr);
+                    }
+                }
+
+                // LOCAL: nome do local do evento ou do polo
+                const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
+
+                // ENDEREÇO: logradouro, numero - bairro - cep, cidade - estado
+                const buildEndereco = (e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null): string => {
+                    if (!e) return 'A confirmar';
+                    const partes = [];
+                    if (e.logradouro || e.numero) partes.push([e.logradouro, e.numero].filter(Boolean).join(', '));
+                    if (e.bairro) partes.push(e.bairro);
+                    const cepCidade = [e.cep, e.cidade].filter(Boolean).join(', ');
+                    if (cepCidade) partes.push(cepCidade);
+                    if (e.estado) partes.push(e.estado);
+                    return partes.length ? partes.join(' - ') : 'A confirmar';
+                };
+                const enderecoStr = buildEndereco(enderecoEvento) !== 'A confirmar'
+                    ? buildEndereco(enderecoEvento)
+                    : buildEndereco(turma ? { logradouro: turma.logradouro, numero: turma.numero, bairro: turma.bairro, cep: turma.cep, cidade: turma.cidade, estado: turma.estado } : null);
+
+                // Preparar parâmetros do template (novo template Gupshup: {{1}} a {{6}})
+                // {{1}} = nome, {{2}} = treinamento, {{3}} = DATA, {{4}} = LOCAL, {{5}} = ENDEREÇO, {{6}} = link
                 const templateParams = [
                     student.alunoNome, // {{1}}
                     student.treinamentoNome, // {{2}}
-                    poloNome && dataEvento ? `${poloNome} em ${dataEvento}` : poloNome || dataEvento || 'local e data a confirmar', // {{3}}
-                    checkInUrl, // {{4}}
+                    dataStr, // {{3}}
+                    localStr, // {{4}}
+                    enderecoStr, // {{5}}
+                    checkInUrl, // {{6}}
                 ];
 
                 // Enviar template em vez de mensagem livre
@@ -296,19 +333,21 @@ export class WhatsAppService {
                
                 if (sendResult.success) {
                     
-                    // Monta a mensagem de texto com o link de check-in
-                    const checkInMessage = `Olá ${student.alunoNome}, parabéns por dizer SIM a essa jornada transformadora! ✨
+                    // Monta a mensagem de texto (redundância) no formato do novo template
+                    const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
-Você garantiu o seu lugar no ${student.treinamentoNome}${poloNome && dataEvento ? ` em ${poloNome} em ${dataEvento}` : ''} e estamos muito animados pra te receber! 🤩
+Você garantiu a sua vaga no _*${student.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
+
+📌*DATA*: ${dataStr}
+📌*LOCAL*: ${localStr}
+📌*ENDEREÇO*: ${enderecoStr}
 
 Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
-
 Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
-${checkInUrl}
+_${checkInUrl}_
 
 Assim que finalizar, sua presença será confirmada automaticamente.
-
 Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
 
 Vamos Prosperar! 🙌`;

@@ -1691,7 +1691,7 @@ export class TurmasService {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id_turma_aluno },
-                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_treinamento_fk'],
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_endereco_evento_fk'],
             });
 
             if (!turmaAluno) {
@@ -1806,6 +1806,49 @@ export class TurmasService {
             const aluno = turmaAluno.id_aluno_fk;
             const turma = turmaAluno.id_turma_fk;
             const treinamento = turma.id_treinamento_fk;
+            const polo = turma.id_polo_fk;
+            const enderecoEvento = turma.id_endereco_evento_fk;
+
+            // DATA: usar exatamente o valor do banco (YYYY-MM-DD), sem fuso horário
+            // Ex: "2026-03-10" e "2026-03-12" -> "10/03/2026 à 12/03/2026"
+            const formatDateOnly = (dateStr: string): string => {
+                if (!dateStr || typeof dateStr !== 'string') return 'A confirmar';
+                const datePart = dateStr.trim().split('T')[0];
+                const parts = datePart.split(/[-/]/);
+                if (parts.length < 3) return 'A confirmar';
+                const d = parts[2].padStart(2, '0');
+                const m = parts[1].padStart(2, '0');
+                const y = parts[0];
+                return `${d}/${m}/${y}`;
+            };
+            const dataInicioStr = turma?.data_inicio;
+            const dataFinalStr = turma?.data_final;
+            let dataStr = 'A confirmar';
+            if (dataInicioStr) {
+                if (dataFinalStr && dataInicioStr !== dataFinalStr) {
+                    dataStr = `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`;
+                } else {
+                    dataStr = formatDateOnly(dataInicioStr);
+                }
+            }
+
+            // LOCAL: nome do local do evento ou do polo
+            const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
+
+            // ENDEREÇO: logradouro, numero - bairro - cep, cidade - estado
+            const buildEndereco = (e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null): string => {
+                if (!e) return 'A confirmar';
+                const partes = [];
+                if (e.logradouro || e.numero) partes.push([e.logradouro, e.numero].filter(Boolean).join(', '));
+                if (e.bairro) partes.push(e.bairro);
+                const cepCidade = [e.cep, e.cidade].filter(Boolean).join(', ');
+                if (cepCidade) partes.push(cepCidade);
+                if (e.estado) partes.push(e.estado);
+                return partes.length ? partes.join(' - ') : 'A confirmar';
+            };
+            const enderecoStr = buildEndereco(enderecoEvento) !== 'A confirmar'
+                ? buildEndereco(enderecoEvento)
+                : buildEndereco(turma ? { logradouro: turma.logradouro, numero: turma.numero, bairro: turma.bairro, cep: turma.cep, cidade: turma.cidade, estado: turma.estado } : null);
 
             // Gerar token JWT para o link de check-in
             const jwtSecret = process.env.JWT_SECRET || 'default-secret-key';
@@ -1838,19 +1881,21 @@ export class TurmasService {
             const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
             const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
-            // Gerar mensagem
-            const message = `Olá ${aluno.nome}! , parabéns por dizer SIM a essa jornada transformadora! ✨
+            // Mensagem no formato do novo template Gupshup
+            const message = `Olá *${aluno.nome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
-Você garantiu o seu lugar no ${checkInData.treinamentoNome} e estamos muito animados pra te receber! 🤩
+Você garantiu a sua vaga no _*${checkInData.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
+
+📌*DATA*: ${dataStr}
+📌*LOCAL*: ${localStr}
+📌*ENDEREÇO*: ${enderecoStr}
 
 Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
-
 Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
-${formularioUrl}
+_${formularioUrl}_
 
 Assim que finalizar, sua presença será confirmada automaticamente.
-
 Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
 
 Vamos Prosperar! 🙌`;

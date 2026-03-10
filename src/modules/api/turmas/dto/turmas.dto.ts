@@ -131,6 +131,21 @@ export class CreateTurmaDto {
     bonus_treinamentos?: number[];
 
     @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_midia_kit?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_grupo_whatsapp?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_grupo_whatsapp_2?: string;
+
+    @IsOptional()
     @IsNumber()
     criado_por?: number;
 }
@@ -223,6 +238,21 @@ export class UpdateTurmaDto {
     bonus_treinamentos?: number[];
 
     @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_midia_kit?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_grupo_whatsapp?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_grupo_whatsapp_2?: string;
+
+    @IsOptional()
     @IsNumber()
     atualizado_por?: number;
 
@@ -308,6 +338,9 @@ export class TurmaResponseDto {
     turma_aberta: boolean;
     bonus_treinamentos?: number[];
     detalhamento_bonus?: { id_treinamento_db: number }[];
+    url_midia_kit?: string;
+    url_grupo_whatsapp?: string;
+    url_grupo_whatsapp_2?: string;
     created_at: Date;
     updated_at: Date;
     polo?: {

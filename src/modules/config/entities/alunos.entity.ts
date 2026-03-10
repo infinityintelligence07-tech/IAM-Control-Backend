@@ -12,14 +12,14 @@ export class Alunos extends BaseEntity {
     @PrimaryGeneratedColumn('increment', { type: 'int', name: 'id', primaryKeyConstraintName: 'pk_alunos' })
     id: number;
 
-    @Column({ type: 'int', name: 'id_polo', nullable: false })
-    id_polo: number;
+    @Column({ type: 'int', name: 'id_polo', nullable: true })
+    id_polo: number | null;
 
     @Column({ type: 'varchar', name: 'nome', nullable: false })
     nome: string;
 
-    @Column({ type: 'varchar', name: 'nome_cracha', nullable: false })
-    nome_cracha: string;
+    @Column({ type: 'varchar', name: 'nome_cracha', nullable: true })
+    nome_cracha: string | null;
 
     @Column({ type: 'varchar', name: 'email', nullable: false, unique: true })
     email: string;
@@ -71,7 +71,7 @@ export class Alunos extends BaseEntity {
         default: EProfissao.CLT,
         nullable: true,
     })
-    profissao: EProfissao;
+    profissao: EProfissao | null;
 
     @Column({
         type: 'enum',
@@ -107,9 +107,9 @@ export class Alunos extends BaseEntity {
     @Column({ type: 'int', name: 'id_treinamento_bonus', nullable: true })
     id_treinamento_bonus: number;
 
-    @ManyToOne(() => Polos, (polos) => polos.alunos)
+    @ManyToOne(() => Polos, (polos) => polos.alunos, { nullable: true })
     @JoinColumn([{ name: 'id_polo', referencedColumnName: 'id' }])
-    id_polo_fk: Polos;
+    id_polo_fk: Polos | null;
 
     @ManyToOne(() => Alunos, (aluno) => aluno.alunosVinculados, { nullable: true })
     @JoinColumn([{ name: 'id_aluno_vinculado', referencedColumnName: 'id' }])

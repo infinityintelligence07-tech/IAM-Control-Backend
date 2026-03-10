@@ -3,6 +3,7 @@ import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto } from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
+import { EProfissao } from '../../config/entities/enum';
 
 @Injectable()
 export class AlunosService {
@@ -226,6 +227,14 @@ export class AlunosService {
 
                 // Atualizar com os novos dados
                 Object.assign(alunoExistente, createAlunoDto);
+                if (createAlunoDto.id_polo !== undefined) {
+                    alunoExistente.id_polo = createAlunoDto.id_polo ?? null;
+                }
+                if (createAlunoDto.profissao !== undefined) {
+                    alunoExistente.profissao = createAlunoDto.profissao != null ? createAlunoDto.profissao : null;
+                }
+                alunoExistente.nome_cracha =
+                    createAlunoDto.nome_cracha != null && createAlunoDto.nome_cracha.trim() !== '' ? createAlunoDto.nome_cracha.trim() : null;
                 alunoExistente.atualizado_em = new Date();
                 alunoExistente.atualizado_por = createAlunoDto.criado_por;
 
@@ -267,6 +276,9 @@ export class AlunosService {
             // Se não existe, criar novo
             const novoAluno = new Alunos();
             Object.assign(novoAluno, createAlunoDto);
+            novoAluno.id_polo = createAlunoDto.id_polo ?? null;
+            novoAluno.profissao = createAlunoDto.profissao != null ? createAlunoDto.profissao : null;
+            novoAluno.nome_cracha = createAlunoDto.nome_cracha != null && createAlunoDto.nome_cracha.trim() !== '' ? createAlunoDto.nome_cracha.trim() : null;
             novoAluno.criado_por = createAlunoDto.criado_por;
 
             try {
@@ -304,18 +316,22 @@ export class AlunosService {
                 // Verificar se é erro de sequência desincronizada
                 const errorCode = saveError?.code || saveError?.driverError?.code;
                 const constraint = saveError?.constraint || saveError?.driverError?.constraint;
-                
+
                 if (errorCode === '23505' && constraint === 'pk_alunos') {
                     console.warn('Sequência de IDs desincronizada detectada. Corrigindo...');
-                    
+
                     // Corrigir a sequência
                     await this.fixAlunosSequence();
-                    
+
                     // Criar um novo objeto para garantir que não há ID pré-definido
                     const novoAlunoRetry = new Alunos();
                     Object.assign(novoAlunoRetry, createAlunoDto);
+                    novoAlunoRetry.id_polo = createAlunoDto.id_polo ?? null;
+                    novoAlunoRetry.profissao = createAlunoDto.profissao != null ? createAlunoDto.profissao : null;
+                    novoAlunoRetry.nome_cracha =
+                        createAlunoDto.nome_cracha != null && createAlunoDto.nome_cracha.trim() !== '' ? createAlunoDto.nome_cracha.trim() : null;
                     novoAlunoRetry.criado_por = createAlunoDto.criado_por;
-                    
+
                     // Tentar novamente
                     const alunoSalvo = await this.uow.alunosRP.save(novoAlunoRetry);
                     console.log('Aluno criado com sucesso após correção da sequência:', alunoSalvo);
@@ -348,7 +364,7 @@ export class AlunosService {
                         polo: undefined, // Será carregado se necessário
                     };
                 }
-                
+
                 // Se não for erro de sequência, relançar o erro
                 throw saveError;
             }
@@ -357,7 +373,7 @@ export class AlunosService {
             if (error instanceof BadRequestException) {
                 throw error;
             }
-            
+
             // Verificar se é erro de email duplicado
             if (typeof error === 'object' && error !== null) {
                 const errorObj = error as any;
@@ -370,7 +386,7 @@ export class AlunosService {
                     throw new BadRequestException(`O email ${email} já está cadastrado. Por favor, use outro email.`);
                 }
             }
-            
+
             throw new Error('Erro interno do servidor ao criar aluno');
         }
     }
@@ -393,6 +409,12 @@ export class AlunosService {
             Object.assign(aluno, updateAlunoDto);
             if (updateAlunoDto.atualizado_por !== undefined) {
                 aluno.atualizado_por = updateAlunoDto.atualizado_por;
+            }
+            if (updateAlunoDto.profissao !== undefined) {
+                aluno.profissao = updateAlunoDto.profissao != null ? updateAlunoDto.profissao : null;
+            }
+            if (updateAlunoDto.nome_cracha !== undefined) {
+                aluno.nome_cracha = updateAlunoDto.nome_cracha != null && updateAlunoDto.nome_cracha.trim() !== '' ? updateAlunoDto.nome_cracha.trim() : null;
             }
 
             const alunoAtualizado = await this.uow.alunosRP.save(aluno);
@@ -510,49 +532,36 @@ export class AlunosService {
     private async fixAlunosSequence(): Promise<void> {
         try {
             const queryRunner = this.uow.alunosRP.manager.connection.createQueryRunner();
-            
+
             // Obter o schema da tabela (pode ser 'public' ou outro)
             const schema = this.uow.alunosRP.metadata.schema || 'public';
-            
+
             // Obter o maior ID atual na tabela
-            const result = await queryRunner.query(
-                `SELECT COALESCE(MAX(id), 0) as max_id FROM ${schema}.alunos`
-            );
+            const result = await queryRunner.query(`SELECT COALESCE(MAX(id), 0) as max_id FROM ${schema}.alunos`);
             const maxId = parseInt(result[0]?.max_id || '0', 10);
-            
+
             // Resetar a sequência para o próximo valor após o maior ID
             // Tentar diferentes formatos de nome de sequência
             const nextId = maxId + 1;
             try {
                 // Tentar com schema
-                await queryRunner.query(
-                    `SELECT setval('${schema}.alunos_id_seq', $1, false)`,
-                    [nextId]
-                );
+                await queryRunner.query(`SELECT setval('${schema}.alunos_id_seq', $1, false)`, [nextId]);
             } catch (seqError) {
                 // Se falhar, tentar sem schema (sequência pode estar no schema padrão)
                 try {
-                    await queryRunner.query(
-                        `SELECT setval('alunos_id_seq', $1, false)`,
-                        [nextId]
-                    );
+                    await queryRunner.query(`SELECT setval('alunos_id_seq', $1, false)`, [nextId]);
                 } catch (seqError2) {
                     // Se ainda falhar, tentar encontrar o nome real da sequência
-                    const seqResult = await queryRunner.query(
-                        `SELECT pg_get_serial_sequence('${schema}.alunos', 'id') as seq_name`
-                    );
+                    const seqResult = await queryRunner.query(`SELECT pg_get_serial_sequence('${schema}.alunos', 'id') as seq_name`);
                     const seqName = seqResult[0]?.seq_name;
                     if (seqName) {
-                        await queryRunner.query(
-                            `SELECT setval($1, $2, false)`,
-                            [seqName, nextId]
-                        );
+                        await queryRunner.query(`SELECT setval($1, $2, false)`, [seqName, nextId]);
                     } else {
                         throw new Error('Não foi possível encontrar a sequência');
                     }
                 }
             }
-            
+
             await queryRunner.release();
             console.log(`Sequência de alunos corrigida. Próximo ID será: ${nextId}`);
         } catch (error) {

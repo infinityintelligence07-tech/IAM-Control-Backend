@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsNumber, IsEnum, IsNotEmpty, IsBoolean } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { EStatusAlunosGeral, ETipoVinculoAluno } from '../../../config/entities/enum';
+import { EStatusAlunosGeral, ETipoVinculoAluno, EProfissao } from '../../../config/entities/enum';
 
 export class GetAlunosDto {
     @IsOptional()
@@ -40,9 +40,9 @@ export class GetAlunosDto {
 
 export class AlunoResponseDto {
     id: number;
-    id_polo: number;
+    id_polo: number | null;
     nome: string;
-    nome_cracha: string;
+    nome_cracha: string | null;
     email: string;
     genero?: string;
     cpf?: string;
@@ -86,19 +86,24 @@ export class AlunosListResponseDto {
 }
 
 export class CreateAlunoDto {
-    @IsNotEmpty()
+    @IsOptional()
     @IsNumber()
-    id_polo: number;
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return undefined;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? undefined : n;
+    })
+    id_polo?: number;
 
     @IsNotEmpty()
     @IsString()
     @Transform(({ value }) => value?.trim())
     nome: string;
 
-    @IsNotEmpty()
+    @IsOptional()
     @IsString()
-    @Transform(({ value }) => value?.trim())
-    nome_cracha: string;
+    @Transform(({ value }) => (value != null && String(value).trim() !== '' ? String(value).trim() : undefined))
+    nome_cracha?: string;
 
     @IsNotEmpty()
     @IsString()
@@ -171,9 +176,13 @@ export class CreateAlunoDto {
     estado?: string;
 
     @IsOptional()
-    @IsString()
-    @Transform(({ value }) => value?.trim())
-    profissao?: string;
+    @IsEnum(EProfissao)
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return undefined;
+        const v = typeof value === 'string' ? value.trim() : value;
+        return v === '' ? undefined : v;
+    })
+    profissao?: EProfissao;
 
     @IsOptional()
     @IsEnum(EStatusAlunosGeral)
@@ -299,9 +308,13 @@ export class UpdateAlunoDto {
     estado?: string;
 
     @IsOptional()
-    @IsString()
-    @Transform(({ value }) => value?.trim())
-    profissao?: string;
+    @IsEnum(EProfissao)
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return undefined;
+        const v = typeof value === 'string' ? value.trim() : value;
+        return v === '' ? undefined : v;
+    })
+    profissao?: EProfissao;
 
     @IsOptional()
     @IsEnum(EStatusAlunosGeral)

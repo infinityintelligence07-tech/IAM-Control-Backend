@@ -13,14 +13,17 @@ async function bootstrap() {
     app.use(bodyParser.json({ limit: '50mb' }));
     app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
-    // Configuração do CORS
+    // Configuração do CORS (development: localhost:3001 | production: iamcontrol.com.br)
+    const corsOrigins = [
+        process.env.FRONTEND_URL,
+        'https://www.iamcontrol.com.br',
+        'https://iamcontrol.com.br',
+        'http://www.iamcontrol.com.br',
+        'http://localhost:3001',
+    ].filter(Boolean);
+
     app.enableCors({
-        origin: [
-            process.env.FRONTEND_URL || 'http://iamcontrol.com.br',
-            'https://www.iamcontrol.com.br',
-            'https://iamcontrol.com.br',
-            'http://www.iamcontrol.com.br',
-        ],
+        origin: corsOrigins,
         credentials: true,
     });
 
@@ -35,6 +38,7 @@ async function bootstrap() {
 
     const port = process.env.PORT || 3000;
     await app.listen(port);
-    console.log(`🚀 Servidor rodando em http://localhost:${port}/api`);
+    const env = process.env.NODE_ENV || 'development';
+    console.log(`🚀 Servidor rodando em http://localhost:${port}/api (${env})`);
 }
 bootstrap();

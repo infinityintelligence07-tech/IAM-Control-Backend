@@ -548,7 +548,7 @@ export class AlunosService {
     async getVinculos(id_aluno: number): Promise<AlunoVinculoResponseDto[]> {
         const vinculos = await this.uow.alunosVinculosRP.find({
             where: { id_aluno, deletado_em: null },
-            relations: ['id_aluno_vinculado_fk', 'id_treinamento_fk'],
+            relations: ['id_aluno_vinculado_fk', 'id_treinamento_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
         });
         return vinculos.map((v) => ({
             id: v.id,
@@ -556,6 +556,7 @@ export class AlunosService {
             tipo_vinculo: v.tipo_vinculo,
             id_aluno_vinculado: v.id_aluno_vinculado,
             id_treinamento: v.id_treinamento,
+            id_turma: v.id_turma,
             aluno_vinculado: v.id_aluno_vinculado_fk ? {
                 id: v.id_aluno_vinculado_fk.id,
                 nome: v.id_aluno_vinculado_fk.nome,
@@ -564,6 +565,11 @@ export class AlunosService {
             treinamento: v.id_treinamento_fk ? {
                 id: v.id_treinamento_fk.id,
                 treinamento: v.id_treinamento_fk.treinamento,
+            } : undefined,
+            turma: v.id_turma_fk ? {
+                id: v.id_turma_fk.id,
+                edicao_turma: v.id_turma_fk.edicao_turma,
+                treinamento_nome: v.id_turma_fk.id_treinamento_fk?.treinamento || '',
             } : undefined,
         }));
     }
@@ -582,6 +588,7 @@ export class AlunosService {
             vinculo.tipo_vinculo = v.tipo_vinculo;
             vinculo.id_aluno_vinculado = v.id_aluno_vinculado;
             vinculo.id_treinamento = v.id_treinamento ?? null;
+            vinculo.id_turma = v.id_turma ?? null;
             vinculo.criado_por = dto.criado_por;
             return vinculo;
         });

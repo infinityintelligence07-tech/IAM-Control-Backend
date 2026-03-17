@@ -4,6 +4,7 @@ import { type_schema } from '../database/typeORM.provider';
 import { ETipoVinculoAluno } from './enum';
 import { Alunos } from './alunos.entity';
 import { Treinamentos } from './treinamentos.entity';
+import { Turmas } from './turmas.entity';
 
 @Entity('alunos_vinculos', { schema: type_schema })
 export class AlunosVinculos extends BaseEntity {
@@ -22,6 +23,9 @@ export class AlunosVinculos extends BaseEntity {
     @Column({ type: 'int', name: 'id_treinamento', nullable: true })
     id_treinamento: number | null;
 
+    @Column({ type: 'int', name: 'id_turma', nullable: true })
+    id_turma: number | null;
+
     @ManyToOne(() => Alunos, (aluno) => aluno.vinculos, { nullable: false, onDelete: 'CASCADE' })
     @JoinColumn([{ name: 'id_aluno', referencedColumnName: 'id' }])
     id_aluno_fk: Alunos;
@@ -33,4 +37,8 @@ export class AlunosVinculos extends BaseEntity {
     @ManyToOne(() => Treinamentos, { nullable: true })
     @JoinColumn([{ name: 'id_treinamento', referencedColumnName: 'id' }])
     id_treinamento_fk: Treinamentos | null;
+
+    @ManyToOne(() => Turmas, { nullable: true })
+    @JoinColumn([{ name: 'id_turma', referencedColumnName: 'id' }])
+    id_turma_fk: Turmas | null;
 }

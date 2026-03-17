@@ -399,6 +399,15 @@ export class AlunoVinculoInputDto {
         return isNaN(n) ? null : n;
     })
     id_treinamento?: number | null;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
+    id_turma?: number | null;
 }
 
 export class SaveAlunoVinculosDto {
@@ -418,6 +427,7 @@ export class AlunoVinculoResponseDto {
     tipo_vinculo: ETipoVinculoAluno;
     id_aluno_vinculado: number;
     id_treinamento: number | null;
+    id_turma: number | null;
     aluno_vinculado?: {
         id: number;
         nome: string;
@@ -426,5 +436,10 @@ export class AlunoVinculoResponseDto {
     treinamento?: {
         id: number;
         treinamento: string;
+    };
+    turma?: {
+        id: number;
+        edicao_turma: string;
+        treinamento_nome: string;
     };
 }

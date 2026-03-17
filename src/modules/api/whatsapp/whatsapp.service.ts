@@ -28,7 +28,7 @@ export class WhatsAppService {
     // UUID do template de check-in aprovado na Gupshup
     private readonly CHECKIN_TEMPLATE_ID_GUPSHUP = '8ebafac1-29e5-4d10-9ebc-03ae51126a80';
     private readonly CHECKIN_TEMPLATE_NAME: string;
-    
+
     // UUID do template de QR Code aprovado na Gupshup (template com imagem)
     // Parâmetros: {{1}} = nome do aluno, {{2}} = nome do treinamento
     private readonly QRCODE_TEMPLATE_ID_GUPSHUP = '34dd38bb-6594-4ccd-9537-42e8720d29b0';
@@ -65,7 +65,7 @@ export class WhatsAppService {
             console.log(`📱 [Z-API] Enviando mensagem via ChatGuru para ${formattedPhone}${contactName ? ` (${contactName})` : ''}`);
 
             // Usa o método createChatAndSendMessage que cria o chat com o nome e envia a mensagem
-            let phoneToUse = formattedPhone;
+            const phoneToUse = formattedPhone;
             try {
                 const result = await this.chatGuruService.createChatAndSendMessage(phoneToUse, message, contactName);
 
@@ -78,7 +78,7 @@ export class WhatsAppService {
                 } else {
                     const errorMsg = result.error || result.warning || 'Falha ao enviar mensagem via ChatGuru';
                     console.warn(`⚠️ [Z-API] Falha ao enviar mensagem: ${errorMsg}`);
-                    
+
                     // Se for erro de chat não encontrado, tenta com número alternado
                     if (this.isChatNotFoundError({ message: errorMsg })) {
                         const alternatePhone = this.tryAlternatePhoneNumber(phoneToUse);
@@ -98,7 +98,7 @@ export class WhatsAppService {
                             }
                         }
                     }
-                    
+
                     return {
                         success: false,
                         error: errorMsg,
@@ -107,7 +107,7 @@ export class WhatsAppService {
             } catch (serviceError: any) {
                 console.error(`❌ [Z-API] Erro no serviço ChatGuru: ${serviceError.message}`);
                 console.error(`   Stack: ${serviceError.stack}`);
-                
+
                 // Se for erro de chat não encontrado, tenta com número alternado
                 if (this.isChatNotFoundError(serviceError)) {
                     const alternatePhone = this.tryAlternatePhoneNumber(phoneToUse);
@@ -127,7 +127,7 @@ export class WhatsAppService {
                         }
                     }
                 }
-                
+
                 return {
                     success: false,
                     error: serviceError.message || 'Erro ao enviar mensagem via Z-API',
@@ -164,13 +164,10 @@ export class WhatsAppService {
 
             // Usa o método createChatAndSendTemplate que cria o chat e envia o template
             const result = await this.chatGuruService.createChatAndSendTemplate(formattedPhone, templateId, templateParams, contactName);
-            
 
             if (result.success) {
-                const messageId = result.templateResult?.messageId || 
-                                 result.templateResult?.result?.messageId ||
-                                 result.templateResult?.messageId;
-                
+                const messageId = result.templateResult?.messageId || result.templateResult?.result?.messageId || result.templateResult?.messageId;
+
                 return {
                     success: true,
                     message: 'Template enviado com sucesso',
@@ -179,10 +176,11 @@ export class WhatsAppService {
                     destination: formattedPhone,
                 };
             } else {
-                const errorMsg = result.templateResult?.error || 
-                               result.templateResult?.result?.error ||
-                               result.templateResult?.result?.message ||
-                               'Falha ao enviar template via ChatGuru';
+                const errorMsg =
+                    result.templateResult?.error ||
+                    result.templateResult?.result?.error ||
+                    result.templateResult?.result?.message ||
+                    'Falha ao enviar template via ChatGuru';
                 return {
                     success: false,
                     error: errorMsg,
@@ -196,7 +194,7 @@ export class WhatsAppService {
             console.error(`📋 Template ID: ${templateId}`);
             console.error(`📄 Erro:`, error);
             console.error(`${'X'.repeat(80)}\n`);
-            
+
             const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar template';
             return {
                 success: false,
@@ -274,7 +272,9 @@ export class WhatsAppService {
                 const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
 
                 // ENDEREÇO: logradouro, numero - bairro - cep, cidade - estado
-                const buildEndereco = (e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null): string => {
+                const buildEndereco = (
+                    e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null,
+                ): string => {
                     if (!e) return 'A confirmar';
                     const partes = [];
                     if (e.logradouro || e.numero) partes.push([e.logradouro, e.numero].filter(Boolean).join(', '));
@@ -284,9 +284,21 @@ export class WhatsAppService {
                     if (e.estado) partes.push(e.estado);
                     return partes.length ? partes.join(' - ') : 'A confirmar';
                 };
-                const enderecoStr = buildEndereco(enderecoEvento) !== 'A confirmar'
-                    ? buildEndereco(enderecoEvento)
-                    : buildEndereco(turma ? { logradouro: turma.logradouro, numero: turma.numero, bairro: turma.bairro, cep: turma.cep, cidade: turma.cidade, estado: turma.estado } : null);
+                const enderecoStr =
+                    buildEndereco(enderecoEvento) !== 'A confirmar'
+                        ? buildEndereco(enderecoEvento)
+                        : buildEndereco(
+                              turma
+                                  ? {
+                                        logradouro: turma.logradouro,
+                                        numero: turma.numero,
+                                        bairro: turma.bairro,
+                                        cep: turma.cep,
+                                        cidade: turma.cidade,
+                                        estado: turma.estado,
+                                    }
+                                  : null,
+                          );
 
                 // Preparar parâmetros do template (novo template Gupshup: {{1}} a {{6}})
                 // {{1}} = nome, {{2}} = treinamento, {{3}} = DATA, {{4}} = LOCAL, {{5}} = ENDEREÇO, {{6}} = link
@@ -302,37 +314,36 @@ export class WhatsAppService {
                 // Enviar template em vez de mensagem livre
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
                 const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
-                
+
                 // IMPORTANTE: Tenta múltiplos formatos de template ID para garantir entrega
                 // Ordem de tentativas (do mais específico para o mais genérico):
                 // 1. Nome do template se configurado via env
                 // 2. UUID do template (Gupshup)
                 // 3. Nome padrão do template
-                
+
                 let sendResult: any = { success: false };
-                
+
                 // Tentativa 1: Nome do template se estiver configurado via env e for diferente do UUID
                 const checkinTemplateNameFromEnv = process.env.GUPSHUP_TEMPLATE_NAME;
                 if (checkinTemplateNameFromEnv && checkinTemplateNameFromEnv !== this.CHECKIN_TEMPLATE_ID_GUPSHUP) {
                     console.log(`📋 Tentativa 1: Usando nome do template da variável de ambiente: ${checkinTemplateNameFromEnv}`);
                     sendResult = await this.sendTemplateMessage(phone, checkinTemplateNameFromEnv, templateParams, alunoNome);
                 }
-                
+
                 // Tentativa 2: UUID do template (Gupshup)
                 if (!sendResult.success) {
                     console.log(`📋 Tentativa 2: Usando UUID do template: ${this.CHECKIN_TEMPLATE_NAME}`);
                     sendResult = await this.sendTemplateMessage(phone, this.CHECKIN_TEMPLATE_NAME, templateParams, alunoNome);
                 }
-                
+
                 // Tentativa 3: Nome padrão do template (se conhecido)
                 // NOTA: Substitua 'link_checkin' pelo nome real do template na Gupshup
                 if (!sendResult.success) {
                     console.log(`📋 Tentativa 3: Usando nome padrão do template: link_checkin`);
                     sendResult = await this.sendTemplateMessage(phone, 'link_checkin', templateParams, alunoNome);
                 }
-               
+
                 if (sendResult.success) {
-                    
                     // Monta a mensagem de texto (redundância) no formato do novo template
                     const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
@@ -351,17 +362,17 @@ Assim que finalizar, sua presença será confirmada automaticamente.
 Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
 
 Vamos Prosperar! 🙌`;
-                    
+
                     let redundancySuccess = false;
                     let redundancyError: string | undefined;
-                    
+
                     try {
                         // Aguarda um pequeno delay antes de enviar a redundância
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        
+                        await new Promise((resolve) => setTimeout(resolve, 1000));
+
                         // Envia a mensagem de texto via ChatGuru (Z-API) como redundância
                         const redundancyResult = await this.sendMessage(phone, checkInMessage, alunoNome);
-                        
+
                         if (redundancyResult.success) {
                             redundancySuccess = true;
                             console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
@@ -378,7 +389,6 @@ Vamos Prosperar! 🙌`;
                         console.error(`   Stack: ${redundancyErrorException.stack}`);
                         console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
                     }
-                    
                 } else {
                     console.error(`❌ Falha ao enviar template de check-in para ${alunoNome} (${phone})`);
                     console.error(`📄 Erro: ${sendResult.error || 'Erro desconhecido'}`);
@@ -774,11 +784,13 @@ Vamos Prosperar! 🙌`;
      * Envia QR code de credenciamento via WhatsApp após check-in
      * IMPORTANTE: SEMPRE usa TEMPLATE aprovado na Gupshup (via ChatGuru)
      * NUNCA envia como mensagem livre para evitar erro 470 (janela de 24h)
-     * 
+     *
      * Template: confirmacao_checkin_qrcode (ID: 34dd38bb-6594-4ccd-9537-42e8720d29b0)
      * Parâmetros: {{1}} = nome do aluno, {{2}} = nome do treinamento
      */
-    async sendQRCodeCredenciamento(data: SendQRCodeDto): Promise<{ success: boolean; message?: string; error?: string; messageId?: string; redundancySent?: boolean }> {
+    async sendQRCodeCredenciamento(
+        data: SendQRCodeDto,
+    ): Promise<{ success: boolean; message?: string; error?: string; messageId?: string; redundancySent?: boolean }> {
         try {
             // Gerar dados do QR code para a imagem
             const qrData = {
@@ -811,7 +823,7 @@ Vamos Prosperar! 🙌`;
 
             // Gerar imagem do QR Code
             const qrCodeImage = await this.chatGuruService.generateQRCode(qrData);
-            
+
             // Faz upload da imagem para obter URL pública
             console.log(`🔲 Fazendo upload da imagem do QR Code...`);
             const qrCodeUrl = await this.chatGuruService.uploadImageForTemplate(qrCodeImage);
@@ -821,8 +833,8 @@ Vamos Prosperar! 🙌`;
             // {{1}} = nome do aluno
             // {{2}} = nome do treinamento
             const templateParams = [
-                data.alunoNome,           // {{1}}
-                data.treinamentoNome,     // {{2}}
+                data.alunoNome, // {{1}}
+                data.treinamentoNome, // {{2}}
             ];
 
             console.log(`📤 Enviando template com QR Code via Gupshup...`);
@@ -835,20 +847,14 @@ Vamos Prosperar! 🙌`;
             // 2. Nome padrão do template - SEGUNDA OPÇÃO MAIS CONFIÁVEL
             // 3. Facebook Template ID
             // 4. Gupshup UUID (menos confiável)
-            
+
             let templateResult: any = { success: false };
             const templateNameFromEnv = process.env.GUPSHUP_QRCODE_TEMPLATE_NAME;
-            
+
             // Tentativa 1: Nome do template se estiver configurado via env
             if (templateNameFromEnv && templateNameFromEnv !== this.QRCODE_TEMPLATE_ID_GUPSHUP) {
                 console.log(`📋 Tentativa 1: Usando nome do template da variável de ambiente: ${templateNameFromEnv}`);
-                templateResult = await this.chatGuruService.sendTemplateWithImage(
-                    cleanPhone,
-                    templateNameFromEnv,
-                    templateParams,
-                    qrCodeUrl,
-                    data.alunoNome,
-                );
+                templateResult = await this.chatGuruService.sendTemplateWithImage(cleanPhone, templateNameFromEnv, templateParams, qrCodeUrl, data.alunoNome);
             }
 
             // Tentativa 2: Nome padrão do template (geralmente mais confiável que IDs)
@@ -881,13 +887,7 @@ Vamos Prosperar! 🙌`;
             if (!templateResult.success) {
                 console.log(`📋 Tentativa 4: Usando Gupshup UUID: ${this.QRCODE_TEMPLATE_NAME}`);
                 console.log(`   NOTA: UUIDs podem não funcionar se o template não estiver totalmente propagado`);
-                templateResult = await this.chatGuruService.sendTemplateWithImage(
-                    cleanPhone,
-                    this.QRCODE_TEMPLATE_NAME,
-                    templateParams,
-                    qrCodeUrl,
-                    data.alunoNome,
-                );
+                templateResult = await this.chatGuruService.sendTemplateWithImage(cleanPhone, this.QRCODE_TEMPLATE_NAME, templateParams, qrCodeUrl, data.alunoNome);
             }
 
             if (templateResult.success) {
@@ -904,11 +904,11 @@ Vamos Prosperar! 🙌`;
                         templateUsed = this.QRCODE_TEMPLATE_NAME;
                     }
                 }
-                
+
                 console.log(`✅ Template QR Code enviado com sucesso para ${data.alunoNome} (${cleanPhone})`);
                 console.log(`🆔 Message ID: ${messageId}`);
                 console.log(`📋 Template usado: ${templateUsed}`);
-                
+
                 // Verifica se há informações adicionais no resultado
                 if (templateResult.result) {
                     const templateResultData = templateResult.result;
@@ -926,7 +926,7 @@ Vamos Prosperar! 🙌`;
                         }
                     }
                 }
-                
+
                 console.log(`\n⚠️ IMPORTANTE: Se a mensagem não chegar:`);
                 console.log(`   1. Verifique no painel Gupshup o status do Message ID: ${messageId}`);
                 console.log(`   2. Templates podem levar até 48h para propagar completamente no WhatsApp`);
@@ -939,7 +939,7 @@ Vamos Prosperar! 🙌`;
                 console.log(`   - Tente usar o NOME do template ao invés do ID (configure GUPSHUP_QRCODE_TEMPLATE_NAME)`);
                 console.log(`   - O nome do template geralmente funciona melhor que IDs numéricos ou UUIDs`);
                 console.log(`   - Verifique se o template não foi desaprovado recentemente pelo WhatsApp\n`);
-                
+
                 // ENVIO REDUNDANTE VIA Z-API (ChatGuru) para garantir entrega e histórico
                 // IMPORTANTE: Envia como mensagem livre (não template) mas com o mesmo layout do template
                 console.log(`\n${'═'.repeat(80)}`);
@@ -949,17 +949,17 @@ Vamos Prosperar! 🙌`;
                 console.log(`📱 Enviando QR Code via ChatGuru (Z-API) como mensagem livre...`);
                 console.log(`📞 Telefone: ${cleanPhone}`);
                 console.log(`👤 Contato: ${data.alunoNome}`);
-                
+
                 let redundancySuccess = false;
                 let redundancyError: string | undefined;
-                
+
                 try {
                     // Aguarda um pequeno delay antes de enviar a redundância
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+
                     // Gera mensagem no formato do template para enviar antes da imagem
                     const qrCodeMessage = this.generateQRCodeMessage(data.alunoNome, data.treinamentoNome);
-                    
+
                     // Envia a imagem do QR Code via ChatGuru (Z-API) como redundância
                     // Passa a mensagem do template para ser enviada antes da imagem
                     const redundancyResult = await this.sendImageMessage(
@@ -969,7 +969,7 @@ Vamos Prosperar! 🙌`;
                         data.alunoNome,
                         qrCodeMessage, // Mensagem no formato do template
                     );
-                    
+
                     if (redundancyResult.success) {
                         redundancySuccess = true;
                         console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
@@ -986,7 +986,7 @@ Vamos Prosperar! 🙌`;
                     console.error(`   Stack: ${redundancyErrorException.stack}`);
                     console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
                 }
-                
+
                 console.log(`${'═'.repeat(80)}`);
                 console.log(`📊 RESUMO DA REDUNDÂNCIA:`);
                 console.log(`   ✅ Template Gupshup: Enviado (Message ID: ${messageId})`);
@@ -995,7 +995,7 @@ Vamos Prosperar! 🙌`;
                     console.log(`   📄 Erro: ${redundancyError}`);
                 }
                 console.log(`${'═'.repeat(80)}\n`);
-                
+
                 return {
                     success: true,
                     message: `QR code enviado com sucesso via template aprovado. Message ID: ${messageId}`,
@@ -1006,11 +1006,8 @@ Vamos Prosperar! 🙌`;
 
             // Se todas as tentativas de template falharam, retorna erro
             // NUNCA tenta enviar como mensagem livre (evita erro 470)
-            const errorMessage = templateResult.error || 
-                               templateResult.result?.error ||
-                               templateResult.result?.message ||
-                               'Falha ao enviar QR code via template';
-            
+            const errorMessage = templateResult.error || templateResult.result?.error || templateResult.result?.message || 'Falha ao enviar QR code via template';
+
             console.error(`\n${'X'.repeat(80)}`);
             console.error(`❌ FALHA AO ENVIAR QR CODE VIA TEMPLATE`);
             console.error(`${'X'.repeat(80)}`);
@@ -1029,7 +1026,7 @@ Vamos Prosperar! 🙌`;
             console.error(`   Verifique o template no painel da Gupshup e certifique-se de que está aprovado`);
             console.error(`   Use o mesmo template que funcionou para o check-in como referência\n`);
             console.error(`${'X'.repeat(80)}\n`);
-            
+
             return {
                 success: false,
                 error: errorMessage,
@@ -1068,38 +1065,36 @@ Vamos Prosperar! 🙌`;
             // IMPORTANTE: Para Z-API funcionar, precisamos garantir que o chat existe e está ativo
             // Estratégia: Enviar uma mensagem de texto primeiro para ativar o chat, depois a imagem
             console.log(`📱 [Z-API] Garantindo que o chat está ativo antes de enviar imagem...`);
-            
+
             let chatActive = false;
             let activationMessageId: string | undefined;
-            let phoneToUse = formattedPhone; // Número que será usado (pode ser alternado)
-            
+            const phoneToUse = formattedPhone; // Número que será usado (pode ser alternado)
+
             try {
                 // Envia mensagem de texto no mesmo formato do template para ativar o chat
                 // Isso garante que o chat existe e está na janela de 24h
                 // Usa o mesmo layout do template para manter consistência
                 const messageToSend = templateMessage || `📱 QR Code de Credenciamento`;
-                
+
                 try {
                     console.log(`📤 [Z-API] Enviando mensagem no formato do template para ativar chat...`);
                     console.log(`📝 [Z-API] Mensagem (primeiros 100 chars): ${messageToSend.substring(0, 100)}...`);
                     const msgResult = await this.chatGuruService.sendMessage(phoneToUse, messageToSend);
-                    
+
                     // Log completo do resultado
                     console.log(`📥 [Z-API] Resultado da mensagem de ativação:`, JSON.stringify(msgResult, null, 2));
-                    
+
                     // Verifica múltiplos formatos de resposta de sucesso
-                    const isSuccess = msgResult && (
-                        msgResult.result === 'success' ||
-                        (typeof msgResult === 'object' && 'result' in msgResult && msgResult.result === 'success')
-                    );
-                    
+                    const isSuccess =
+                        msgResult && (msgResult.result === 'success' || (typeof msgResult === 'object' && 'result' in msgResult && msgResult.result === 'success'));
+
                     if (isSuccess) {
                         chatActive = true;
                         activationMessageId = msgResult?.messageId || msgResult?.id;
                         console.log(`✅ [Z-API] Chat ativado com mensagem no formato do template`);
                         console.log(`   🆔 Message ID da ativação: ${activationMessageId || 'N/A'}`);
                         // Aguarda um pouco antes de enviar a imagem
-                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        await new Promise((resolve) => setTimeout(resolve, 1500));
                     } else {
                         console.warn(`⚠️ [Z-API] Mensagem de ativação não retornou sucesso, mas continuando...`);
                         console.warn(`   Resultado: ${JSON.stringify(msgResult)}`);
@@ -1117,15 +1112,18 @@ Vamos Prosperar! 🙌`;
                             if (chatResult?.result === 'success' || chatResult?.chatId) {
                                 chatActive = true;
                                 console.log(`✅ [Z-API] Chat criado com sucesso`);
-                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                await new Promise((resolve) => setTimeout(resolve, 1000));
                             }
                         } catch (chatError: any) {
                             const chatErrorMsg = chatError?.message?.toLowerCase() || '';
-                            if (chatErrorMsg.includes('já existe') || chatErrorMsg.includes('already exists') || 
-                                chatErrorMsg.includes('mensagem inicial inválida')) {
+                            if (
+                                chatErrorMsg.includes('já existe') ||
+                                chatErrorMsg.includes('already exists') ||
+                                chatErrorMsg.includes('mensagem inicial inválida')
+                            ) {
                                 console.log(`📱 [Z-API] Chat já existe ou erro não crítico, continuando...`);
                                 chatActive = true;
-                                await new Promise(resolve => setTimeout(resolve, 500));
+                                await new Promise((resolve) => setTimeout(resolve, 500));
                             } else {
                                 console.warn(`⚠️ [Z-API] Não foi possível criar/ativar chat: ${chatError.message}`);
                                 console.warn(`   Tentando enviar imagem mesmo assim (pode funcionar se o chat já existir)...`);
@@ -1141,18 +1139,18 @@ Vamos Prosperar! 🙌`;
             try {
                 console.log(`📤 [Z-API] Iniciando envio da imagem com número: ${phoneToUse}...`);
                 const result = await this.chatGuruService.sendImage(phoneToUse, imageBase64, caption);
-                
+
                 // Log completo do resultado para diagnóstico
                 console.log(`📥 [Z-API] Resultado completo do envio:`, JSON.stringify(result, null, 2));
-                
+
                 // Verifica se o resultado indica sucesso (múltiplos formatos possíveis)
-                const isSuccess = result && (
-                    result.success === true || 
-                    result.result === 'success' || 
-                    result.result?.result === 'success' ||
-                    (typeof result === 'object' && result.result === 'success')
-                );
-                
+                const isSuccess =
+                    result &&
+                    (result.success === true ||
+                        result.result === 'success' ||
+                        result.result?.result === 'success' ||
+                        (typeof result === 'object' && result.result === 'success'));
+
                 if (isSuccess) {
                     console.log(`\n${'═'.repeat(80)}`);
                     console.log(`✅ [Z-API] IMAGEM ENVIADA COM SUCESSO VIA CHATGURU`);
@@ -1191,7 +1189,7 @@ Vamos Prosperar! 🙌`;
                     console.error(`   4. Problemas com a conta Z-API/ChatGuru`);
                     console.error(`   5. API retornou sucesso mas não processou a mensagem`);
                     console.error(`${'X'.repeat(80)}\n`);
-                    
+
                     // Se for erro de chat não encontrado, tenta com número alternado
                     if (this.isChatNotFoundError(result)) {
                         const alternatePhone = this.tryAlternatePhoneNumber(phoneToUse);
@@ -1199,11 +1197,8 @@ Vamos Prosperar! 🙌`;
                             console.log(`\n🔄 [Z-API] Tentando enviar imagem com número alternado: ${alternatePhone}`);
                             try {
                                 const retryResult = await this.chatGuruService.sendImage(alternatePhone, imageBase64, caption);
-                                const retrySuccess = retryResult && (
-                                    retryResult.success === true || 
-                                    retryResult.result === 'success' || 
-                                    retryResult.result?.result === 'success'
-                                );
+                                const retrySuccess =
+                                    retryResult && (retryResult.success === true || retryResult.result === 'success' || retryResult.result?.result === 'success');
                                 if (retrySuccess) {
                                     console.log(`\n${'═'.repeat(80)}`);
                                     console.log(`✅ [Z-API] IMAGEM ENVIADA COM SUCESSO COM NÚMERO ALTERNADO`);
@@ -1221,7 +1216,7 @@ Vamos Prosperar! 🙌`;
                             }
                         }
                     }
-                    
+
                     return {
                         success: false,
                         error: errorMsg,
@@ -1244,7 +1239,7 @@ Vamos Prosperar! 🙌`;
                 console.error(`   3. Número bloqueado ou inválido`);
                 console.error(`   4. Problemas com a conta Z-API/ChatGuru`);
                 console.error(`${'X'.repeat(80)}\n`);
-                
+
                 // Se for erro de chat não encontrado, tenta com número alternado
                 if (this.isChatNotFoundError(imageError)) {
                     const alternatePhone = this.tryAlternatePhoneNumber(phoneToUse);
@@ -1252,11 +1247,8 @@ Vamos Prosperar! 🙌`;
                         console.log(`\n🔄 [Z-API] Tentando enviar imagem com número alternado: ${alternatePhone}`);
                         try {
                             const retryResult = await this.chatGuruService.sendImage(alternatePhone, imageBase64, caption);
-                            const retrySuccess = retryResult && (
-                                retryResult.success === true || 
-                                retryResult.result === 'success' || 
-                                retryResult.result?.result === 'success'
-                            );
+                            const retrySuccess =
+                                retryResult && (retryResult.success === true || retryResult.result === 'success' || retryResult.result?.result === 'success');
                             if (retrySuccess) {
                                 console.log(`\n${'═'.repeat(80)}`);
                                 console.log(`✅ [Z-API] IMAGEM ENVIADA COM SUCESSO COM NÚMERO ALTERNADO`);
@@ -1274,7 +1266,7 @@ Vamos Prosperar! 🙌`;
                         }
                     }
                 }
-                
+
                 return {
                     success: false,
                     error: imageError.message || 'Erro ao enviar imagem via Z-API',
@@ -1298,35 +1290,35 @@ Vamos Prosperar! 🙌`;
      */
     private tryAlternatePhoneNumber(phone: string): string | null {
         // Remove caracteres não numéricos
-        let cleanPhone = phone.replace(/\D/g, '');
-        
+        const cleanPhone = phone.replace(/\D/g, '');
+
         // Garante que tem código do país (55)
         if (!cleanPhone.startsWith('55')) {
             return null; // Número inválido
         }
-        
+
         // Remove o código do país para trabalhar com DDD + número
         const withoutCountryCode = cleanPhone.substring(2);
-        
+
         // Verifica se tem DDD (2 dígitos) + número
         if (withoutCountryCode.length < 10 || withoutCountryCode.length > 11) {
             return null; // Número inválido
         }
-        
+
         const ddd = withoutCountryCode.substring(0, 2);
         const number = withoutCountryCode.substring(2);
-        
+
         // Se o número tem 9 dígitos (começa com 9), tenta sem o 9
         if (number.length === 9 && number.startsWith('9')) {
             const newNumber = number.substring(1); // Remove o 9
             return `55${ddd}${newNumber}`;
         }
-        
+
         // Se o número tem 8 dígitos, tenta com o 9
         if (number.length === 8) {
             return `55${ddd}9${number}`;
         }
-        
+
         return null; // Não pode alternar
     }
 
@@ -1366,23 +1358,23 @@ Vamos Prosperar! 🙌`;
 • Apresente na entrada do evento`;
     }
 
-//     private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string, local?: string, data?: string): string {
-//         const localEData = local && data ? `${local} em ${data}` : local || data || 'local e data a confirmar';
+    //     private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string, local?: string, data?: string): string {
+    //         const localEData = local && data ? `${local} em ${data}` : local || data || 'local e data a confirmar';
 
-//         return `Olá ${alunoNome}, parabéns por dizer SIM a essa jornada transformadora! ✨
+    //         return `Olá ${alunoNome}, parabéns por dizer SIM a essa jornada transformadora! ✨
 
-// Você garantiu o seu lugar no ${treinamentoNome} em ${localEData} e estamos muito animados pra te receber! 🤩
+    // Você garantiu o seu lugar no ${treinamentoNome} em ${localEData} e estamos muito animados pra te receber! 🤩
 
-// Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
+    // Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
 
-// Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
+    // Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
-// ${checkInUrl}
+    // ${checkInUrl}
 
-// Assim que finalizar, sua presença será confirmada automaticamente.
+    // Assim que finalizar, sua presença será confirmada automaticamente.
 
-// Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
+    // Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
 
-// Vamos Prosperar! 🙌`;
-//     }
+    // Vamos Prosperar! 🙌`;
+    //     }
 }

@@ -1,5 +1,5 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsNotEmpty, IsBoolean } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsOptional, IsString, IsNumber, IsEnum, IsNotEmpty, IsBoolean, IsArray, ValidateNested } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { EStatusAlunosGeral, ETipoVinculoAluno, EProfissao } from '../../../config/entities/enum';
 
 export class GetAlunosDto {
@@ -89,9 +89,9 @@ export class CreateAlunoDto {
     @IsOptional()
     @IsNumber()
     @Transform(({ value }) => {
-        if (value === '' || value === null || value === undefined) return undefined;
+        if (value === '' || value === null || value === undefined) return null;
         const n = typeof value === 'string' ? parseInt(value, 10) : value;
-        return isNaN(n) ? undefined : n;
+        return isNaN(n) ? null : n;
     })
     id_polo?: number;
 
@@ -205,7 +205,11 @@ export class CreateAlunoDto {
 
     @IsOptional()
     @IsNumber()
-    @Transform(({ value }) => parseInt(value))
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_aluno_vinculado?: number;
 
     @IsOptional()
@@ -214,7 +218,11 @@ export class CreateAlunoDto {
 
     @IsOptional()
     @IsNumber()
-    @Transform(({ value }) => parseInt(value))
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_treinamento_bonus?: number;
 
     @IsOptional()
@@ -337,7 +345,11 @@ export class UpdateAlunoDto {
 
     @IsOptional()
     @IsNumber()
-    @Transform(({ value }) => parseInt(value))
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_aluno_vinculado?: number;
 
     @IsOptional()
@@ -346,7 +358,11 @@ export class UpdateAlunoDto {
 
     @IsOptional()
     @IsNumber()
-    @Transform(({ value }) => parseInt(value))
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_treinamento_bonus?: number;
 
     @IsOptional()
@@ -366,4 +382,49 @@ export class SoftDeleteAlunoDto {
     @IsOptional()
     @IsNumber()
     atualizado_por?: number;
+}
+
+export class AlunoVinculoInputDto {
+    @IsEnum(ETipoVinculoAluno)
+    tipo_vinculo: ETipoVinculoAluno;
+
+    @IsNumber()
+    id_aluno_vinculado: number;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
+    id_treinamento?: number | null;
+}
+
+export class SaveAlunoVinculosDto {
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => AlunoVinculoInputDto)
+    vinculos: AlunoVinculoInputDto[];
+
+    @IsOptional()
+    @IsNumber()
+    criado_por?: number;
+}
+
+export class AlunoVinculoResponseDto {
+    id: number;
+    id_aluno: number;
+    tipo_vinculo: ETipoVinculoAluno;
+    id_aluno_vinculado: number;
+    id_treinamento: number | null;
+    aluno_vinculado?: {
+        id: number;
+        nome: string;
+        email: string;
+    };
+    treinamento?: {
+        id: number;
+        treinamento: string;
+    };
 }

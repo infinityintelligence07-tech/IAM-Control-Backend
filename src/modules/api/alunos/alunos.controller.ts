@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Query, Param, Body, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { AlunosService } from './alunos.service';
-import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto } from './dto/alunos.dto';
+import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto, SaveAlunoVinculosDto, AlunoVinculoResponseDto } from './dto/alunos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -13,6 +13,19 @@ export class AlunosController {
     async findAll(@Query() filters: GetAlunosDto): Promise<AlunosListResponseDto> {
         console.log('Buscando alunos com filtros:', filters);
         return this.alunosService.findAll(filters);
+    }
+
+    @Get(':id/vinculos')
+    async getVinculos(@Param('id', ParseIntPipe) id: number): Promise<AlunoVinculoResponseDto[]> {
+        return this.alunosService.getVinculos(id);
+    }
+
+    @Put(':id/vinculos')
+    async saveVinculos(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: SaveAlunoVinculosDto,
+    ): Promise<AlunoVinculoResponseDto[]> {
+        return this.alunosService.saveVinculos(id, dto);
     }
 
     @Get(':id')

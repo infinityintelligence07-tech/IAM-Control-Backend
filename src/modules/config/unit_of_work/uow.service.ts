@@ -18,6 +18,7 @@ import { TurmasAlunosTreinamentosContratos } from '../entities/turmasAlunosTrein
 import { MasterclassPreCadastros } from '../entities/masterclassPreCadastros.entity';
 import { Usuarios } from '../entities/usuarios.entity';
 import { EnderecoEventos } from '../entities/enderecoEventos.entity';
+import { AlunosVinculos } from '../entities/alunosVinculos.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -137,6 +138,12 @@ export class UnitOfWorkService {
     get enderecoEventosRP(): Repository<EnderecoEventos> {
         if (!this._enderecoEventosRP) this._enderecoEventosRP = this.postgresEM.getRepository(EnderecoEventos);
         return this._enderecoEventosRP;
+    }
+
+    private _alunosVinculosRP?: Repository<AlunosVinculos>;
+    get alunosVinculosRP(): Repository<AlunosVinculos> {
+        if (!this._alunosVinculosRP) this._alunosVinculosRP = this.postgresEM.getRepository(AlunosVinculos);
+        return this._alunosVinculosRP;
     }
     /*****************************************************************************/
 }

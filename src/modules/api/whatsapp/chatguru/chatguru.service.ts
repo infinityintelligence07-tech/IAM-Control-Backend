@@ -1868,6 +1868,63 @@ export class ChatGuruService {
     }
 
     /**
+     * Busca um template na Gupshup pelo ID ou pelo nome (elementName).
+     * A API Gupshup não expõe "get by id" direto; fazemos GET da lista e filtramos.
+     * Útil para obter o corpo do template (data), placeholders e meta sem mockar no código.
+     * @param templateId ID do template (UUID Gupshup) ou nome do template (elementName)
+     * @returns O objeto do template ou null se não encontrado. Inclui: id, elementName, data (body com {{1}}, {{2}}), meta, status, etc.
+     */
+    async getTemplateById(templateId: string): Promise<{ success: boolean; template?: any; error?: string }> {
+        try {
+            if (!templateId || !templateId.trim()) {
+                return { success: false, error: 'templateId é obrigatório' };
+            }
+            const result = await this.listTemplates();
+            if (!result.success || !Array.isArray(result.templates)) {
+                return {
+                    success: false,
+                    error: result.error || 'Falha ao listar templates da Gupshup',
+                };
+            }
+            const idOrName = templateId.trim();
+            const template = result.templates.find(
+                (t: any) =>
+                    (t.id && String(t.id).toLowerCase() === idOrName.toLowerCase()) ||
+                    (t.elementName && String(t.elementName).toLowerCase() === idOrName.toLowerCase()) ||
+                    (t.name && String(t.name).toLowerCase() === idOrName.toLowerCase()),
+            );
+            if (!template) {
+                return {
+                    success: true,
+                    template: undefined,
+                    error: `Template não encontrado: "${templateId}". Use GET /whatsapp/templates para listar IDs e nomes.`,
+                };
+            }
+            return {
+                success: true,
+                template: {
+                    id: template.id,
+                    elementName: template.elementName || template.name,
+                    name: template.name || template.elementName,
+                    data: template.data,
+                    meta: template.meta,
+                    status: template.status,
+                    category: template.category,
+                    languageCode: template.languageCode || template.language,
+                    templateType: template.templateType,
+                },
+            };
+        } catch (error: any) {
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error.message;
+            this.logger.error(`Erro ao buscar template por ID "${templateId}": ${errorMessage}`);
+            return {
+                success: false,
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
      * Cria chat e envia template
      */
     async createChatAndSendTemplate(

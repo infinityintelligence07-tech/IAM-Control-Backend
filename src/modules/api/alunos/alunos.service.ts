@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto } from './dto/alunos.dto';
+import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto, SaveAlunoVinculosDto, AlunoVinculoResponseDto } from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
+import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
 import { EProfissao } from '../../config/entities/enum';
 
 @Injectable()
@@ -267,6 +268,9 @@ export class AlunosService {
                     possui_deficiencia: alunoAtualizado.possui_deficiencia,
                     desc_deficiencia: alunoAtualizado.desc_deficiencia,
                     url_foto_aluno: alunoAtualizado.url_foto_aluno,
+                    id_aluno_vinculado: alunoAtualizado.id_aluno_vinculado,
+                    tipo_vinculo: alunoAtualizado.tipo_vinculo,
+                    id_treinamento_bonus: alunoAtualizado.id_treinamento_bonus,
                     created_at: alunoAtualizado.criado_em,
                     updated_at: alunoAtualizado.atualizado_em,
                     polo: undefined, // Será carregado se necessário
@@ -308,6 +312,9 @@ export class AlunosService {
                     possui_deficiencia: alunoSalvo.possui_deficiencia,
                     desc_deficiencia: alunoSalvo.desc_deficiencia,
                     url_foto_aluno: alunoSalvo.url_foto_aluno,
+                    id_aluno_vinculado: alunoSalvo.id_aluno_vinculado,
+                    tipo_vinculo: alunoSalvo.tipo_vinculo,
+                    id_treinamento_bonus: alunoSalvo.id_treinamento_bonus,
                     created_at: alunoSalvo.criado_em,
                     updated_at: alunoSalvo.atualizado_em,
                     polo: undefined, // Será carregado se necessário
@@ -359,6 +366,9 @@ export class AlunosService {
                         possui_deficiencia: alunoSalvo.possui_deficiencia,
                         desc_deficiencia: alunoSalvo.desc_deficiencia,
                         url_foto_aluno: alunoSalvo.url_foto_aluno,
+                        id_aluno_vinculado: alunoSalvo.id_aluno_vinculado,
+                        tipo_vinculo: alunoSalvo.tipo_vinculo,
+                        id_treinamento_bonus: alunoSalvo.id_treinamento_bonus,
                         created_at: alunoSalvo.criado_em,
                         updated_at: alunoSalvo.atualizado_em,
                         polo: undefined, // Será carregado se necessário
@@ -415,6 +425,16 @@ export class AlunosService {
             }
             if (updateAlunoDto.nome_cracha !== undefined) {
                 aluno.nome_cracha = updateAlunoDto.nome_cracha != null && updateAlunoDto.nome_cracha.trim() !== '' ? updateAlunoDto.nome_cracha.trim() : null;
+            }
+            // Garantir limpeza explícita dos campos de vínculo quando null for enviado
+            if ('id_aluno_vinculado' in updateAlunoDto) {
+                aluno.id_aluno_vinculado = updateAlunoDto.id_aluno_vinculado ?? null;
+            }
+            if ('tipo_vinculo' in updateAlunoDto) {
+                aluno.tipo_vinculo = updateAlunoDto.tipo_vinculo ?? null;
+            }
+            if ('id_treinamento_bonus' in updateAlunoDto) {
+                aluno.id_treinamento_bonus = updateAlunoDto.id_treinamento_bonus ?? null;
             }
 
             const alunoAtualizado = await this.uow.alunosRP.save(aluno);
@@ -523,6 +543,51 @@ export class AlunosService {
             }
             throw new Error('Erro interno do servidor ao excluir aluno');
         }
+    }
+
+    async getVinculos(id_aluno: number): Promise<AlunoVinculoResponseDto[]> {
+        const vinculos = await this.uow.alunosVinculosRP.find({
+            where: { id_aluno, deletado_em: null },
+            relations: ['id_aluno_vinculado_fk', 'id_treinamento_fk'],
+        });
+        return vinculos.map((v) => ({
+            id: v.id,
+            id_aluno: v.id_aluno,
+            tipo_vinculo: v.tipo_vinculo,
+            id_aluno_vinculado: v.id_aluno_vinculado,
+            id_treinamento: v.id_treinamento,
+            aluno_vinculado: v.id_aluno_vinculado_fk ? {
+                id: v.id_aluno_vinculado_fk.id,
+                nome: v.id_aluno_vinculado_fk.nome,
+                email: v.id_aluno_vinculado_fk.email,
+            } : undefined,
+            treinamento: v.id_treinamento_fk ? {
+                id: v.id_treinamento_fk.id,
+                treinamento: v.id_treinamento_fk.treinamento,
+            } : undefined,
+        }));
+    }
+
+    async saveVinculos(id_aluno: number, dto: SaveAlunoVinculosDto): Promise<AlunoVinculoResponseDto[]> {
+        // Delete all existing vinculos for this aluno
+        const existing = await this.uow.alunosVinculosRP.find({ where: { id_aluno, deletado_em: null } });
+        if (existing.length > 0) {
+            await this.uow.alunosVinculosRP.remove(existing);
+        }
+        // Create new vinculos
+        if (dto.vinculos.length === 0) return [];
+        const newVinculos = dto.vinculos.map((v) => {
+            const vinculo = new AlunosVinculos();
+            vinculo.id_aluno = id_aluno;
+            vinculo.tipo_vinculo = v.tipo_vinculo;
+            vinculo.id_aluno_vinculado = v.id_aluno_vinculado;
+            vinculo.id_treinamento = v.id_treinamento ?? null;
+            vinculo.criado_por = dto.criado_por;
+            return vinculo;
+        });
+        await this.uow.alunosVinculosRP.save(newVinculos);
+        // Return with relations
+        return this.getVinculos(id_aluno);
     }
 
     /**

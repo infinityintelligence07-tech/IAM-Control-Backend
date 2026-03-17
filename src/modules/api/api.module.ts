@@ -9,8 +9,9 @@ import { DocumentosModule } from './documentos/documentos.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { EnderecoEventosModule } from './endereco-eventos/endereco-eventos.module';
 import { RelatoriosFinanceiroModule } from './relatorios/financeiro/relatorios-financeiro.module';
+import { UploadModule } from './upload/upload.module';
 
 @Module({
-    imports: [AlunosModule, PolosModule, TreinamentosModule, TurmasModule, WhatsAppModule, MasterclassModule, DocumentosModule, UsuariosModule, EnderecoEventosModule, RelatoriosFinanceiroModule],
+    imports: [AlunosModule, PolosModule, TreinamentosModule, TurmasModule, WhatsAppModule, MasterclassModule, DocumentosModule, UsuariosModule, EnderecoEventosModule, RelatoriosFinanceiroModule, UploadModule],
 })
 export class ApiModule {}

@@ -113,6 +113,18 @@ export class WhatsAppController {
     }
 
     /**
+     * Busca um template na Gupshup pelo ID (UUID) ou pelo nome (elementName).
+     * Retorna o corpo da mensagem (data), meta e metadados do template, sem precisar mockar no código.
+     * Ex.: GET /whatsapp/templates/8ebafac1-29e5-4d10-9ebc-03ae51126a80
+     *      GET /whatsapp/templates/link_checkin
+     */
+    @Get('templates/:id')
+    @UseGuards(JwtAuthGuard)
+    async getTemplateById(@Param('id') id: string) {
+        return this.chatGuruService.getTemplateById(id);
+    }
+
+    /**
      * Webhook da Gupshup - recebe callbacks de status de mensagens
      * Configure este URL no painel da Gupshup: https://seu-dominio.com/api/whatsapp/webhook-gupshup
      * Este endpoint NÃO requer autenticação JWT pois é chamado pela Gupshup

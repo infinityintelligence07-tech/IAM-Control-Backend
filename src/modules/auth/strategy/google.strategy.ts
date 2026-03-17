@@ -10,10 +10,11 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
             clientSecret: process.env.GOOGLE_CLIENT_SECRET,
             callbackURL: process.env.GOOGLE_CALLBACK_URL || 'https://iamcontrol.com.br/api/auth/google/callback',
             scope: ['email', 'profile'],
+            passReqToCallback: true,
         });
     }
 
-    validate(accessToken: string, refreshToken: string, profile: any, done: VerifyCallback): any {
+    validate(req: any, accessToken: string, refreshToken: string, profile: any, done: VerifyCallback): any {
         try {
             console.log('Google OAuth Profile:', profile);
             const { name, emails, photos } = profile;

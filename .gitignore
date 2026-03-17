@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-node_modules
-=======
 # compiled output
 /dist
 /node_modules
@@ -48,6 +45,10 @@ lerna-debug.log*
 .env.backup.local
 .env.*
 
+# Google Cloud / Service Account credentials (nunca commitar)
+responsive-cab-468017-d2-*.json
+*.credentials.json
+
 # temp directory
 .temp
 .tmp
@@ -58,7 +59,10 @@ pids
 *.seed
 *.pid.lock
 
-# Diagnostic reports (https://nodejs.org/api/report.html)
+# Diagnostic reports
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
->>>>>>> master
+
+# Uploads (fotos de alunos)
+/uploads
+
 backup

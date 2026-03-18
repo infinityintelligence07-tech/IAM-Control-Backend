@@ -242,7 +242,7 @@ export class DocumentosService {
                     id_aluno: criarContratoDto.id_aluno,
                     id_turma: idTurmaParaCracha,
                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO, // Origem padrão
-                    status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN, // Status padrão
+                    status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                     nome_cracha: aluno.nome_cracha || aluno.nome,
                     numero_cracha: numeroCracha,
                 });
@@ -2689,7 +2689,7 @@ export class DocumentosService {
                     id_aluno: criarTermoDto.id_aluno,
                     id_turma: idTurmaParaCracha,
                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
-                    status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                    status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                     nome_cracha: aluno.nome_cracha || aluno.nome,
                     numero_cracha: numeroCracha,
                 });

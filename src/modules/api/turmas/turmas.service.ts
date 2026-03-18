@@ -1532,8 +1532,12 @@ export class TurmasService {
             // Gerar número de crachá único para esta turma
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma);
 
-            // Usar nome do crachá fornecido ou o padrão do aluno
-            const nomeCracha = addAlunoDto.nome_cracha || aluno.nome_cracha;
+            // Usar nome do crachá fornecido ou o padrão do aluno (obrigatório na entidade)
+            const nomeCracha =
+                addAlunoDto.nome_cracha?.trim() ||
+                aluno.nome_cracha?.trim() ||
+                aluno.nome?.trim() ||
+                'Aluno';
 
             // Debug: Log dos dados recebidos
             console.log('=== DADOS RECEBIDOS PARA ADICIONAR ALUNO ===');

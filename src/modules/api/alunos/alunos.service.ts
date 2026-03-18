@@ -570,6 +570,9 @@ export class AlunosService {
                 id: v.id_turma_fk.id,
                 edicao_turma: v.id_turma_fk.edicao_turma,
                 treinamento_nome: v.id_turma_fk.id_treinamento_fk?.treinamento || '',
+                sigla_treinamento: v.id_turma_fk.id_treinamento_fk?.sigla_treinamento,
+                data_inicio: v.id_turma_fk.data_inicio,
+                data_final: v.id_turma_fk.data_final,
             } : undefined,
         }));
     }

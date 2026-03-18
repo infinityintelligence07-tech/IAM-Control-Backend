@@ -13,6 +13,9 @@ import {
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
     SoftDeleteTurmaDto,
+    OpcoesTransferenciaResponseDto,
+    HistoricoTransferenciaItemDto,
+    HistoricoTransferenciasResponseDto,
 } from './dto/turmas.dto';
 import { FindManyOptions, ILike, Not, In } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -24,6 +27,20 @@ export class TurmasService {
         private readonly uow: UnitOfWorkService,
         private readonly whatsappService: WhatsAppService,
     ) {}
+
+    /** Mapeia entidade Turmas (com relações id_treinamento_fk e id_polo_fk) para o objeto de tag de transferência. */
+    private mapTurmaToTransferenciaTag(turma: any): { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string } | undefined {
+        if (!turma) return undefined;
+        return {
+            id: turma.id,
+            edicao_turma: turma.edicao_turma ?? undefined,
+            data_inicio: turma.data_inicio ?? '',
+            data_final: turma.data_final ?? '',
+            treinamento_nome: turma.id_treinamento_fk?.treinamento ?? undefined,
+            sigla_treinamento: turma.id_treinamento_fk?.sigla_treinamento ?? undefined,
+            polo_nome: turma.id_polo_fk?.polo ?? undefined,
+        };
+    }
 
     /**
      * Formatar data para o formato YYYY-MM-DD (apenas data, sem hora)
@@ -698,7 +715,7 @@ export class TurmasService {
             if (id_turma) {
                 // Excluir alunos que já estão nesta turma
                 const alunosNaTurma = await this.uow.turmasAlunosRP.find({
-                    where: { id_turma },
+                    where: { id_turma, deletado_em: null },
                     select: ['id_aluno'],
                 });
 
@@ -742,7 +759,7 @@ export class TurmasService {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id },
-                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk', 'id_turma_transferencia_para_fk', 'id_turma_transferencia_para_fk.id_treinamento_fk', 'id_turma_transferencia_para_fk.id_polo_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
             });
 
             if (!turmaAluno) {
@@ -758,6 +775,8 @@ export class TurmasService {
                 vaga_bonus: turmaAluno.vaga_bonus,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
                 presenca_turma: turmaAluno.presenca_turma,
+                transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
+                transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
                 telefone: turmaAluno.id_aluno_fk?.telefone_um || '',
                 created_at: turmaAluno.criado_em,
                 aluno: turmaAluno.id_aluno_fk
@@ -831,9 +850,9 @@ export class TurmasService {
                 where: { id: id_aluno, deletado_em: null },
             });
 
-            // Buscar turmas onde o aluno está vinculado
+            // Buscar turmas onde o aluno está vinculado (excluir vínculos com data de deleção)
             const turmasAluno = await this.uow.turmasAlunosRP.find({
-                where: { id_aluno: id_aluno.toString() },
+                where: { id_aluno: id_aluno.toString(), deletado_em: null },
                 relations: ['id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
                 order: { criado_em: 'DESC' },
             });
@@ -1418,7 +1437,7 @@ export class TurmasService {
 
             // Verificar se há alunos na turma
             const alunosNaTurma = await this.uow.turmasAlunosRP.count({
-                where: { id_turma: id },
+                where: { id_turma: id, deletado_em: null },
             });
 
             if (alunosNaTurma > 0) {
@@ -1447,8 +1466,8 @@ export class TurmasService {
             }
 
             const [turmasAlunos, total] = await this.uow.turmasAlunosRP.findAndCount({
-                where: { id_turma },
-                relations: ['id_aluno_fk'],
+                where: { id_turma, deletado_em: null },
+                relations: ['id_aluno_fk', 'id_turma_transferencia_para_fk', 'id_turma_transferencia_para_fk.id_treinamento_fk', 'id_turma_transferencia_para_fk.id_polo_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
                 order: { criado_em: 'DESC' },
                 skip: (page - 1) * limit,
                 take: limit,
@@ -1461,10 +1480,13 @@ export class TurmasService {
                 nome_cracha: turmaAluno.nome_cracha,
                 numero_cracha: turmaAluno.numero_cracha,
                 vaga_bonus: turmaAluno.vaga_bonus,
+                origem_aluno: turmaAluno.origem_aluno ?? undefined,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
-                presenca_turma: turmaAluno.presenca_turma, // Adicionado campo presenca_turma
+                presenca_turma: turmaAluno.presenca_turma,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 created_at: turmaAluno.criado_em,
+                transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
+                transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
                 aluno: turmaAluno.id_aluno_fk
                     ? {
                           id: turmaAluno.id_aluno_fk.id,
@@ -1520,9 +1542,9 @@ export class TurmasService {
                 throw new NotFoundException('Aluno não encontrado');
             }
 
-            // Verificar se aluno já está na turma
+            // Verificar se aluno já está na turma (considerar apenas vínculos ativos)
             const alunoJaNaTurma = await this.uow.turmasAlunosRP.findOne({
-                where: { id_turma, id_aluno: addAlunoDto.id_aluno.toString() },
+                where: { id_turma, id_aluno: addAlunoDto.id_aluno.toString(), deletado_em: null },
             });
 
             if (alunoJaNaTurma) {
@@ -1612,6 +1634,199 @@ export class TurmasService {
             }
             throw new Error('Erro interno do servidor ao adicionar aluno à turma');
         }
+    }
+
+    /**
+     * Opções de transferência para um aluno na turma: apenas treinamentos (não palestras).
+     * Retorna: edição mais próxima por data e próxima edição no mesmo polo.
+     */
+    async getOpcoesTransferencia(id_turma_aluno: string): Promise<OpcoesTransferenciaResponseDto> {
+        const turmaAluno = await this.uow.turmasAlunosRP.findOne({
+            where: { id: id_turma_aluno },
+            relations: ['id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
+        });
+        if (!turmaAluno) throw new NotFoundException('Aluno não encontrado na turma');
+        const turmaOrigem = turmaAluno.id_turma_fk;
+        if (!turmaOrigem) throw new NotFoundException('Turma de origem não encontrada');
+        const treinamento = turmaOrigem.id_treinamento_fk;
+        if (!treinamento) throw new NotFoundException('Treinamento da turma não encontrado');
+        if (treinamento.tipo_palestra === true) {
+            throw new BadRequestException('Transferência só é permitida para treinamentos, não para palestras');
+        }
+        const id_treinamento = turmaOrigem.id_treinamento;
+        const id_turma_origem = turmaOrigem.id;
+        const id_polo_origem = turmaOrigem.id_polo;
+        const hoje = this.formatDateToDateOnly(new Date().toISOString());
+
+        const outrasTurmas = await this.uow.turmasRP.find({
+            where: {
+                id_treinamento,
+                id: Not(id_turma_origem),
+                status_turma: Not(EStatusTurmas.ENCERRADA),
+            },
+            relations: ['id_treinamento_fk', 'id_polo_fk'],
+            order: { data_inicio: 'ASC' },
+        });
+        const turmasTreinamento = outrasTurmas.filter((t) => t.id_treinamento_fk?.tipo_palestra !== true);
+
+        const comDataFutura = turmasTreinamento.filter((t) => (t.data_inicio ?? '') >= hoje);
+        const edicaoMaisProximaData = comDataFutura[0] ?? null;
+        const mesmoPolo = turmasTreinamento.filter((t) => t.id_polo === id_polo_origem && (t.data_inicio ?? '') >= hoje);
+        const proximaEdicaoMesmoPolo = mesmoPolo[0] ?? null;
+
+        const toTurmaResponse = (t: any): TurmaResponseDto => ({
+            id: t.id,
+            id_polo: t.id_polo,
+            id_treinamento: t.id_treinamento,
+            edicao_turma: t.edicao_turma,
+            data_inicio: t.data_inicio,
+            data_final: t.data_final,
+            status_turma: t.status_turma,
+            capacidade_turma: t.capacidade_turma,
+            turma_aberta: t.turma_aberta,
+            treinamento_nome: t.id_treinamento_fk?.treinamento,
+            sigla_treinamento: t.id_treinamento_fk?.sigla_treinamento,
+            polo_nome: t.id_polo_fk?.polo,
+        } as TurmaResponseDto);
+
+        return {
+            edicao_mais_proxima_data: edicaoMaisProximaData ? toTurmaResponse(edicaoMaisProximaData) : undefined,
+            proxima_edicao_mesmo_polo: proximaEdicaoMesmoPolo ? toTurmaResponse(proximaEdicaoMesmoPolo) : undefined,
+        };
+    }
+
+    /**
+     * Transfere o aluno para outra turma (mesmo treinamento, outra edição). Não remove da turma atual; marca com tag e cria vínculo na turma destino.
+     */
+    async transferirAluno(id_turma_aluno: string, id_turma_destino: number): Promise<AlunoTurmaResponseDto> {
+        const turmaAlunoOrigem = await this.uow.turmasAlunosRP.findOne({
+            where: { id: id_turma_aluno },
+            relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
+        });
+        if (!turmaAlunoOrigem) throw new NotFoundException('Aluno não encontrado na turma');
+        if (!turmaAlunoOrigem.id_aluno_fk) throw new NotFoundException('Aluno vinculado não encontrado');
+        const turmaOrigem = turmaAlunoOrigem.id_turma_fk;
+        if (!turmaOrigem) throw new NotFoundException('Turma de origem não encontrada');
+        if (turmaOrigem.id_treinamento_fk?.tipo_palestra === true) {
+            throw new BadRequestException('Transferência só é permitida para treinamentos, não para palestras');
+        }
+
+        const turmaDestino = await this.uow.turmasRP.findOne({
+            where: { id: id_turma_destino },
+            relations: ['id_treinamento_fk', 'id_polo_fk'],
+        });
+        if (!turmaDestino) throw new NotFoundException('Turma de destino não encontrada');
+        if (turmaDestino.id_treinamento !== turmaOrigem.id_treinamento) {
+            throw new BadRequestException('Só é possível transferir para outra edição do mesmo treinamento');
+        }
+        if (turmaDestino.id_treinamento_fk?.tipo_palestra === true) {
+            throw new BadRequestException('Turma de destino não pode ser palestra');
+        }
+        if (turmaDestino.status_turma === EStatusTurmas.ENCERRADA) {
+            throw new BadRequestException('Não é possível transferir para turma encerrada');
+        }
+        if (turmaDestino.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
+            throw new BadRequestException('Não é possível transferir para turma com inscrições pausadas');
+        }
+        if (Number(id_turma_destino) === turmaOrigem.id) {
+            throw new BadRequestException('Turma de destino deve ser diferente da turma de origem');
+        }
+
+        const idAluno = parseInt(turmaAlunoOrigem.id_aluno, 10);
+        const jaNaTurmaDestino = await this.uow.turmasAlunosRP.findOne({
+            where: { id_turma: id_turma_destino, id_aluno: turmaAlunoOrigem.id_aluno, deletado_em: null },
+        });
+        if (jaNaTurmaDestino) throw new BadRequestException('Aluno já está na turma de destino');
+
+        const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
+        const nomeCracha = turmaAlunoOrigem.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome || 'Aluno';
+
+        turmaAlunoOrigem.id_turma_transferencia_para = id_turma_destino;
+        await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
+
+        const turmaAlunoDestino = this.uow.turmasAlunosRP.create({
+            id_turma: id_turma_destino,
+            id_aluno: turmaAlunoOrigem.id_aluno,
+            nome_cracha: nomeCracha,
+            numero_cracha: numeroCracha,
+            vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
+            origem_aluno: EOrigemAlunos.TRANSFERENCIA,
+            status_aluno_turma: turmaAlunoOrigem.status_aluno_turma ?? EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+            id_turma_transferencia_de: turmaOrigem.id,
+        });
+        const turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
+
+        const historico = this.uow.historicoTransferenciasRP.create({
+            id_aluno: idAluno,
+            id_turma_de: turmaOrigem.id,
+            id_turma_para: id_turma_destino,
+            id_turma_aluno_de: turmaAlunoOrigem.id,
+            id_turma_aluno_para: turmaAlunoDestinoSalvo.id,
+        });
+        await this.uow.historicoTransferenciasRP.save(historico);
+
+        const turmaAlunoCompleta = await this.uow.turmasAlunosRP.findOne({
+            where: { id: turmaAlunoDestinoSalvo.id },
+            relations: ['id_aluno_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
+        });
+        return {
+            id: turmaAlunoCompleta.id,
+            id_turma: turmaAlunoCompleta.id_turma,
+            id_aluno: turmaAlunoCompleta.id_aluno,
+            nome_cracha: turmaAlunoCompleta.nome_cracha,
+            numero_cracha: turmaAlunoCompleta.numero_cracha,
+            vaga_bonus: turmaAlunoCompleta.vaga_bonus,
+            status_aluno_turma: turmaAlunoCompleta.status_aluno_turma,
+            presenca_turma: turmaAlunoCompleta.presenca_turma,
+            url_comprovante_pgto: turmaAlunoCompleta.url_comprovante_pgto,
+            created_at: turmaAlunoCompleta.criado_em,
+            transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAlunoCompleta.id_turma_transferencia_de_fk),
+            aluno: turmaAlunoCompleta.id_aluno_fk
+                ? {
+                      id: turmaAlunoCompleta.id_aluno_fk.id,
+                      nome: turmaAlunoCompleta.id_aluno_fk.nome,
+                      email: turmaAlunoCompleta.id_aluno_fk.email,
+                      nome_cracha: turmaAlunoCompleta.id_aluno_fk.nome_cracha,
+                  }
+                : undefined,
+        };
+    }
+
+    /**
+     * Histórico de transferências do aluno (de onde saiu para onde foi).
+     */
+    async getHistoricoTransferencias(id_aluno: number): Promise<HistoricoTransferenciasResponseDto> {
+        const list = await this.uow.historicoTransferenciasRP.find({
+            where: { id_aluno },
+            relations: ['id_turma_de_fk', 'id_turma_de_fk.id_treinamento_fk', 'id_turma_de_fk.id_polo_fk', 'id_turma_para_fk', 'id_turma_para_fk.id_treinamento_fk', 'id_turma_para_fk.id_polo_fk'],
+            order: { criado_em: 'DESC' },
+        });
+        const data: HistoricoTransferenciaItemDto[] = list.map((h) => ({
+            id: h.id,
+            id_aluno: h.id_aluno,
+            id_turma_de: h.id_turma_de,
+            id_turma_para: h.id_turma_para,
+            turma_de: {
+                id: h.id_turma_de_fk?.id ?? h.id_turma_de,
+                edicao_turma: h.id_turma_de_fk?.edicao_turma,
+                data_inicio: h.id_turma_de_fk?.data_inicio ?? '',
+                data_final: h.id_turma_de_fk?.data_final ?? '',
+                treinamento_nome: h.id_turma_de_fk?.id_treinamento_fk?.treinamento,
+                sigla_treinamento: h.id_turma_de_fk?.id_treinamento_fk?.sigla_treinamento,
+                polo_nome: h.id_turma_de_fk?.id_polo_fk?.polo,
+            },
+            turma_para: {
+                id: h.id_turma_para_fk?.id ?? h.id_turma_para,
+                edicao_turma: h.id_turma_para_fk?.edicao_turma,
+                data_inicio: h.id_turma_para_fk?.data_inicio ?? '',
+                data_final: h.id_turma_para_fk?.data_final ?? '',
+                treinamento_nome: h.id_turma_para_fk?.id_treinamento_fk?.treinamento,
+                sigla_treinamento: h.id_turma_para_fk?.id_treinamento_fk?.sigla_treinamento,
+                polo_nome: h.id_turma_para_fk?.id_polo_fk?.polo,
+            },
+            criado_em: h.criado_em,
+        }));
+        return { data };
     }
 
     async removeAlunoTurma(id_turma_aluno: string): Promise<void> {
@@ -1779,6 +1994,7 @@ export class TurmasService {
                 where: {
                     id_turma,
                     numero_cracha: numeroCracha,
+                    deletado_em: null,
                 },
             });
 

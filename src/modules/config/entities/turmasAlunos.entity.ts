@@ -49,6 +49,22 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'boolean', name: 'adquiriu_outros_itens', default: false, nullable: false })
     adquiriu_outros_itens: boolean;
 
+    /** Turma para a qual o aluno foi transferido (tag "Transferência Para"). O aluno permanece na turma atual com esta referência. */
+    @Column({ type: 'int', name: 'id_turma_transferencia_para', nullable: true })
+    id_turma_transferencia_para: number | null;
+
+    /** Turma de onde o aluno veio por transferência (tag "Transferência De"). */
+    @Column({ type: 'int', name: 'id_turma_transferencia_de', nullable: true })
+    id_turma_transferencia_de: number | null;
+
+    @ManyToOne(() => Turmas, { nullable: true })
+    @JoinColumn([{ name: 'id_turma_transferencia_para', referencedColumnName: 'id' }])
+    id_turma_transferencia_para_fk: Turmas | null;
+
+    @ManyToOne(() => Turmas, { nullable: true })
+    @JoinColumn([{ name: 'id_turma_transferencia_de', referencedColumnName: 'id' }])
+    id_turma_transferencia_de_fk: Turmas | null;
+
     @ManyToOne(() => Alunos, (alunos) => alunos.turmasAlunos)
     @JoinColumn([{ name: 'id_aluno', referencedColumnName: 'id' }])
     id_aluno_fk: Alunos;

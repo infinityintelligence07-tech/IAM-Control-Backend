@@ -19,6 +19,7 @@ import { MasterclassPreCadastros } from '../entities/masterclassPreCadastros.ent
 import { Usuarios } from '../entities/usuarios.entity';
 import { EnderecoEventos } from '../entities/enderecoEventos.entity';
 import { AlunosVinculos } from '../entities/alunosVinculos.entity';
+import { HistoricoTransferenciasAlunos } from '../entities/historicoTransferenciasAlunos.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -144,6 +145,12 @@ export class UnitOfWorkService {
     get alunosVinculosRP(): Repository<AlunosVinculos> {
         if (!this._alunosVinculosRP) this._alunosVinculosRP = this.postgresEM.getRepository(AlunosVinculos);
         return this._alunosVinculosRP;
+    }
+
+    private _historicoTransferenciasRP?: Repository<HistoricoTransferenciasAlunos>;
+    get historicoTransferenciasRP(): Repository<HistoricoTransferenciasAlunos> {
+        if (!this._historicoTransferenciasRP) this._historicoTransferenciasRP = this.postgresEM.getRepository(HistoricoTransferenciasAlunos);
+        return this._historicoTransferenciasRP;
     }
     /*****************************************************************************/
 }

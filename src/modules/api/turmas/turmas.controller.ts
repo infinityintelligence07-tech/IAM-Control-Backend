@@ -6,12 +6,15 @@ import {
     UpdateTurmaDto,
     AddAlunoTurmaDto,
     UpdateAlunoTurmaDto,
+    TransferirAlunoDto,
     TurmasListResponseDto,
     TurmaResponseDto,
     AlunosTurmaListResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
     SoftDeleteTurmaDto,
+    OpcoesTransferenciaResponseDto,
+    HistoricoTransferenciasResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
@@ -59,6 +62,27 @@ export class TurmasController {
             console.error('Erro no controller ao buscar aluno da turma:', error);
             throw error;
         }
+    }
+
+    @Get('opcoes-transferencia/:id_turma_aluno')
+    @UseGuards(JwtAuthGuard)
+    async getOpcoesTransferencia(@Param('id_turma_aluno') id_turma_aluno: string): Promise<OpcoesTransferenciaResponseDto> {
+        return this.turmasService.getOpcoesTransferencia(id_turma_aluno);
+    }
+
+    @Post('transferir-aluno/:id_turma_aluno')
+    @UseGuards(JwtAuthGuard)
+    async transferirAluno(
+        @Param('id_turma_aluno') id_turma_aluno: string,
+        @Body() dto: TransferirAlunoDto,
+    ): Promise<AlunoTurmaResponseDto> {
+        return this.turmasService.transferirAluno(id_turma_aluno, dto.id_turma_destino);
+    }
+
+    @Get('historico-transferencias/:id_aluno')
+    @UseGuards(JwtAuthGuard)
+    async getHistoricoTransferencias(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<HistoricoTransferenciasResponseDto> {
+        return this.turmasService.getHistoricoTransferencias(id_aluno);
     }
 
     @Get('aluno-trilha/:id_aluno')

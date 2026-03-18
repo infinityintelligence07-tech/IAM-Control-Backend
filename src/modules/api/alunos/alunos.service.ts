@@ -514,7 +514,22 @@ export class AlunosService {
             aluno.atualizado_por = softDeleteDto.atualizado_por;
 
             await this.uow.alunosRP.save(aluno);
-            console.log('Aluno marcado como deletado:', id);
+
+            const dataDelecao = new Date(softDeleteDto.deletado_em);
+            const idAlunoStr = id.toString();
+            const turmasAlunosDoAluno = await this.uow.turmasAlunosRP.find({
+                where: { id_aluno: idAlunoStr, deletado_em: null },
+            });
+            for (const ta of turmasAlunosDoAluno) {
+                ta.deletado_em = dataDelecao;
+                ta.atualizado_por = softDeleteDto.atualizado_por ?? null;
+                await this.uow.turmasAlunosRP.save(ta);
+            }
+            if (turmasAlunosDoAluno.length > 0) {
+                console.log(`Aluno ${id} marcado como deletado; ${turmasAlunosDoAluno.length} vínculo(s) em turmas também marcado(s) com data de deleção.`);
+            } else {
+                console.log('Aluno marcado como deletado:', id);
+            }
         } catch (error) {
             console.error('Erro ao fazer soft delete do aluno:', error);
             if (error instanceof NotFoundException) {

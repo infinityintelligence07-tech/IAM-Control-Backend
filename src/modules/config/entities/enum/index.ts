@@ -59,7 +59,9 @@ export enum EFuncoes {
 
 export enum EOrigemAlunos {
     ALUNO_BONUS = 'ALUNO_BONUS',
+    ALUNO_CONVIDADO = 'ALUNO_CONVIDADO',
     COMPROU_INGRESSO = 'COMPROU_INGRESSO',
+    TRANSFERENCIA = 'TRANSFERENCIA',
 }
 
 export enum EPresencaTurmas {

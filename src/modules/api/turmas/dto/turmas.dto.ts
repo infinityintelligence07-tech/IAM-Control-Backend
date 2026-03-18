@@ -272,7 +272,7 @@ export class AddAlunoTurmaDto {
 
     @IsOptional()
     @IsString()
-    origem_aluno?: 'COMPROU_INGRESSO' | 'ALUNO_BONUS';
+    origem_aluno?: 'COMPROU_INGRESSO' | 'ALUNO_BONUS' | 'ALUNO_CONVIDADO' | 'TRANSFERENCIA';
 
     @IsOptional()
     @IsString()
@@ -366,6 +366,10 @@ export class TurmaResponseDto {
     pre_cadastrados_count?: number;
     presentes_count?: number;
     inadimplentes_count?: number;
+    /** Preenchido em opções de transferência */
+    treinamento_nome?: string;
+    sigla_treinamento?: string;
+    polo_nome?: string;
 }
 
 export class TurmasListResponseDto {
@@ -383,10 +387,31 @@ export class AlunoTurmaResponseDto {
     nome_cracha: string;
     numero_cracha: string;
     vaga_bonus: boolean;
+    origem_aluno?: string;
     status_aluno_turma?: string;
-    presenca_turma?: string; // Adicionado campo presenca_turma
+    presenca_turma?: string;
     url_comprovante_pgto?: string;
     created_at: Date;
+    /** Tag "Transferência Para": turma para a qual o aluno foi transferido (permanece na turma atual com esta referência). */
+    transferencia_para_turma?: {
+        id: number;
+        edicao_turma?: string;
+        data_inicio: string;
+        data_final: string;
+        treinamento_nome?: string;
+        sigla_treinamento?: string;
+        polo_nome?: string;
+    };
+    /** Tag "Transferência De": turma de onde o aluno veio. */
+    transferencia_de_turma?: {
+        id: number;
+        edicao_turma?: string;
+        data_inicio: string;
+        data_final: string;
+        treinamento_nome?: string;
+        sigla_treinamento?: string;
+        polo_nome?: string;
+    };
     aluno?: {
         id: number;
         nome: string;
@@ -397,6 +422,31 @@ export class AlunoTurmaResponseDto {
         possui_deficiencia?: boolean;
         desc_deficiencia?: string;
     };
+}
+
+/** Opções de transferência: edição mais próxima por data e próxima edição no mesmo polo. */
+export class OpcoesTransferenciaResponseDto {
+    edicao_mais_proxima_data?: TurmaResponseDto;
+    proxima_edicao_mesmo_polo?: TurmaResponseDto;
+}
+
+export class TransferirAlunoDto {
+    @IsNumber()
+    id_turma_destino: number;
+}
+
+export class HistoricoTransferenciaItemDto {
+    id: string;
+    id_aluno: number;
+    id_turma_de: number;
+    id_turma_para: number;
+    turma_de: { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string };
+    turma_para: { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string };
+    criado_em: Date;
+}
+
+export class HistoricoTransferenciasResponseDto {
+    data: HistoricoTransferenciaItemDto[];
 }
 
 export class AlunosTurmaListResponseDto {

@@ -29,6 +29,10 @@ export class WhatsAppService {
     private readonly CHECKIN_TEMPLATE_ID_GUPSHUP = '8ebafac1-29e5-4d10-9ebc-03ae51126a80';
     private readonly CHECKIN_TEMPLATE_NAME: string;
 
+    // Template de confirmação de presença (Gupshup): {{1}} Nome Treinamento, {{2}} Sigla - Edição, {{3}} Datas, {{4}} Endereço completo
+    private readonly CONFIRMACAO_TEMPLATE_ID_GUPSHUP = '0e791b97-a9c0-4f3b-993f-034f9ce437e2';
+    private readonly CONFIRMACAO_TEMPLATE_NAME = 'template_iamcontrol_confirmacao_aluno';
+
     // UUID do template de QR Code aprovado na Gupshup (template com imagem)
     // Parâmetros: {{1}} = nome do aluno, {{2}} = nome do treinamento
     private readonly QRCODE_TEMPLATE_ID_GUPSHUP = '34dd38bb-6594-4ccd-9537-42e8720d29b0';
@@ -358,8 +362,8 @@ Para confirmar sua presença, é só clicar no link abaixo, preencher as informa
 
 _${checkInUrl}_
 
-Assim que finalizar, sua presença será confirmada automaticamente.
-Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
+Assim que finalizar, seu check-in será realizado automaticamente.
+Para não correr o risco de esquecer ou perder o prazo, faça agora mesmo seu check-in.
 
 Vamos Prosperar! 🙌`;
 
@@ -406,6 +410,111 @@ Vamos Prosperar! 🙌`;
                 console.error(`Erro ao processar aluno ${student.alunoNome}:`, error);
                 const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
                 results.errors.push(`Erro interno para ${student.alunoNome}: ${errorMessage}`);
+            }
+        }
+
+        results.success = results.errors.length === 0;
+        return results;
+    }
+
+    async sendConfirmacaoToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
+        const results = { success: true, sent: 0, errors: [] as string[] };
+
+        for (const student of students) {
+            try {
+                const alunoTurma = await this.uow.turmasAlunosRP.findOne({
+                    where: { id: student.alunoTurmaId },
+                    relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_endereco_evento_fk'],
+                });
+
+                if (!alunoTurma || !alunoTurma.id_aluno_fk) {
+                    results.errors.push(`Aluno não encontrado: ${student.alunoNome}`);
+                    continue;
+                }
+
+                const turma = alunoTurma.id_turma_fk;
+                const treinamento = turma?.id_treinamento_fk;
+                const treinamentoNome = treinamento?.treinamento ?? student.treinamentoNome ?? 'Treinamento';
+                // {{1}} = Nome do Treinamento
+                const param1 = treinamentoNome;
+                // {{2}} = Sigla do Treinamento (ou Nome) - Edição
+                const siglaOuNome = treinamento?.sigla_treinamento?.trim() || treinamentoNome;
+                const edicao = turma?.edicao_turma?.trim() || '';
+                const param2 = edicao ? `${siglaOuNome} - ${edicao}` : siglaOuNome;
+
+                const formatDateOnly = (dateStr: string): string => {
+                    if (!dateStr || typeof dateStr !== 'string') return 'A confirmar';
+                    const datePart = dateStr.trim().split('T')[0];
+                    const parts = datePart.split(/[-/]/);
+                    if (parts.length < 3) return 'A confirmar';
+                    const d = parts[2].padStart(2, '0');
+                    const m = parts[1].padStart(2, '0');
+                    const y = parts[0];
+                    return `${d}/${m}/${y}`;
+                };
+                const dataInicioStr = turma?.data_inicio;
+                const dataFinalStr = turma?.data_final;
+                let dataStr = 'A confirmar';
+                if (dataInicioStr) {
+                    if (dataFinalStr && dataInicioStr !== dataFinalStr) {
+                        dataStr = `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`;
+                    } else {
+                        dataStr = formatDateOnly(dataInicioStr);
+                    }
+                }
+                // {{3}} = Data de início à data de fim
+                const param3 = dataStr;
+
+                const polo = turma?.id_polo_fk;
+                const enderecoEvento = turma?.id_endereco_evento_fk;
+                const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
+                const buildEndereco = (
+                    e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null,
+                ): string => {
+                    if (!e) return 'A confirmar';
+                    const partes = [];
+                    if (e.logradouro || e.numero) partes.push([e.logradouro, e.numero].filter(Boolean).join(', '));
+                    if (e.bairro) partes.push(e.bairro);
+                    const cepCidade = [e.cep, e.cidade].filter(Boolean).join(', ');
+                    if (cepCidade) partes.push(cepCidade);
+                    if (e.estado) partes.push(e.estado);
+                    return partes.length ? partes.join(' - ') : 'A confirmar';
+                };
+                const enderecoParte =
+                    buildEndereco(enderecoEvento) !== 'A confirmar'
+                        ? buildEndereco(enderecoEvento)
+                        : buildEndereco(
+                              turma
+                                  ? {
+                                        logradouro: turma.logradouro,
+                                        numero: turma.numero,
+                                        bairro: turma.bairro,
+                                        cep: turma.cep,
+                                        cidade: turma.cidade,
+                                        estado: turma.estado,
+                                    }
+                                  : null,
+                          );
+                // {{4}} = Endereço completo: Local Evento - Logradouro, Número - Bairro - CEP, Cidade - Estado
+                const param4 = enderecoParte !== 'A confirmar' ? `${localStr} - ${enderecoParte}` : localStr;
+
+                const templateParams = [param1, param2, param3, param4];
+                const phone = alunoTurma.id_aluno_fk.telefone_um;
+                const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
+
+                let sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_NAME, templateParams, alunoNome);
+                if (!sendResult.success) {
+                    sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP, templateParams, alunoNome);
+                }
+
+                if (sendResult.success) {
+                    results.sent++;
+                } else {
+                    results.errors.push(`Erro ao enviar confirmação para ${alunoNome}: ${sendResult.error}`);
+                }
+            } catch (error: unknown) {
+                const msg = error instanceof Error ? error.message : 'Erro desconhecido';
+                results.errors.push(`Erro interno para ${student.alunoNome}: ${msg}`);
             }
         }
 

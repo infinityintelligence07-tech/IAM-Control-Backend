@@ -12,6 +12,18 @@ import { RelatoriosFinanceiroModule } from './relatorios/financeiro/relatorios-f
 import { UploadModule } from './upload/upload.module';
 
 @Module({
-    imports: [AlunosModule, PolosModule, TreinamentosModule, TurmasModule, WhatsAppModule, MasterclassModule, DocumentosModule, UsuariosModule, EnderecoEventosModule, RelatoriosFinanceiroModule, UploadModule],
+    imports: [
+        AlunosModule,
+        PolosModule,
+        TreinamentosModule,
+        TurmasModule,
+        WhatsAppModule,
+        MasterclassModule,
+        DocumentosModule,
+        UsuariosModule,
+        EnderecoEventosModule,
+        RelatoriosFinanceiroModule,
+        UploadModule,
+    ],
 })
 export class ApiModule {}

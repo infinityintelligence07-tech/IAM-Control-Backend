@@ -1339,7 +1339,7 @@ export class ContractTemplateService {
         console.log('Data recebida:', JSON.stringify(data, null, 2));
         console.log('Formas pagamento:', JSON.stringify(data.pagamento?.formas_pagamento || data.formas_pagamento, null, 2));
         console.log('Testemunhas:', JSON.stringify(data.testemunhas, null, 2));
-        
+
         return {
             aluno_nome: data.aluno?.nome || '',
             dados_contrato: {
@@ -1376,20 +1376,22 @@ export class ContractTemplateService {
                         edicao_turma: '',
                     },
                 },
-                testemunhas: data.testemunhas ? {
-                    testemunha_um: {
-                        nome: data.testemunhas.testemunha_um?.nome || '',
-                        cpf: data.testemunhas.testemunha_um?.cpf || '',
-                        email: data.testemunhas.testemunha_um?.email || '',
-                        telefone: data.testemunhas.testemunha_um?.telefone || '',
-                    },
-                    testemunha_dois: {
-                        nome: data.testemunhas.testemunha_dois?.nome || '',
-                        cpf: data.testemunhas.testemunha_dois?.cpf || '',
-                        email: data.testemunhas.testemunha_dois?.email || '',
-                        telefone: data.testemunhas.testemunha_dois?.telefone || '',
-                    },
-                } : undefined,
+                testemunhas: data.testemunhas
+                    ? {
+                          testemunha_um: {
+                              nome: data.testemunhas.testemunha_um?.nome || '',
+                              cpf: data.testemunhas.testemunha_um?.cpf || '',
+                              email: data.testemunhas.testemunha_um?.email || '',
+                              telefone: data.testemunhas.testemunha_um?.telefone || '',
+                          },
+                          testemunha_dois: {
+                              nome: data.testemunhas.testemunha_dois?.nome || '',
+                              cpf: data.testemunhas.testemunha_dois?.cpf || '',
+                              email: data.testemunhas.testemunha_dois?.email || '',
+                              telefone: data.testemunhas.testemunha_dois?.telefone || '',
+                          },
+                      }
+                    : undefined,
                 campos_variaveis: {
                     'Cidade do Treinamento': data.campos_variaveis?.['Cidade do Treinamento'] || '',
                     'Data Prevista do Treinamento': data.campos_variaveis?.['Data Prevista do Treinamento'] || '',
@@ -1561,16 +1563,16 @@ export class ContractTemplateService {
             return Buffer.from(pdfBuffer);
         } catch (error: any) {
             console.error('Erro ao gerar PDF do contrato:', error);
-            
+
             // Verificar se é erro de dependências do sistema
-            if (error?.message?.includes('cannot open shared object file') || 
-                error?.message?.includes('Failed to launch the browser process')) {
-                const errorMessage = 'Erro ao iniciar o navegador. Dependências do sistema podem estar faltando. ' +
+            if (error?.message?.includes('cannot open shared object file') || error?.message?.includes('Failed to launch the browser process')) {
+                const errorMessage =
+                    'Erro ao iniciar o navegador. Dependências do sistema podem estar faltando. ' +
                     'Execute: apt-get update && apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2';
                 console.error(errorMessage);
                 throw new Error('Erro ao gerar PDF do contrato: Dependências do sistema faltando. Verifique os logs do servidor.');
             }
-            
+
             throw new Error('Erro ao gerar PDF do contrato');
         }
     }

@@ -26,7 +26,7 @@ export class RolesGuard implements CanActivate {
 
             // Verificar se é ADMINISTRADOR (tem acesso total)
             const isAdmin = usuario.funcao && Array.isArray(usuario.funcao) && usuario.funcao.includes(EFuncoes.ADMINISTRADOR);
-            
+
             if (isAdmin) {
                 // Administradores têm acesso a tudo
                 return true;
@@ -34,9 +34,9 @@ export class RolesGuard implements CanActivate {
 
             // Verificar funções permitidas
             const allowedFunctions = this.getAllowedFunctions(request);
-            const hasFunction = allowedFunctions.length === 0 || allowedFunctions.some(funcao => 
-                usuario.funcao && Array.isArray(usuario.funcao) && usuario.funcao.includes(funcao)
-            );
+            const hasFunction =
+                allowedFunctions.length === 0 ||
+                allowedFunctions.some((funcao) => usuario.funcao && Array.isArray(usuario.funcao) && usuario.funcao.includes(funcao));
 
             // Verificar setores permitidos
             const allowedSectors = this.getAllowedSectors(request);

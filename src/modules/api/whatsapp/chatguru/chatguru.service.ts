@@ -28,11 +28,9 @@ export class ChatGuruService {
         // Configurações da Gupshup (opcionais - se não configuradas, tenta usar ChatGuru)
         this.gupshupApiKey = this.configService.get<string>('GUPSHUP_API_KEY') || '';
         // Usa GUPSHUP_DISPLAY_NAME se disponível, senão tenta GUPSHUP_APP_NAME
-        this.gupshupAppName = this.configService.get<string>('GUPSHUP_DISPLAY_NAME') || 
-                              this.configService.get<string>('GUPSHUP_APP_NAME') || '';
+        this.gupshupAppName = this.configService.get<string>('GUPSHUP_DISPLAY_NAME') || this.configService.get<string>('GUPSHUP_APP_NAME') || '';
         // Usa GUPSHUP_PHONE_NUMBER se disponível, senão tenta GUPSHUP_SOURCE
-        this.gupshupSource = this.configService.get<string>('GUPSHUP_PHONE_NUMBER') || 
-                             this.configService.get<string>('GUPSHUP_SOURCE') || '';
+        this.gupshupSource = this.configService.get<string>('GUPSHUP_PHONE_NUMBER') || this.configService.get<string>('GUPSHUP_SOURCE') || '';
         // App ID da Gupshup (opcional, mas pode ser necessário)
         this.gupshupAppId = this.configService.get<string>('GUPSHUP_APP_ID') || '';
     }
@@ -368,7 +366,7 @@ export class ChatGuruService {
 
             // Log completo da resposta para diagnóstico
             this.logger.debug(`📥 Resposta completa do envio de imagem:`, JSON.stringify(response.data, null, 2));
-            
+
             if (response.data?.result === 'success') {
                 this.logger.log(`✅ Imagem enviada com sucesso para ${normalizedNumber}`);
                 this.logger.log(`   📋 Descrição: ${response.data?.description || 'N/A'}`);
@@ -380,7 +378,7 @@ export class ChatGuruService {
                     result: response.data,
                 };
             }
-            
+
             // Se não retornou success, loga detalhes
             this.logger.warn(`⚠️ Resposta não indica sucesso claro:`, JSON.stringify(response.data, null, 2));
 
@@ -597,16 +595,16 @@ export class ChatGuruService {
             this.logger.log(`📊 RESULTADO: Mensagem=${messageSent ? '✅' : '❌'} | QR Code=${qrCodeSent ? '✅' : '❌'}`);
             this.logger.log(`${'='.repeat(80)}\n`);
 
-                return {
+            return {
                 success: messageSent || qrCodeSent,
                 messageSent,
                 qrCodeSent,
-                    result: {
+                result: {
                     message: messageResult,
                     qrCode: qrResult,
-                    },
+                },
                 warning: !qrCodeSent ? 'QR code não pôde ser enviado' : undefined,
-                };
+            };
         } catch (error: any) {
             this.logger.error(`❌ Erro no processo completo com QR code: ${error.message}`, {
                 stack: error.stack,
@@ -643,27 +641,26 @@ export class ChatGuruService {
             formData.append('channel', 'whatsapp');
             formData.append('source', this.gupshupSource);
             formData.append('destination', destination);
-            formData.append('message', JSON.stringify({
-                type: 'text',
-                text: message,
-            }));
-            
+            formData.append(
+                'message',
+                JSON.stringify({
+                    type: 'text',
+                    text: message,
+                }),
+            );
+
             if (this.gupshupAppName) {
                 formData.append('src.name', this.gupshupAppName);
             }
 
             const response = await firstValueFrom(
-                this.http.post<any>(
-                    gupshupEndpoint,
-                    formData.toString(),
-                    {
-                        headers: {
-                            'apikey': this.gupshupApiKey,
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Cache-Control': 'no-cache',
-                        },
+                this.http.post<any>(gupshupEndpoint, formData.toString(), {
+                    headers: {
+                        apikey: this.gupshupApiKey,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cache-Control': 'no-cache',
                     },
-                ),
+                }),
             );
 
             const responseData = response.data || response;
@@ -729,29 +726,28 @@ export class ChatGuruService {
             formData.append('channel', 'whatsapp');
             formData.append('source', this.gupshupSource);
             formData.append('destination', destination);
-            formData.append('message', JSON.stringify({
-                type: 'image',
-                originalUrl: imageUrl,
-                previewUrl: imageUrl,
-                caption: caption || '',
-            }));
-            
+            formData.append(
+                'message',
+                JSON.stringify({
+                    type: 'image',
+                    originalUrl: imageUrl,
+                    previewUrl: imageUrl,
+                    caption: caption || '',
+                }),
+            );
+
             if (this.gupshupAppName) {
                 formData.append('src.name', this.gupshupAppName);
             }
 
             const response = await firstValueFrom(
-                this.http.post<any>(
-                    gupshupEndpoint,
-                    formData.toString(),
-                    {
-                        headers: {
-                            'apikey': this.gupshupApiKey,
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Cache-Control': 'no-cache',
-                        },
+                this.http.post<any>(gupshupEndpoint, formData.toString(), {
+                    headers: {
+                        apikey: this.gupshupApiKey,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cache-Control': 'no-cache',
                     },
-                ),
+                }),
             );
 
             const responseData = response.data || response;
@@ -813,14 +809,9 @@ export class ChatGuruService {
      * @param templateParams Array de parâmetros para os campos variáveis do template
      * @param contactName Nome do contato (opcional)
      */
-    async sendTemplateMessage(
-        phoneNumber: string,
-        templateId: string,
-        templateParams: string[],
-        contactName?: string,
-    ): Promise<any> {
+    async sendTemplateMessage(phoneNumber: string, templateId: string, templateParams: string[], contactName?: string): Promise<any> {
         const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
-        
+
         try {
             this.logger.log(`Enviando template ${templateId} para ${normalizedNumber}${contactName ? ` (${contactName})` : ''}`);
 
@@ -837,7 +828,7 @@ export class ChatGuruService {
 
             // Tenta primeiro com template_id (Gupshup format)
             params.template_id = templateId;
-            
+
             // Adiciona os parâmetros do template
             // O formato pode variar, mas geralmente é params[0], params[1], etc.
             templateParams.forEach((param, index) => {
@@ -850,9 +841,7 @@ export class ChatGuruService {
                 params_count: templateParams.length,
             });
 
-            const response = await firstValueFrom(
-                this.http.post<{ result?: string; description?: string }>(this.endpoint, null, { params }),
-            );
+            const response = await firstValueFrom(this.http.post<{ result?: string; description?: string }>(this.endpoint, null, { params }));
 
             if (response.data?.result === 'success') {
                 this.logger.log(`Template enviado com sucesso para ${normalizedNumber}`);
@@ -870,7 +859,12 @@ export class ChatGuruService {
             this.logger.error(`Erro ao enviar template (status ${statusCode}): ${errorMessage}`);
 
             // Se a ação template_send não existir ou retornar 500, tenta com formatos alternativos
-            if (statusCode === 400 || statusCode === 500 || errorMessage?.toLowerCase().includes('invalid action') || errorMessage?.toLowerCase().includes('ação inválida')) {
+            if (
+                statusCode === 400 ||
+                statusCode === 500 ||
+                errorMessage?.toLowerCase().includes('invalid action') ||
+                errorMessage?.toLowerCase().includes('ação inválida')
+            ) {
                 this.logger.warn('Ação template_send não disponível ou falhou, tentando formatos alternativos...');
                 try {
                     return await this.sendTemplateMessageAlternative(normalizedNumber, templateId, templateParams);
@@ -888,9 +882,9 @@ export class ChatGuruService {
                             if (gupshupErrorMsg.includes('Credenciais da Gupshup não configuradas')) {
                                 throw new Error(
                                     `Falha ao enviar template: O ChatGuru não suporta envio de templates diretamente. ` +
-                                    `Para usar templates, configure as credenciais da Gupshup nas variáveis de ambiente: ` +
-                                    `GUPSHUP_API_KEY, GUPSHUP_SOURCE (e opcionalmente GUPSHUP_APP_NAME). ` +
-                                    `Erro original: ${errorMessage}`
+                                        `Para usar templates, configure as credenciais da Gupshup nas variáveis de ambiente: ` +
+                                        `GUPSHUP_API_KEY, GUPSHUP_SOURCE (e opcionalmente GUPSHUP_APP_NAME). ` +
+                                        `Erro original: ${errorMessage}`,
                                 );
                             }
                             throw new Error(`Falha ao enviar template: ${errorMessage}. Todas as tentativas falharam. Último erro: ${gupshupErrorMsg}`);
@@ -912,13 +906,7 @@ export class ChatGuruService {
      * @param imageUrl URL pública da imagem para o header do template
      * @param contactName Nome do contato (opcional)
      */
-    async sendTemplateWithImage(
-        phoneNumber: string,
-        templateId: string,
-        templateParams: string[],
-        imageUrl: string,
-        contactName?: string,
-    ): Promise<any> {
+    async sendTemplateWithImage(phoneNumber: string, templateId: string, templateParams: string[], imageUrl: string, contactName?: string): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
@@ -975,7 +963,7 @@ export class ChatGuruService {
             formData.append('channel', 'whatsapp');
             formData.append('source', this.gupshupSource);
             formData.append('destination', destination);
-            formData.append('src.name', this.gupshupAppName);  // OBRIGATÓRIO!
+            formData.append('src.name', this.gupshupAppName); // OBRIGATÓRIO!
             formData.append('template', JSON.stringify(templatePayload));
             formData.append('message', JSON.stringify(messagePayload));
 
@@ -989,17 +977,13 @@ export class ChatGuruService {
             });
 
             const response = await firstValueFrom(
-                this.http.post<any>(
-                    gupshupEndpoint,
-                    formData.toString(),
-                    {
-                        headers: {
-                            'apikey': this.gupshupApiKey,
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Cache-Control': 'no-cache',
-                        },
+                this.http.post<any>(gupshupEndpoint, formData.toString(), {
+                    headers: {
+                        apikey: this.gupshupApiKey,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cache-Control': 'no-cache',
                     },
-                ),
+                }),
             );
 
             const responseData = response.data || response;
@@ -1008,7 +992,7 @@ export class ChatGuruService {
             const isSuccess = status === 'submitted' || status === 'success' || hasMessageId;
 
             this.logger.log(`📥 Resposta da Gupshup:`, JSON.stringify(responseData, null, 2));
-            
+
             // Verifica se há avisos ou erros na resposta
             if (responseData?.warning) {
                 this.logger.warn(`⚠️ Aviso da Gupshup: ${responseData.warning}`);
@@ -1046,13 +1030,13 @@ export class ChatGuruService {
                 // NOTA: A verificação de status pode falhar, mas isso não significa que a mensagem não foi enviada
                 if (messageId) {
                     this.logger.log(`⏳ Aguardando 5 segundos para verificar status real da mensagem...`);
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                    
+                    await new Promise((resolve) => setTimeout(resolve, 5000));
+
                     try {
                         const statusResult = await this.checkMessageStatus(messageId);
                         if (statusResult.success && statusResult.status) {
                             this.logger.log(`📊 Status real da mensagem:`, JSON.stringify(statusResult.status, null, 2));
-                            
+
                             // Verifica se há erros no status
                             const statusStr = JSON.stringify(statusResult.status).toLowerCase();
                             if (statusStr.includes('failed') || statusStr.includes('error') || statusStr.includes('rejected')) {
@@ -1098,11 +1082,8 @@ export class ChatGuruService {
 
             const errorMsg = responseData?.message || responseData?.error || 'Erro desconhecido';
             throw new Error(errorMsg);
-
         } catch (error: any) {
-            const errorMessage = error?.response?.data?.message || 
-                                error?.response?.data?.error || 
-                                error.message;
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error.message;
             const statusCode = error?.response?.status;
 
             this.logger.error(`\n${'X'.repeat(80)}`);
@@ -1129,12 +1110,7 @@ export class ChatGuruService {
      * @param imageBase64 Imagem em base64
      * @param contactName Nome do contato (opcional)
      */
-    async sendSessionMessageWithImage(
-        phoneNumber: string,
-        message: string,
-        imageBase64: string,
-        contactName?: string,
-    ): Promise<any> {
+    async sendSessionMessageWithImage(phoneNumber: string, message: string, imageBase64: string, contactName?: string): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
@@ -1163,11 +1139,14 @@ export class ChatGuruService {
             textFormData.append('channel', 'whatsapp');
             textFormData.append('source', this.gupshupSource);
             textFormData.append('destination', destination);
-            textFormData.append('message', JSON.stringify({
-                type: 'text',
-                text: message,
-            }));
-            
+            textFormData.append(
+                'message',
+                JSON.stringify({
+                    type: 'text',
+                    text: message,
+                }),
+            );
+
             if (this.gupshupAppName) {
                 textFormData.append('src.name', this.gupshupAppName);
             }
@@ -1175,17 +1154,13 @@ export class ChatGuruService {
             this.logger.debug('Enviando mensagem de texto...');
 
             const textResponse = await firstValueFrom(
-                this.http.post<any>(
-                    gupshupEndpoint,
-                    textFormData.toString(),
-                    {
-                        headers: {
-                            'apikey': this.gupshupApiKey,
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Cache-Control': 'no-cache',
-                        },
+                this.http.post<any>(gupshupEndpoint, textFormData.toString(), {
+                    headers: {
+                        apikey: this.gupshupApiKey,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cache-Control': 'no-cache',
                     },
-                ),
+                }),
             );
 
             const textResult = textResponse.data || textResponse;
@@ -1210,13 +1185,16 @@ export class ChatGuruService {
             imageFormData.append('channel', 'whatsapp');
             imageFormData.append('source', this.gupshupSource);
             imageFormData.append('destination', destination);
-            imageFormData.append('message', JSON.stringify({
-                type: 'image',
-                originalUrl: imageUrl,
-                previewUrl: imageUrl,
-                caption: '📲 QR Code de Credenciamento',
-            }));
-            
+            imageFormData.append(
+                'message',
+                JSON.stringify({
+                    type: 'image',
+                    originalUrl: imageUrl,
+                    previewUrl: imageUrl,
+                    caption: '📲 QR Code de Credenciamento',
+                }),
+            );
+
             if (this.gupshupAppName) {
                 imageFormData.append('src.name', this.gupshupAppName);
             }
@@ -1224,17 +1202,13 @@ export class ChatGuruService {
             this.logger.debug('Enviando imagem...');
 
             const imageResponse = await firstValueFrom(
-                this.http.post<any>(
-                    gupshupEndpoint,
-                    imageFormData.toString(),
-                    {
-                        headers: {
-                            'apikey': this.gupshupApiKey,
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Cache-Control': 'no-cache',
-                        },
+                this.http.post<any>(gupshupEndpoint, imageFormData.toString(), {
+                    headers: {
+                        apikey: this.gupshupApiKey,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Cache-Control': 'no-cache',
                     },
-                ),
+                }),
             );
 
             const imageResult = imageResponse.data || imageResponse;
@@ -1259,11 +1233,8 @@ export class ChatGuruService {
             }
 
             throw new Error(imageResult?.message || 'Falha ao enviar imagem');
-
         } catch (error: any) {
-            const errorMessage = error?.response?.data?.message || 
-                                error?.response?.data?.error || 
-                                error.message;
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error.message;
             const statusCode = error?.response?.status;
 
             this.logger.error(`\n${'X'.repeat(80)}`);
@@ -1284,11 +1255,7 @@ export class ChatGuruService {
     /**
      * Método alternativo 1 para enviar template (usando message_send com template)
      */
-    private async sendTemplateMessageAlternative(
-        phoneNumber: string,
-        templateId: string,
-        templateParams: string[],
-    ): Promise<any> {
+    private async sendTemplateMessageAlternative(phoneNumber: string, templateId: string, templateParams: string[]): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
@@ -1307,9 +1274,7 @@ export class ChatGuruService {
                 params.template_params = JSON.stringify(templateParams);
             }
 
-            const response = await firstValueFrom(
-                this.http.post<{ result?: string; description?: string }>(this.endpoint, null, { params }),
-            );
+            const response = await firstValueFrom(this.http.post<{ result?: string; description?: string }>(this.endpoint, null, { params }));
 
             if (response.data?.result === 'success') {
                 this.logger.log(`Template enviado com sucesso (formato alternativo 1) para ${normalizedNumber}`);
@@ -1329,11 +1294,7 @@ export class ChatGuruService {
     /**
      * Método alternativo 2 para enviar template (usando message_send com template_id e params separados)
      */
-    private async sendTemplateMessageAlternative2(
-        phoneNumber: string,
-        templateId: string,
-        templateParams: string[],
-    ): Promise<any> {
+    private async sendTemplateMessageAlternative2(phoneNumber: string, templateId: string, templateParams: string[]): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
@@ -1358,9 +1319,7 @@ export class ChatGuruService {
                 params_count: templateParams.length,
             });
 
-            const response = await firstValueFrom(
-                this.http.post<{ result?: string; description?: string }>(this.endpoint, null, { params }),
-            );
+            const response = await firstValueFrom(this.http.post<{ result?: string; description?: string }>(this.endpoint, null, { params }));
 
             if (response.data?.result === 'success') {
                 this.logger.log(`Template enviado com sucesso (formato alternativo 2) para ${normalizedNumber}`);
@@ -1381,17 +1340,15 @@ export class ChatGuruService {
      * Envia template usando a API da Gupshup diretamente
      * Usa a API oficial da Gupshup quando o ChatGuru não suporta templates
      */
-    private async sendTemplateViaGupshupDirect(
-        phoneNumber: string,
-        templateId: string,
-        templateParams: string[],
-    ): Promise<any> {
+    private async sendTemplateViaGupshupDirect(phoneNumber: string, templateId: string, templateParams: string[]): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
             // Verifica se as credenciais da Gupshup estão configuradas
             if (!this.gupshupApiKey || !this.gupshupSource) {
-                throw new Error('Credenciais da Gupshup não configuradas. Configure GUPSHUP_API_KEY e GUPSHUP_PHONE_NUMBER (ou GUPSHUP_SOURCE) nas variáveis de ambiente.');
+                throw new Error(
+                    'Credenciais da Gupshup não configuradas. Configure GUPSHUP_API_KEY e GUPSHUP_PHONE_NUMBER (ou GUPSHUP_SOURCE) nas variáveis de ambiente.',
+                );
             }
 
             // Log detalhado para rastrear o envio
@@ -1402,11 +1359,13 @@ export class ChatGuruService {
             this.logger.log(`📋 Template ID: ${templateId}`);
             this.logger.log(`📝 Parâmetros: ${JSON.stringify(templateParams)}`);
             this.logger.log(`⏰ Timestamp: ${new Date().toISOString()}`);
-            
+
             // Log das credenciais (parcialmente mascaradas para segurança)
             this.logger.log(`Enviando template via API Gupshup diretamente para ${normalizedNumber}`);
             this.logger.debug('Credenciais Gupshup configuradas:', {
-                apiKey: this.gupshupApiKey ? `${this.gupshupApiKey.substring(0, 10)}...${this.gupshupApiKey.substring(this.gupshupApiKey.length - 5)}` : 'não configurada',
+                apiKey: this.gupshupApiKey
+                    ? `${this.gupshupApiKey.substring(0, 10)}...${this.gupshupApiKey.substring(this.gupshupApiKey.length - 5)}`
+                    : 'não configurada',
                 source: this.gupshupSource || 'não configurado',
                 appName: this.gupshupAppName || 'não configurado',
                 appId: this.gupshupAppId || 'não configurado',
@@ -1433,25 +1392,27 @@ export class ChatGuruService {
             formData.append('channel', 'whatsapp');
             formData.append('source', this.gupshupSource);
             formData.append('destination', destination);
-            
+
             // Para templates, a Gupshup pode aceitar diferentes formatos
             // IMPORTANTE: A Gupshup geralmente usa o Facebook temp ID (numérico) para templates
             // O Gupshup temp ID (UUID) pode não funcionar diretamente na API
             // Vamos tentar primeiro com o ID fornecido, mas se falhar, pode precisar do Facebook temp ID
-            
+
             // Verifica se o template ID é UUID (Gupshup) ou numérico (Facebook)
             const isFacebookId = /^\d+$/.test(templateId);
             const isGupshupId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(templateId);
-            
+
             this.logger.debug('🔍 Tipo do Template ID:', {
                 template_id: templateId,
                 is_facebook_id: isFacebookId,
                 is_gupshup_id: isGupshupId,
-                note: isFacebookId ? 'Facebook ID (numérico) - formato correto para API' : 
-                      isGupshupId ? 'Gupshup ID (UUID) - pode precisar ser convertido' : 
-                      'Formato desconhecido',
+                note: isFacebookId
+                    ? 'Facebook ID (numérico) - formato correto para API'
+                    : isGupshupId
+                      ? 'Gupshup ID (UUID) - pode precisar ser convertido'
+                      : 'Formato desconhecido',
             });
-            
+
             // FORMATO CORRETO DA GUPSHUP PARA TEMPLATES:
             // O template deve ser enviado no campo 'template' (NÃO no campo 'message')
             // template={"id":"nome_template","params":["param1","param2"]}
@@ -1460,7 +1421,7 @@ export class ChatGuruService {
                 id: templateId,
                 params: templateParams,
             };
-            
+
             // Log do template antes de enviar
             this.logger.debug('📋 Template que será enviado:', {
                 template_id: templateId,
@@ -1468,10 +1429,10 @@ export class ChatGuruService {
                 params: templateParams,
                 params_count: templateParams.length,
             });
-            
+
             // Adiciona o template - FORMATO CORRETO: campo 'template', não 'message'
             formData.append('template', JSON.stringify(templatePayload));
-            
+
             // Log do payload que está sendo enviado
             this.logger.debug('Payload do template sendo enviado:', {
                 template_id: templateId,
@@ -1479,12 +1440,12 @@ export class ChatGuruService {
                 params: templateParams,
                 params_count: templateParams.length,
             });
-            
+
             // Se tiver appName configurado, adiciona src.name
             if (this.gupshupAppName) {
                 formData.append('src.name', this.gupshupAppName);
             }
-            
+
             // Log do payload completo para debug
             this.logger.debug('Payload completo do envio:', {
                 template: JSON.stringify(templatePayload),
@@ -1503,59 +1464,58 @@ export class ChatGuruService {
 
             let response: any;
             let lastError: any = null;
-            
+
             try {
                 this.logger.debug(`Enviando template com apikey...`);
-                
+
                 // A Gupshup espera form-urlencoded
                 response = await firstValueFrom(
-                    this.http.post<any>(
-                        gupshupEndpoint,
-                        formData.toString(),
-                        {
-                            headers: {
-                                'apikey': this.gupshupApiKey,
-                                'Content-Type': 'application/x-www-form-urlencoded',
-                                'Cache-Control': 'no-cache',
-                            },
+                    this.http.post<any>(gupshupEndpoint, formData.toString(), {
+                        headers: {
+                            apikey: this.gupshupApiKey,
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Cache-Control': 'no-cache',
                         },
-                    ),
+                    }),
                 );
                 // Log completo da resposta
-                this.logger.log('📥 Resposta completa da Gupshup:', JSON.stringify({
-                    status: response.status,
-                    statusText: response.statusText,
-                    data: response.data,
-                    headers: response.headers,
-                }, null, 2));
+                this.logger.log(
+                    '📥 Resposta completa da Gupshup:',
+                    JSON.stringify(
+                        {
+                            status: response.status,
+                            statusText: response.statusText,
+                            data: response.data,
+                            headers: response.headers,
+                        },
+                        null,
+                        2,
+                    ),
+                );
             } catch (error: any) {
                 lastError = error;
                 const errorMsg = error?.response?.data?.message || error?.response?.data?.error || error.message;
                 const statusCode = error?.response?.status;
                 this.logger.error(`Erro ao enviar template (${statusCode}): ${errorMsg}`);
-                
+
                 // Se for erro 401, pode ser problema de API key
                 if (statusCode === 401) {
                     this.logger.error('Erro 401: API key pode estar incorreta ou não autorizada para este app.');
                     throw error;
                 }
-                
+
                 // Tenta endpoint alternativo
                 this.logger.warn(`Tentando endpoint alternativo /sm/api/v1/msg...`);
                 try {
                     const altEndpoint = 'https://api.gupshup.io/sm/api/v1/msg';
                     response = await firstValueFrom(
-                        this.http.post<any>(
-                            altEndpoint,
-                            formData.toString(),
-                            {
-                                headers: {
-                                    'apikey': this.gupshupApiKey,
-                                    'Content-Type': 'application/x-www-form-urlencoded',
-                                    'Cache-Control': 'no-cache',
-                                },
+                        this.http.post<any>(altEndpoint, formData.toString(), {
+                            headers: {
+                                apikey: this.gupshupApiKey,
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                                'Cache-Control': 'no-cache',
                             },
-                        ),
+                        }),
                     );
                     this.logger.debug('Resposta da Gupshup (endpoint alternativo):', JSON.stringify(response.data, null, 2));
                 } catch (altError: any) {
@@ -1563,7 +1523,7 @@ export class ChatGuruService {
                     throw altError;
                 }
             }
-            
+
             // Se não conseguiu resposta, lança o último erro
             if (!response) {
                 throw lastError || new Error('Falha ao enviar template - nenhuma tentativa foi bem-sucedida');
@@ -1571,12 +1531,12 @@ export class ChatGuruService {
 
             // Verifica diferentes formatos de resposta de sucesso
             const responseData = response.data || response;
-            
+
             // Log completo da resposta para debug
             this.logger.log(`📥 Resposta completa da Gupshup para ${normalizedNumber}:`, JSON.stringify(responseData, null, 2));
             this.logger.log(`📥 Tipo da resposta:`, typeof responseData);
             this.logger.log(`📥 Keys da resposta:`, Object.keys(responseData || {}));
-            
+
             // Verifica diferentes formatos de resposta de sucesso da Gupshup
             // A Gupshup pode retornar diferentes formatos:
             // 1. { status: 'success', messageId: '...' }
@@ -1588,7 +1548,7 @@ export class ChatGuruService {
             const status = responseData?.status?.toLowerCase();
             const hasMessageId = !!(responseData?.messageId || responseData?.id || responseData?.msgid);
             const hasError = !!(responseData?.error || responseData?.message?.toLowerCase().includes('error'));
-            
+
             this.logger.log(`\n${'─'.repeat(60)}`);
             this.logger.log(`📥 RESPOSTA DA GUPSHUP RECEBIDA`);
             this.logger.log(`${'─'.repeat(60)}`);
@@ -1601,15 +1561,15 @@ export class ChatGuruService {
             this.logger.log(`   - Tem Erro: ${hasError}`);
             this.logger.log(`   - MessageId: ${responseData?.messageId || responseData?.id || responseData?.msgid || 'não retornado'}`);
             this.logger.log(`${'─'.repeat(60)}\n`);
-            
-            const isSuccess = 
-                status === 'success' || 
-                status === 'submitted' || 
+
+            const isSuccess =
+                status === 'success' ||
+                status === 'submitted' ||
                 status === 'accepted' ||
                 hasMessageId ||
                 (status && !hasError && status !== 'error' && status !== 'failed') ||
                 (typeof responseData === 'string' && responseData.toLowerCase().includes('success'));
-            
+
             if (isSuccess) {
                 const messageId = responseData?.messageId || responseData?.id || responseData?.msgid;
                 this.logger.log(`\n${'='.repeat(80)}`);
@@ -1620,7 +1580,7 @@ export class ChatGuruService {
                 this.logger.log(`🆔 Message ID: ${messageId || 'NÃO RETORNADO'}`);
                 this.logger.log(`📊 Status: ${status || 'N/A'}`);
                 this.logger.log(`⏰ Timestamp: ${new Date().toISOString()}`);
-                
+
                 // IMPORTANTE: Mesmo que a API retorne sucesso, isso não garante entrega
                 // A Gupshup aceita a mensagem, mas a entrega depende do WhatsApp
                 if (!messageId) {
@@ -1638,7 +1598,7 @@ export class ChatGuruService {
                     this.logger.log(`   A entrega depende do WhatsApp (número ativo, não bloqueado, etc)`);
                 }
                 this.logger.log(`${'='.repeat(80)}\n`);
-                
+
                 // Retorna sucesso mesmo que não tenha messageId (algumas APIs não retornam)
                 return {
                     success: true,
@@ -1661,7 +1621,7 @@ export class ChatGuruService {
             // Se chegou aqui, a resposta não é clara - mas pode ser sucesso mesmo assim
             // Algumas APIs retornam apenas um objeto vazio ou com timestamp em caso de sucesso
             this.logger.warn(`⚠️ Resposta da Gupshup não reconhecida claramente:`, JSON.stringify(responseData, null, 2));
-            
+
             // Se não há erro explícito e a resposta existe, assume sucesso
             if (responseData && !hasError) {
                 this.logger.warn(`⚠️ Assumindo sucesso baseado na ausência de erro explícito`);
@@ -1673,16 +1633,13 @@ export class ChatGuruService {
                     warning: 'Resposta não reconhecida claramente, mas assumindo sucesso',
                 };
             }
-            
+
             throw new Error('Resposta da Gupshup não reconhecida. Verifique os logs para mais detalhes.');
         } catch (error: any) {
-            const errorMessage = error?.response?.data?.message || 
-                                error?.response?.data?.error || 
-                                error?.response?.data?.description ||
-                                error.message;
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error?.response?.data?.description || error.message;
             const statusCode = error?.response?.status;
             const errorData = error?.response?.data;
-            
+
             this.logger.error(`\n${'X'.repeat(80)}`);
             this.logger.error(`❌ ERRO AO ENVIAR TEMPLATE VIA GUPSHUP`);
             this.logger.error(`${'X'.repeat(80)}`);
@@ -1693,7 +1650,7 @@ export class ChatGuruService {
             this.logger.error(`📄 Dados do erro: ${JSON.stringify(errorData, null, 2)}`);
             this.logger.error(`⏰ Timestamp: ${new Date().toISOString()}`);
             this.logger.error(`${'X'.repeat(80)}\n`);
-            
+
             throw new Error(`Falha ao enviar template via Gupshup: ${errorMessage}`);
         }
     }
@@ -1722,7 +1679,7 @@ export class ChatGuruService {
                 const response = await firstValueFrom(
                     this.http.get<any>(statusEndpoint, {
                         headers: {
-                            'apikey': this.gupshupApiKey,
+                            apikey: this.gupshupApiKey,
                             'Content-Type': 'application/json',
                         },
                     }),
@@ -1740,13 +1697,13 @@ export class ChatGuruService {
             } catch (error: any) {
                 // Tenta endpoint alternativo
                 this.logger.warn(`Endpoint principal falhou, tentando alternativo...`);
-                
+
                 const altEndpoint = `https://api.gupshup.io/sm/api/v1/msg/${messageId}`;
                 try {
                     const response = await firstValueFrom(
                         this.http.get<any>(altEndpoint, {
                             headers: {
-                                'apikey': this.gupshupApiKey,
+                                apikey: this.gupshupApiKey,
                                 'Content-Type': 'application/json',
                             },
                         }),
@@ -1766,10 +1723,11 @@ export class ChatGuruService {
                 }
             }
         } catch (error: any) {
-            const errorMessage = error?.response?.data?.message || 
-                                error?.response?.data?.error || 
-                                (typeof error?.response?.data === 'object' ? JSON.stringify(error?.response?.data) : error?.response?.data) ||
-                                error.message;
+            const errorMessage =
+                error?.response?.data?.message ||
+                error?.response?.data?.error ||
+                (typeof error?.response?.data === 'object' ? JSON.stringify(error?.response?.data) : error?.response?.data) ||
+                error.message;
             const statusCode = error?.response?.status;
             const errorData = error?.response?.data;
 
@@ -1817,14 +1775,14 @@ export class ChatGuruService {
             const response = await firstValueFrom(
                 this.http.get<any>(templatesEndpoint, {
                     headers: {
-                        'apikey': this.gupshupApiKey,
+                        apikey: this.gupshupApiKey,
                         'Content-Type': 'application/json',
                     },
                 }),
             );
 
             this.logger.log(`📥 Templates encontrados:`);
-            
+
             // Processa e exibe os templates de forma legível
             const templates = response.data?.templates || response.data || [];
             if (Array.isArray(templates)) {
@@ -1837,7 +1795,7 @@ export class ChatGuruService {
                     this.logger.log(`   - Linguagem: ${template.languageCode || template.language || 'N/A'}`);
                 });
             }
-            
+
             this.logger.log(`\n${'='.repeat(80)}\n`);
 
             return {
@@ -1846,9 +1804,7 @@ export class ChatGuruService {
                 count: Array.isArray(templates) ? templates.length : 0,
             };
         } catch (error: any) {
-            const errorMessage = error?.response?.data?.message || 
-                                error?.response?.data?.error || 
-                                error.message;
+            const errorMessage = error?.response?.data?.message || error?.response?.data?.error || error.message;
             const statusCode = error?.response?.status;
 
             this.logger.error(`\n${'X'.repeat(80)}`);
@@ -1927,12 +1883,7 @@ export class ChatGuruService {
     /**
      * Cria chat e envia template
      */
-    async createChatAndSendTemplate(
-        phoneNumber: string,
-        templateId: string,
-        templateParams: string[],
-        contactName?: string,
-    ): Promise<any> {
+    async createChatAndSendTemplate(phoneNumber: string, templateId: string, templateParams: string[], contactName?: string): Promise<any> {
         try {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
@@ -1949,11 +1900,7 @@ export class ChatGuruService {
             } catch (chatError: any) {
                 // Se o erro for sobre mensagem inicial inválida ou chat já existe, continua
                 const errorMsg = chatError.message?.toLowerCase() || '';
-                if (
-                    errorMsg.includes('mensagem inicial inválida') ||
-                    errorMsg.includes('já existe') ||
-                    errorMsg.includes('already exists')
-                ) {
+                if (errorMsg.includes('mensagem inicial inválida') || errorMsg.includes('já existe') || errorMsg.includes('already exists')) {
                     this.logger.warn(`Não foi possível criar chat antes do template (pode já existir ou não ser necessário): ${chatError.message}`);
                     // Continua mesmo assim - o template pode funcionar sem criar o chat primeiro
                 } else {

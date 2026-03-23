@@ -1,6 +1,15 @@
 import { Controller, Get, Post, Put, Delete, Query, Param, Body, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, UseGuards } from '@nestjs/common';
 import { AlunosService } from './alunos.service';
-import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto, SaveAlunoVinculosDto, AlunoVinculoResponseDto } from './dto/alunos.dto';
+import {
+    GetAlunosDto,
+    AlunosListResponseDto,
+    AlunoResponseDto,
+    CreateAlunoDto,
+    UpdateAlunoDto,
+    SoftDeleteAlunoDto,
+    SaveAlunoVinculosDto,
+    AlunoVinculoResponseDto,
+} from './dto/alunos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -21,10 +30,7 @@ export class AlunosController {
     }
 
     @Put(':id/vinculos')
-    async saveVinculos(
-        @Param('id', ParseIntPipe) id: number,
-        @Body() dto: SaveAlunoVinculosDto,
-    ): Promise<AlunoVinculoResponseDto[]> {
+    async saveVinculos(@Param('id', ParseIntPipe) id: number, @Body() dto: SaveAlunoVinculosDto): Promise<AlunoVinculoResponseDto[]> {
         return this.alunosService.saveVinculos(id, dto);
     }
 

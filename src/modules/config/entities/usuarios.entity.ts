@@ -32,7 +32,7 @@ export class Usuarios extends BaseEntity {
 
     @Column({ type: 'varchar', name: 'rg', nullable: true })
     rg?: string;
-    
+
     @Column({ type: 'varchar', name: 'pis', nullable: true })
     pis?: string;
 

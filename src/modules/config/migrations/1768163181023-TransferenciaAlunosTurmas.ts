@@ -4,12 +4,8 @@ export class TransferenciaAlunosTurmas1768163181023 implements MigrationInterfac
     name = 'TransferenciaAlunosTurmas1768163181023';
 
     public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(
-            `ALTER TABLE "turmas_alunos" ADD COLUMN IF NOT EXISTS "id_turma_transferencia_para" integer`,
-        );
-        await queryRunner.query(
-            `ALTER TABLE "turmas_alunos" ADD COLUMN IF NOT EXISTS "id_turma_transferencia_de" integer`,
-        );
+        await queryRunner.query(`ALTER TABLE "turmas_alunos" ADD COLUMN IF NOT EXISTS "id_turma_transferencia_para" integer`);
+        await queryRunner.query(`ALTER TABLE "turmas_alunos" ADD COLUMN IF NOT EXISTS "id_turma_transferencia_de" integer`);
         await queryRunner.query(`
             CREATE TABLE IF NOT EXISTS "historico_transferencias_alunos" (
                 "id" BIGSERIAL NOT NULL,
@@ -30,11 +26,7 @@ export class TransferenciaAlunosTurmas1768163181023 implements MigrationInterfac
 
     public async down(queryRunner: QueryRunner): Promise<void> {
         await queryRunner.query(`DROP TABLE IF EXISTS "historico_transferencias_alunos"`);
-        await queryRunner.query(
-            `ALTER TABLE "turmas_alunos" DROP COLUMN IF EXISTS "id_turma_transferencia_de"`,
-        );
-        await queryRunner.query(
-            `ALTER TABLE "turmas_alunos" DROP COLUMN IF EXISTS "id_turma_transferencia_para"`,
-        );
+        await queryRunner.query(`ALTER TABLE "turmas_alunos" DROP COLUMN IF EXISTS "id_turma_transferencia_de"`);
+        await queryRunner.query(`ALTER TABLE "turmas_alunos" DROP COLUMN IF EXISTS "id_turma_transferencia_para"`);
     }
 }

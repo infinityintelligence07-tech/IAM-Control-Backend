@@ -15,4 +15,3 @@ export class RelatoriosFinanceiroController {
         return this.relatoriosFinanceiroService.getAlunosInadimplentes();
     }
 }
-

@@ -10,4 +10,3 @@ import { UnitOfWorkModule } from '../../config/unit_of_work/uow.module';
     exports: [EnderecoEventosService],
 })
 export class EnderecoEventosModule {}
-

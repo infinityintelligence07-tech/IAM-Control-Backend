@@ -43,11 +43,13 @@ export class TurmasController {
         @Query('id_turma') id_turma?: number,
         @Query('page') page: number = 1,
         @Query('limit') limit: number = 10,
+        @Query('search') search?: string,
     ): Promise<AlunosDisponiveisResponseDto> {
-        console.log('Buscando alunos disponíveis para turma:', id_turma);
+        console.log('Buscando alunos disponíveis para turma:', id_turma, 'search:', search);
         const pageNum = page ? parseInt(page.toString()) : 1;
         const limitNum = limit ? parseInt(limit.toString()) : 10;
-        return await this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum);
+        const searchStr = typeof search === 'string' && search.trim() ? search.trim() : undefined;
+        return await this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum, searchStr);
     }
 
     @Get('aluno/:id')
@@ -72,10 +74,7 @@ export class TurmasController {
 
     @Post('transferir-aluno/:id_turma_aluno')
     @UseGuards(JwtAuthGuard)
-    async transferirAluno(
-        @Param('id_turma_aluno') id_turma_aluno: string,
-        @Body() dto: TransferirAlunoDto,
-    ): Promise<AlunoTurmaResponseDto> {
+    async transferirAluno(@Param('id_turma_aluno') id_turma_aluno: string, @Body() dto: TransferirAlunoDto): Promise<AlunoTurmaResponseDto> {
         return this.turmasService.transferirAluno(id_turma_aluno, dto.id_turma_destino);
     }
 

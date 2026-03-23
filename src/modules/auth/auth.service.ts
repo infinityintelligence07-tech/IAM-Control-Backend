@@ -91,14 +91,9 @@ export class AuthService {
         const exists = await this.uow.usuariosRP.findOne({ where: { email } });
 
         if (exists) {
-            // Usuário já existe, faz login
-            const match = await bcrypt.compare(providerId, exists.senha);
-            if (!match) {
-                // Atualiza a senha com o novo providerId
-                exists.senha = await bcrypt.hash(providerId, 10);
-            }
-            // Garante que o provider está definido como 'google'
-            if (exists.provider !== 'google') {
+            // Usuário já existe, apenas autentica via Google sem sobrescrever senha.
+            // Isso preserva login por email/senha para contas já existentes.
+            if (!exists.provider) {
                 exists.provider = 'google';
             }
             // Atualiza a foto se fornecida
@@ -172,7 +167,33 @@ export class AuthService {
     async me(userId: number) {
         const user = await this.uow.usuariosRP.findOne({
             where: { id: userId },
-            select: ['id', 'nome', 'email', 'primeiro_nome', 'sobrenome', 'telefone', 'setor', 'funcao', 'url_foto', 'provider', 'cep', 'logradouro', 'complemento', 'numero', 'bairro', 'cidade', 'estado', 'cpf', 'cnpj', 'rg', 'ctps', 'chave_pix', 'tipo_colaborador', 'data_nascimento', 'data_admissao'] as any,
+            select: [
+                'id',
+                'nome',
+                'email',
+                'primeiro_nome',
+                'sobrenome',
+                'telefone',
+                'setor',
+                'funcao',
+                'url_foto',
+                'provider',
+                'cep',
+                'logradouro',
+                'complemento',
+                'numero',
+                'bairro',
+                'cidade',
+                'estado',
+                'cpf',
+                'cnpj',
+                'rg',
+                'ctps',
+                'chave_pix',
+                'tipo_colaborador',
+                'data_nascimento',
+                'data_admissao',
+            ] as any,
         });
         return user;
     }
@@ -272,8 +293,54 @@ export class AuthService {
         };
     }
 
-    async updateProfile(userId: number, primeiro_nome: string, sobrenome: string, email: string, telefone: string, setor: ESetores, funcao: EFuncoes[], cep?: string, logradouro?: string, complemento?: string, numero?: string, bairro?: string, cidade?: string, estado?: string, cpf?: string, cnpj?: string, rg?: string, ctps?: string, chave_pix?: string, tipo_colaborador?: string, data_nascimento?: string, data_admissao?: string) {
-        console.log('updateProfile chamado com:', { userId, primeiro_nome, sobrenome, email, telefone, setor, funcao, cep, logradouro, complemento, numero, bairro, cidade, estado, cpf, cnpj, rg, ctps, chave_pix, tipo_colaborador, data_nascimento, data_admissao });
+    async updateProfile(
+        userId: number,
+        primeiro_nome: string,
+        sobrenome: string,
+        email: string,
+        telefone: string,
+        setor: ESetores,
+        funcao: EFuncoes[],
+        cep?: string,
+        logradouro?: string,
+        complemento?: string,
+        numero?: string,
+        bairro?: string,
+        cidade?: string,
+        estado?: string,
+        cpf?: string,
+        cnpj?: string,
+        rg?: string,
+        ctps?: string,
+        chave_pix?: string,
+        tipo_colaborador?: string,
+        data_nascimento?: string,
+        data_admissao?: string,
+    ) {
+        console.log('updateProfile chamado com:', {
+            userId,
+            primeiro_nome,
+            sobrenome,
+            email,
+            telefone,
+            setor,
+            funcao,
+            cep,
+            logradouro,
+            complemento,
+            numero,
+            bairro,
+            cidade,
+            estado,
+            cpf,
+            cnpj,
+            rg,
+            ctps,
+            chave_pix,
+            tipo_colaborador,
+            data_nascimento,
+            data_admissao,
+        });
 
         try {
             const user = await this.uow.usuariosRP.findOne({ where: { id: userId } });
@@ -371,11 +438,7 @@ export class AuthService {
                 }
             }
 
-            const updateQuery = this.uow.usuariosRP
-                .createQueryBuilder()
-                .update('Usuarios')
-                .set(updateData)
-                .where('id = :userId', { userId });
+            const updateQuery = this.uow.usuariosRP.createQueryBuilder().update('Usuarios').set(updateData).where('id = :userId', { userId });
 
             // Só atualizar email se realmente mudou
             if (emailNovoNormalizado !== emailAtualNormalizado) {

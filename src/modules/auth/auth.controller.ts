@@ -83,7 +83,7 @@ export class AuthController {
 
             // Redireciona para o frontend com o token
             const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
-            res.redirect(`${frontendUrl}/auth/google/callback?token=${result.token}`);
+            res.redirect(`${frontendUrl}/auth/google/callback?token=${encodeURIComponent(result.token)}`);
         } catch (error) {
             console.error('Erro no Google OAuth:', error);
             const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
@@ -131,12 +131,79 @@ export class AuthController {
     @UseGuards(JwtAuthGuard)
     async updateProfile(@Body() body: any, @Req() req: any) {
         try {
-            const { primeiro_nome, sobrenome, email, telefone, setor, funcao, cep, logradouro, complemento, numero, bairro, cidade, estado, cpf, cnpj, rg, ctps, chave_pix, tipo_colaborador, data_nascimento, data_admissao } = body;
+            const {
+                primeiro_nome,
+                sobrenome,
+                email,
+                telefone,
+                setor,
+                funcao,
+                cep,
+                logradouro,
+                complemento,
+                numero,
+                bairro,
+                cidade,
+                estado,
+                cpf,
+                cnpj,
+                rg,
+                ctps,
+                chave_pix,
+                tipo_colaborador,
+                data_nascimento,
+                data_admissao,
+            } = body;
             const userId = body.id;
             console.log('Controller recebeu:', { userId, body });
-            console.log('Dados extraídos:', { primeiro_nome, sobrenome, email, telefone, setor, funcao, cep, logradouro, complemento, numero, bairro, cidade, estado, cpf, cnpj, rg, ctps, chave_pix, tipo_colaborador, data_nascimento, data_admissao });
+            console.log('Dados extraídos:', {
+                primeiro_nome,
+                sobrenome,
+                email,
+                telefone,
+                setor,
+                funcao,
+                cep,
+                logradouro,
+                complemento,
+                numero,
+                bairro,
+                cidade,
+                estado,
+                cpf,
+                cnpj,
+                rg,
+                ctps,
+                chave_pix,
+                tipo_colaborador,
+                data_nascimento,
+                data_admissao,
+            });
 
-            return this.auth.updateProfile(userId, primeiro_nome, sobrenome, email, telefone, setor, funcao, cep, logradouro, complemento, numero, bairro, cidade, estado, cpf, cnpj, rg, ctps, chave_pix, tipo_colaborador, data_nascimento, data_admissao);
+            return this.auth.updateProfile(
+                userId,
+                primeiro_nome,
+                sobrenome,
+                email,
+                telefone,
+                setor,
+                funcao,
+                cep,
+                logradouro,
+                complemento,
+                numero,
+                bairro,
+                cidade,
+                estado,
+                cpf,
+                cnpj,
+                rg,
+                ctps,
+                chave_pix,
+                tipo_colaborador,
+                data_nascimento,
+                data_admissao,
+            );
         } catch (error) {
             console.error('Error in updateProfile controller:', error);
             throw error;

@@ -1,6 +1,15 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { GetAlunosDto, AlunosListResponseDto, AlunoResponseDto, CreateAlunoDto, UpdateAlunoDto, SoftDeleteAlunoDto, SaveAlunoVinculosDto, AlunoVinculoResponseDto } from './dto/alunos.dto';
+import {
+    GetAlunosDto,
+    AlunosListResponseDto,
+    AlunoResponseDto,
+    CreateAlunoDto,
+    UpdateAlunoDto,
+    SoftDeleteAlunoDto,
+    SaveAlunoVinculosDto,
+    AlunoVinculoResponseDto,
+} from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
 import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
@@ -572,23 +581,29 @@ export class AlunosService {
             id_aluno_vinculado: v.id_aluno_vinculado,
             id_treinamento: v.id_treinamento,
             id_turma: v.id_turma,
-            aluno_vinculado: v.id_aluno_vinculado_fk ? {
-                id: v.id_aluno_vinculado_fk.id,
-                nome: v.id_aluno_vinculado_fk.nome,
-                email: v.id_aluno_vinculado_fk.email,
-            } : undefined,
-            treinamento: v.id_treinamento_fk ? {
-                id: v.id_treinamento_fk.id,
-                treinamento: v.id_treinamento_fk.treinamento,
-            } : undefined,
-            turma: v.id_turma_fk ? {
-                id: v.id_turma_fk.id,
-                edicao_turma: v.id_turma_fk.edicao_turma,
-                treinamento_nome: v.id_turma_fk.id_treinamento_fk?.treinamento || '',
-                sigla_treinamento: v.id_turma_fk.id_treinamento_fk?.sigla_treinamento,
-                data_inicio: v.id_turma_fk.data_inicio,
-                data_final: v.id_turma_fk.data_final,
-            } : undefined,
+            aluno_vinculado: v.id_aluno_vinculado_fk
+                ? {
+                      id: v.id_aluno_vinculado_fk.id,
+                      nome: v.id_aluno_vinculado_fk.nome,
+                      email: v.id_aluno_vinculado_fk.email,
+                  }
+                : undefined,
+            treinamento: v.id_treinamento_fk
+                ? {
+                      id: v.id_treinamento_fk.id,
+                      treinamento: v.id_treinamento_fk.treinamento,
+                  }
+                : undefined,
+            turma: v.id_turma_fk
+                ? {
+                      id: v.id_turma_fk.id,
+                      edicao_turma: v.id_turma_fk.edicao_turma,
+                      treinamento_nome: v.id_turma_fk.id_treinamento_fk?.treinamento || '',
+                      sigla_treinamento: v.id_turma_fk.id_treinamento_fk?.sigla_treinamento,
+                      data_inicio: v.id_turma_fk.data_inicio,
+                      data_final: v.id_turma_fk.data_final,
+                  }
+                : undefined,
         }));
     }
 

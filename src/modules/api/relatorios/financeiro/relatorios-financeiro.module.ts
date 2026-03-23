@@ -11,4 +11,3 @@ import { AdminOrLiderGuard } from '../../../auth/guards/admin-or-lider.guard';
     exports: [RelatoriosFinanceiroService],
 })
 export class RelatoriosFinanceiroModule {}
-

@@ -33,12 +33,7 @@ export class AdminOrLiderGuard implements CanActivate {
             const isAdmin = usuario.funcao.includes(EFuncoes.ADMINISTRADOR);
 
             // Verificar se o usuário tem alguma função de LÍDER
-            const liderFunctions = [
-                EFuncoes.LIDER,
-                EFuncoes.LIDER_DE_EVENTOS,
-                EFuncoes.LIDER_DE_MASTERCLASS,
-                EFuncoes.LIDER_DE_CONFRONTO,
-            ];
+            const liderFunctions = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
             const isLider = liderFunctions.some((liderFunc) => usuario.funcao.includes(liderFunc));
 
             if (!isAdmin && !isLider) {
@@ -55,4 +50,3 @@ export class AdminOrLiderGuard implements CanActivate {
         }
     }
 }
-

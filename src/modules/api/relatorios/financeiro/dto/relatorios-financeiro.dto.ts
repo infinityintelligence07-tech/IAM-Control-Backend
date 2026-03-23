@@ -24,4 +24,3 @@ export class AlunosInadimplentesResponseDto {
     data: AlunoInadimplenteDto[];
     total: number;
 }
-

@@ -118,7 +118,7 @@ export class MasterclassService {
             // Verificar se a linha 1 tem cabeçalhos válidos (nome, email, telefone, whatsapp)
             const linha1 = arrayData[0] || [];
             const linha1Str = linha1.map((cell: any) => cell?.toString().toLowerCase().trim() || '').join(' ');
-            const temCamposObrigatorios = 
+            const temCamposObrigatorios =
                 (linha1Str.includes('nome') || linha1Str.includes('name')) &&
                 (linha1Str.includes('email') || linha1Str.includes('e-mail')) &&
                 (linha1Str.includes('telefone') || linha1Str.includes('whatsapp') || linha1Str.includes('phone'));
@@ -132,7 +132,7 @@ export class MasterclassService {
                 // Verificar linha 2
                 const linha2 = arrayData[1] || [];
                 const linha2Str = linha2.map((cell: any) => cell?.toString().toLowerCase().trim() || '').join(' ');
-                const temCamposObrigatoriosLinha2 = 
+                const temCamposObrigatoriosLinha2 =
                     (linha2Str.includes('nome') || linha2Str.includes('name')) &&
                     (linha2Str.includes('email') || linha2Str.includes('e-mail')) &&
                     (linha2Str.includes('telefone') || linha2Str.includes('whatsapp') || linha2Str.includes('phone'));
@@ -262,7 +262,7 @@ export class MasterclassService {
 
             // Buscar pré-cadastros existentes para esta turma
             const preCadastrosExistentes = await this.uow.masterclassPreCadastrosRP.find({
-                where: { 
+                where: {
                     id_turma,
                     deletado_em: null,
                 },
@@ -287,7 +287,7 @@ export class MasterclassService {
             for (const row of fileData) {
                 try {
                     console.log(`🔍 Processando linha:`, row);
-                    
+
                     // Validar dados obrigatórios
                     if (!row.nome || !row.email || !row.telefone) {
                         const camposFaltando = [];
@@ -597,7 +597,7 @@ export class MasterclassService {
             });
 
             const eventos = Array.from(eventosMap.values());
-            
+
             // Ordenar eventos: primeiro por data (mais recente primeiro), depois por cidade
             eventos.sort((a, b) => {
                 // Comparar por data (mais recente primeiro)
@@ -611,7 +611,7 @@ export class MasterclassService {
                 const cidadeB = (b.cidade || '').toLowerCase();
                 return cidadeA.localeCompare(cidadeB);
             });
-            
+
             console.log('✅ Total de eventos retornados:', eventos.length);
 
             const totalPages = Math.ceil(total / limit);
@@ -657,12 +657,15 @@ export class MasterclassService {
 
             console.log(`📊 [buscarEvento] Total de pré-cadastros encontrados (incluindo deletados): ${todosPreCadastros.length}`);
             if (todosPreCadastros.length > 0) {
-                console.log(`📋 [buscarEvento] Primeiros 3 pré-cadastros encontrados:`, todosPreCadastros.slice(0, 3).map(pc => ({
-                    id: pc.id,
-                    nome: pc.nome_aluno,
-                    id_turma: pc.id_turma,
-                    deletado_em: pc.deletado_em,
-                })));
+                console.log(
+                    `📋 [buscarEvento] Primeiros 3 pré-cadastros encontrados:`,
+                    todosPreCadastros.slice(0, 3).map((pc) => ({
+                        id: pc.id,
+                        nome: pc.nome_aluno,
+                        id_turma: pc.id_turma,
+                        deletado_em: pc.deletado_em,
+                    })),
+                );
             }
 
             // Agora buscar apenas os não deletados
@@ -678,12 +681,15 @@ export class MasterclassService {
 
             console.log(`✅ [buscarEvento] Pré-cadastros não deletados encontrados: ${preCadastros.length}`);
             if (preCadastros.length > 0) {
-                console.log(`📋 [buscarEvento] Primeiros 3 pré-cadastros não deletados:`, preCadastros.slice(0, 3).map(pc => ({
-                    id: pc.id,
-                    nome: pc.nome_aluno,
-                    id_turma: pc.id_turma,
-                    deletado_em: pc.deletado_em,
-                })));
+                console.log(
+                    `📋 [buscarEvento] Primeiros 3 pré-cadastros não deletados:`,
+                    preCadastros.slice(0, 3).map((pc) => ({
+                        id: pc.id,
+                        nome: pc.nome_aluno,
+                        id_turma: pc.id_turma,
+                        deletado_em: pc.deletado_em,
+                    })),
+                );
             } else {
                 console.log(`⚠️ [buscarEvento] NENHUM pré-cadastro não deletado encontrado para turma ${id_turma}`);
                 // Tentar buscar novamente sem o filtro de deletado para debug
@@ -694,7 +700,7 @@ export class MasterclassService {
                 });
                 console.log(`🔍 [buscarEvento] Total de pré-cadastros (incluindo deletados) para turma ${id_turma}: ${todosParaDebug.length}`);
                 if (todosParaDebug.length > 0) {
-                    const deletados = todosParaDebug.filter(pc => pc.deletado_em !== null);
+                    const deletados = todosParaDebug.filter((pc) => pc.deletado_em !== null);
                     console.log(`📊 [buscarEvento] Deletados: ${deletados.length}, Não deletados: ${todosParaDebug.length - deletados.length}`);
                 }
             }
@@ -731,7 +737,7 @@ export class MasterclassService {
     async confirmarPresenca(confirmarDto: ConfirmarPresencaDto): Promise<MasterclassPreCadastroResponseDto> {
         try {
             const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
-                where: { 
+                where: {
                     id: confirmarDto.id_pre_cadastro,
                     deletado_em: null,
                 },
@@ -782,7 +788,7 @@ export class MasterclassService {
     async vincularAluno(vincularDto: VincularAlunoDto): Promise<MasterclassPreCadastroResponseDto> {
         try {
             const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
-                where: { 
+                where: {
                     id: vincularDto.id_pre_cadastro,
                     deletado_em: null,
                 },
@@ -844,7 +850,7 @@ export class MasterclassService {
     async alterarInteresse(alterarDto: AlterarInteresseDto): Promise<MasterclassPreCadastroResponseDto> {
         try {
             const preCadastro = await this.uow.masterclassPreCadastrosRP.findOne({
-                where: { 
+                where: {
                     id: alterarDto.id_pre_cadastro,
                     deletado_em: null,
                 },

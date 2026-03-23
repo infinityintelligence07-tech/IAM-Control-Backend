@@ -14,12 +14,7 @@ export class RelatoriosFinanceiroService {
                 where: {
                     deletado_em: null,
                 },
-                relations: [
-                    'id_turma_aluno_fk',
-                    'id_turma_aluno_fk.id_aluno_fk',
-                    'id_turma_aluno_fk.id_aluno_fk.id_polo_fk',
-                    'id_treinamento_fk',
-                ],
+                relations: ['id_turma_aluno_fk', 'id_turma_aluno_fk.id_aluno_fk', 'id_turma_aluno_fk.id_aluno_fk.id_polo_fk', 'id_treinamento_fk'],
             });
 
             // Buscar também alunos que têm status INADIMPLENTE diretamente
@@ -36,22 +31,22 @@ export class RelatoriosFinanceiroService {
             const inadimplentes = todosTreinamentos.filter((t) => {
                 const alunoEntity = t.id_turma_aluno_fk?.id_aluno_fk;
                 const turmaAluno = t.id_turma_aluno_fk;
-                
+
                 // Verificar se é inadimplente
                 if (t.preco_total_pago >= t.preco_treinamento) {
                     return false;
                 }
-                
+
                 // Verificar se aluno não está deletado
                 if (!alunoEntity || alunoEntity.deletado_em) {
                     return false;
                 }
-                
+
                 // Verificar se turma_aluno não está deletada
                 if (!turmaAluno || turmaAluno.deletado_em) {
                     return false;
                 }
-                
+
                 return true;
             });
 
@@ -60,7 +55,7 @@ export class RelatoriosFinanceiroService {
 
             for (const treinamento of inadimplentes) {
                 const alunoEntity = treinamento.id_turma_aluno_fk?.id_aluno_fk;
-                
+
                 if (!alunoEntity || alunoEntity.deletado_em) continue;
 
                 const alunoId = alunoEntity.id;
@@ -84,7 +79,7 @@ export class RelatoriosFinanceiroService {
                     });
                 }
 
-                const aluno = alunosMap.get(alunoId)!;
+                const aluno = alunosMap.get(alunoId);
                 const treinamentoEntity = treinamento.id_treinamento_fk;
 
                 aluno.treinamentos.push({
@@ -103,16 +98,14 @@ export class RelatoriosFinanceiroService {
             // Adicionar alunos que têm status INADIMPLENTE diretamente
             // Primeiro, obter IDs dos alunos que já estão no mapa (para evitar duplicatas)
             const alunosIdsNoMapa = new Set(Array.from(alunosMap.keys()));
-            
+
             // Filtrar apenas alunos com status INADIMPLENTE que ainda não estão no mapa
-            const alunosStatusInadimplenteNovos = alunosComStatusInadimplente.filter(
-                (aluno) => !alunosIdsNoMapa.has(aluno.id)
-            );
+            const alunosStatusInadimplenteNovos = alunosComStatusInadimplente.filter((aluno) => !alunosIdsNoMapa.has(aluno.id));
 
             // Adicionar alunos com status inadimplente ao mapa (mesmo sem treinamentos pendentes)
             for (const alunoComStatus of alunosStatusInadimplenteNovos) {
                 const alunoId = alunoComStatus.id;
-                
+
                 // Buscar treinamentos do aluno que já foram processados anteriormente
                 const treinamentosDoAluno = inadimplentes.filter((t) => {
                     const alunoEntity = t.id_turma_aluno_fk?.id_aluno_fk;
@@ -125,7 +118,7 @@ export class RelatoriosFinanceiroService {
                 for (const treinamento of treinamentosDoAluno) {
                     const valorPendente = treinamento.preco_treinamento - treinamento.preco_total_pago;
                     const treinamentoEntity = treinamento.id_treinamento_fk;
-                    
+
                     treinamentosPendentes.push({
                         id: treinamento.id_treinamento,
                         nome: treinamentoEntity?.treinamento || 'Treinamento não encontrado',
@@ -168,4 +161,3 @@ export class RelatoriosFinanceiroService {
         }
     }
 }
-

@@ -29,7 +29,11 @@ export class TurmasService {
     ) {}
 
     /** Mapeia entidade Turmas (com relações id_treinamento_fk e id_polo_fk) para o objeto de tag de transferência. */
-    private mapTurmaToTransferenciaTag(turma: any): { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string } | undefined {
+    private mapTurmaToTransferenciaTag(
+        turma: any,
+    ):
+        | { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string }
+        | undefined {
         if (!turma) return undefined;
         return {
             id: turma.id,
@@ -47,12 +51,12 @@ export class TurmasService {
      */
     private formatDateToDateOnly(dateString: string): string {
         if (!dateString) return dateString;
-        
+
         // Se já está no formato YYYY-MM-DD, retornar como está
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
             return dateString;
         }
-        
+
         // Tentar parsear a data e formatar
         try {
             const date = new Date(dateString);
@@ -322,7 +326,7 @@ export class TurmasService {
             }
 
             // Debug: verificar turma 23
-            const turma23 = turmasFiltradas.find(t => t.id === 23);
+            const turma23 = turmasFiltradas.find((t) => t.id === 23);
             if (turma23) {
                 console.log(`🎯 [DEBUG] Turma 23 encontrada:`);
                 console.log(`  - id_treinamento: ${turma23.id_treinamento}`);
@@ -337,10 +341,11 @@ export class TurmasService {
 
             // Buscar contadores de pré-cadastrados apenas para turmas de palestra/masterclass
             const turmasPalestras = turmasFiltradas.filter((t) => {
-                const isPalestra = t.id_treinamento_fk?.tipo_palestra === true || 
-                                  t.id_treinamento_fk?.tipo_treinamento === false;
+                const isPalestra = t.id_treinamento_fk?.tipo_palestra === true || t.id_treinamento_fk?.tipo_treinamento === false;
                 if (t.id === 23) {
-                    console.log(`🎯 [DEBUG] Turma 23 - tipo_palestra: ${t.id_treinamento_fk?.tipo_palestra}, tipo_treinamento: ${t.id_treinamento_fk?.tipo_treinamento}, isPalestra: ${isPalestra}`);
+                    console.log(
+                        `🎯 [DEBUG] Turma 23 - tipo_palestra: ${t.id_treinamento_fk?.tipo_palestra}, tipo_treinamento: ${t.id_treinamento_fk?.tipo_treinamento}, isPalestra: ${isPalestra}`,
+                    );
                 }
                 return isPalestra;
             });
@@ -409,13 +414,12 @@ export class TurmasService {
                         : undefined,
                     // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
                     alunos_count: (() => {
-                        const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || 
-                                          turma.id_treinamento_fk?.tipo_treinamento === false;
+                        const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
                         if (turma.id === 23) {
                             console.log(`🎯 [DEBUG] Turma 23 - Calculando alunos_count:`);
                             console.log(`  - isPalestra: ${isPalestra}`);
                             console.log(`  - preCadastrosCount[23]: ${JSON.stringify(preCadastrosCount[turma.id])}`);
-                            console.log(`  - alunos_count será: ${isPalestra ? (preCadastrosCount[turma.id]?.total || 0) : (turma.turmasAlunos?.length || 0)}`);
+                            console.log(`  - alunos_count será: ${isPalestra ? preCadastrosCount[turma.id]?.total || 0 : turma.turmasAlunos?.length || 0}`);
                         }
                         if (isPalestra) {
                             return preCadastrosCount[turma.id]?.total || 0;
@@ -471,11 +475,8 @@ export class TurmasService {
             }
 
             // Buscar contadores de pré-cadastrados apenas se for palestra/masterclass
-            const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || 
-                               turma.id_treinamento_fk?.tipo_treinamento === false;
-            const preCadastrosCount = isPalestra 
-                ? await this.getPreCadastrosCountByTurmas([turma.id])
-                : {};
+            const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
+            const preCadastrosCount = isPalestra ? await this.getPreCadastrosCountByTurmas([turma.id]) : {};
 
             return {
                 id: turma.id,
@@ -671,9 +672,7 @@ export class TurmasService {
 
             // Verificar se é palestra para definir turma_aberta como true por padrão
             const isPalestra = treinamento.tipo_palestra === true;
-            const turmaAberta = createTurmaDto.turma_aberta !== undefined 
-                ? createTurmaDto.turma_aberta 
-                : (isPalestra ? true : false);
+            const turmaAberta = createTurmaDto.turma_aberta !== undefined ? createTurmaDto.turma_aberta : isPalestra ? true : false;
 
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
@@ -701,36 +700,41 @@ export class TurmasService {
     }
 
     /**
-     * Buscar alunos disponíveis para uma turma
+     * Buscar alunos disponíveis para uma turma.
+     * Se search for informado, filtra por nome ou email (ILIKE); caso contrário retorna vazio quando usado em modo autocomplete.
      */
-    async getAlunosDisponiveis(id_turma?: number, page: number = 1, limit: number = 10): Promise<AlunosDisponiveisResponseDto> {
+    async getAlunosDisponiveis(id_turma?: number, page: number = 1, limit: number = 10, search?: string): Promise<AlunosDisponiveisResponseDto> {
         try {
             const skip = (page - 1) * limit;
 
-            // Buscar alunos que não estão na turma especificada
-            const whereConditions: any = {
-                deletado_em: null,
-            };
+            // Quando não há busca, retornar vazio para modo autocomplete (lista inicia zerada)
+            if (!search || !search.trim()) {
+                return {
+                    data: [],
+                    total: 0,
+                    page,
+                    limit,
+                    totalPages: 0,
+                };
+            }
+
+            const qb = this.uow.alunosRP
+                .createQueryBuilder('aluno')
+                .where('aluno.deletado_em IS NULL')
+                .andWhere('(aluno.nome ILIKE :search OR aluno.email ILIKE :search)', { search: `%${search.trim()}%` });
 
             if (id_turma) {
-                // Excluir alunos que já estão nesta turma
                 const alunosNaTurma = await this.uow.turmasAlunosRP.find({
                     where: { id_turma, deletado_em: null },
                     select: ['id_aluno'],
                 });
-
                 const idsAlunosNaTurma = alunosNaTurma.map((ta) => ta.id_aluno);
                 if (idsAlunosNaTurma.length > 0) {
-                    whereConditions.id = Not(In(idsAlunosNaTurma));
+                    qb.andWhere('aluno.id NOT IN (:...ids)', { ids: idsAlunosNaTurma });
                 }
             }
 
-            const [alunos, total] = await this.uow.alunosRP.findAndCount({
-                where: whereConditions,
-                skip,
-                take: limit,
-                order: { nome: 'ASC' },
-            });
+            const [alunos, total] = await qb.orderBy('aluno.nome', 'ASC').skip(skip).take(limit).getManyAndCount();
 
             return {
                 data: alunos.map((aluno) => ({
@@ -759,7 +763,18 @@ export class TurmasService {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id },
-                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk', 'id_turma_transferencia_para_fk', 'id_turma_transferencia_para_fk.id_treinamento_fk', 'id_turma_transferencia_para_fk.id_polo_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
+                relations: [
+                    'id_aluno_fk',
+                    'id_turma_fk',
+                    'id_turma_fk.id_treinamento_fk',
+                    'id_turma_fk.id_polo_fk',
+                    'id_turma_transferencia_para_fk',
+                    'id_turma_transferencia_para_fk.id_treinamento_fk',
+                    'id_turma_transferencia_para_fk.id_polo_fk',
+                    'id_turma_transferencia_de_fk',
+                    'id_turma_transferencia_de_fk.id_treinamento_fk',
+                    'id_turma_transferencia_de_fk.id_polo_fk',
+                ],
             });
 
             if (!turmaAluno) {
@@ -870,7 +885,10 @@ export class TurmasService {
                 .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
                 .leftJoinAndSelect('turma.id_polo_fk', 'polo')
                 .where('mc.deletado_em IS NULL')
-                .andWhere('(CAST(mc.id_aluno_vinculado AS TEXT) = :idAluno OR mc.id_aluno_vinculado = :idAlunoNum)', { idAluno: idAlunoString, idAlunoNum: id_aluno })
+                .andWhere('(CAST(mc.id_aluno_vinculado AS TEXT) = :idAluno OR mc.id_aluno_vinculado = :idAlunoNum)', {
+                    idAluno: idAlunoString,
+                    idAlunoNum: id_aluno,
+                })
                 .orderBy('mc.criado_em', 'DESC')
                 .getMany();
 
@@ -1351,7 +1369,7 @@ export class TurmasService {
                 data_inicio_undefined: updateTurmaDto.data_inicio === undefined,
                 data_final_undefined: updateTurmaDto.data_final === undefined,
             });
-            
+
             if (updateTurmaDto.data_inicio !== undefined && updateTurmaDto.data_inicio !== null && updateTurmaDto.data_inicio !== '') {
                 updateDataWithDates.data_inicio = this.formatDateToDateOnly(updateTurmaDto.data_inicio);
                 console.log(`[DEBUG] Data início formatada: ${updateDataWithDates.data_inicio}`);
@@ -1360,7 +1378,7 @@ export class TurmasService {
                 updateDataWithDates.data_final = this.formatDateToDateOnly(updateTurmaDto.data_final);
                 console.log(`[DEBUG] Data final formatada: ${updateDataWithDates.data_final}`);
             }
-            
+
             console.log(`[DEBUG] Dados finais para update:`, {
                 data_inicio: updateDataWithDates.data_inicio,
                 data_final: updateDataWithDates.data_final,
@@ -1467,7 +1485,15 @@ export class TurmasService {
 
             const [turmasAlunos, total] = await this.uow.turmasAlunosRP.findAndCount({
                 where: { id_turma, deletado_em: null },
-                relations: ['id_aluno_fk', 'id_turma_transferencia_para_fk', 'id_turma_transferencia_para_fk.id_treinamento_fk', 'id_turma_transferencia_para_fk.id_polo_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
+                relations: [
+                    'id_aluno_fk',
+                    'id_turma_transferencia_para_fk',
+                    'id_turma_transferencia_para_fk.id_treinamento_fk',
+                    'id_turma_transferencia_para_fk.id_polo_fk',
+                    'id_turma_transferencia_de_fk',
+                    'id_turma_transferencia_de_fk.id_treinamento_fk',
+                    'id_turma_transferencia_de_fk.id_polo_fk',
+                ],
                 order: { criado_em: 'DESC' },
                 skip: (page - 1) * limit,
                 take: limit,
@@ -1555,11 +1581,7 @@ export class TurmasService {
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma);
 
             // Usar nome do crachá fornecido ou o padrão do aluno (obrigatório na entidade)
-            const nomeCracha =
-                addAlunoDto.nome_cracha?.trim() ||
-                aluno.nome_cracha?.trim() ||
-                aluno.nome?.trim() ||
-                'Aluno';
+            const nomeCracha = addAlunoDto.nome_cracha?.trim() || aluno.nome_cracha?.trim() || aluno.nome?.trim() || 'Aluno';
 
             // Debug: Log dos dados recebidos
             console.log('=== DADOS RECEBIDOS PARA ADICIONAR ALUNO ===');
@@ -1674,20 +1696,21 @@ export class TurmasService {
         const mesmoPolo = turmasTreinamento.filter((t) => t.id_polo === id_polo_origem && (t.data_inicio ?? '') >= hoje);
         const proximaEdicaoMesmoPolo = mesmoPolo[0] ?? null;
 
-        const toTurmaResponse = (t: any): TurmaResponseDto => ({
-            id: t.id,
-            id_polo: t.id_polo,
-            id_treinamento: t.id_treinamento,
-            edicao_turma: t.edicao_turma,
-            data_inicio: t.data_inicio,
-            data_final: t.data_final,
-            status_turma: t.status_turma,
-            capacidade_turma: t.capacidade_turma,
-            turma_aberta: t.turma_aberta,
-            treinamento_nome: t.id_treinamento_fk?.treinamento,
-            sigla_treinamento: t.id_treinamento_fk?.sigla_treinamento,
-            polo_nome: t.id_polo_fk?.polo,
-        } as TurmaResponseDto);
+        const toTurmaResponse = (t: any): TurmaResponseDto =>
+            ({
+                id: t.id,
+                id_polo: t.id_polo,
+                id_treinamento: t.id_treinamento,
+                edicao_turma: t.edicao_turma,
+                data_inicio: t.data_inicio,
+                data_final: t.data_final,
+                status_turma: t.status_turma,
+                capacidade_turma: t.capacidade_turma,
+                turma_aberta: t.turma_aberta,
+                treinamento_nome: t.id_treinamento_fk?.treinamento,
+                sigla_treinamento: t.id_treinamento_fk?.sigla_treinamento,
+                polo_nome: t.id_polo_fk?.polo,
+            }) as TurmaResponseDto;
 
         return {
             edicao_mais_proxima_data: edicaoMaisProximaData ? toTurmaResponse(edicaoMaisProximaData) : undefined,
@@ -1798,7 +1821,14 @@ export class TurmasService {
     async getHistoricoTransferencias(id_aluno: number): Promise<HistoricoTransferenciasResponseDto> {
         const list = await this.uow.historicoTransferenciasRP.find({
             where: { id_aluno },
-            relations: ['id_turma_de_fk', 'id_turma_de_fk.id_treinamento_fk', 'id_turma_de_fk.id_polo_fk', 'id_turma_para_fk', 'id_turma_para_fk.id_treinamento_fk', 'id_turma_para_fk.id_polo_fk'],
+            relations: [
+                'id_turma_de_fk',
+                'id_turma_de_fk.id_treinamento_fk',
+                'id_turma_de_fk.id_polo_fk',
+                'id_turma_para_fk',
+                'id_turma_para_fk.id_treinamento_fk',
+                'id_turma_para_fk.id_polo_fk',
+            ],
             order: { criado_em: 'DESC' },
         });
         const data: HistoricoTransferenciaItemDto[] = list.map((h) => ({
@@ -2066,9 +2096,21 @@ export class TurmasService {
                 if (e.estado) partes.push(e.estado);
                 return partes.length ? partes.join(' - ') : 'A confirmar';
             };
-            const enderecoStr = buildEndereco(enderecoEvento) !== 'A confirmar'
-                ? buildEndereco(enderecoEvento)
-                : buildEndereco(turma ? { logradouro: turma.logradouro, numero: turma.numero, bairro: turma.bairro, cep: turma.cep, cidade: turma.cidade, estado: turma.estado } : null);
+            const enderecoStr =
+                buildEndereco(enderecoEvento) !== 'A confirmar'
+                    ? buildEndereco(enderecoEvento)
+                    : buildEndereco(
+                          turma
+                              ? {
+                                    logradouro: turma.logradouro,
+                                    numero: turma.numero,
+                                    bairro: turma.bairro,
+                                    cep: turma.cep,
+                                    cidade: turma.cidade,
+                                    estado: turma.estado,
+                                }
+                              : null,
+                      );
 
             // Gerar token JWT para o link de check-in
             const jwtSecret = process.env.JWT_SECRET || 'default-secret-key';

@@ -288,21 +288,16 @@ export class DocumentosService {
                         turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
                     } catch (error: any) {
                         // Verificar se é erro de constraint única
-                        if (
-                            typeof error === 'object' &&
-                            error !== null &&
-                            'code' in error &&
-                            ((error as any).code === '23505' || (error as any).driverError?.code === '23505')
-                        ) {
+                        if (typeof error === 'object' && error !== null && 'code' in error && (error.code === '23505' || error.driverError?.code === '23505')) {
                             const constraint = error?.constraint || error?.driverError?.constraint;
-                            
+
                             // Se for erro de sequência desincronizada (primary key)
                             if (constraint === 'pk_turmas_alunos_trn') {
                                 console.warn('Sequência de IDs desincronizada detectada em turmas_alunos_treinamentos. Corrigindo...');
-                                
+
                                 // Corrigir a sequência
                                 await this.fixTurmasAlunosTreinamentosSequence();
-                                
+
                                 // Criar um novo objeto para garantir que não há ID pré-definido
                                 const novoRegistro = this.uow.turmasAlunosTreinamentosRP.create({
                                     id_turma_aluno: turmaAluno.id,
@@ -311,7 +306,7 @@ export class DocumentosService {
                                     forma_pgto: [],
                                     preco_total_pago: 0,
                                 });
-                                
+
                                 // Tentar novamente
                                 turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(novoRegistro);
                                 console.log('Registro criado com sucesso após correção da sequência');
@@ -398,9 +393,8 @@ export class DocumentosService {
             // Preparar dados dos signers para o campo zapsign_signers_data
             const signersData = signers.map((signer, index) => {
                 // Tentar encontrar o signer correspondente no ZapSign por índice ou nome
-                const zapSignSigner = zapSignResponse.signers[index] || 
-                                     zapSignResponse.signers.find((s) => s.name === signer.name);
-                
+                const zapSignSigner = zapSignResponse.signers[index] || zapSignResponse.signers.find((s) => s.name === signer.name);
+
                 return {
                     name: signer.name,
                     email: signer.email || undefined,
@@ -410,7 +404,7 @@ export class DocumentosService {
                     signing_url: zapSignSigner?.sign_url || '',
                 };
             });
-            
+
             console.log('=== SIGNERS DATA PREPARADO ===');
             console.log('Total de signers:', signersData.length);
             console.log('Signers data:', JSON.stringify(signersData, null, 2));
@@ -1070,7 +1064,7 @@ export class DocumentosService {
                     let parcelas: number = 1;
 
                     const formaNome = forma.forma || '';
-                    
+
                     // Verificar se é à vista ou parcelado
                     if (formaNome.toLowerCase().includes('parcelado') || formaNome.toLowerCase().includes('parcela')) {
                         tipo = 'PARCELADO';
@@ -1292,9 +1286,9 @@ export class DocumentosService {
         };
 
         const forma = formaMapping[primeiraForma.forma] || primeiraForma.forma;
-        const tipo = tipoMapping[(primeiraForma as any).tipo] || (primeiraForma as any).tipo;
+        const tipo = tipoMapping[primeiraForma.tipo] || primeiraForma.tipo;
 
-        if ((primeiraForma as any).tipo === 'PARCELADO') {
+        if (primeiraForma.tipo === 'PARCELADO') {
             const numeroParcelas = formasPagamento.length;
             return `${forma} ${tipo} (${numeroParcelas} parcelas)`;
         }
@@ -2740,21 +2734,16 @@ export class DocumentosService {
                         turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
                     } catch (error: any) {
                         // Verificar se é erro de constraint única
-                        if (
-                            typeof error === 'object' &&
-                            error !== null &&
-                            'code' in error &&
-                            ((error as any).code === '23505' || (error as any).driverError?.code === '23505')
-                        ) {
+                        if (typeof error === 'object' && error !== null && 'code' in error && (error.code === '23505' || error.driverError?.code === '23505')) {
                             const constraint = error?.constraint || error?.driverError?.constraint;
-                            
+
                             // Se for erro de sequência desincronizada (primary key)
                             if (constraint === 'pk_turmas_alunos_trn') {
                                 console.warn('Sequência de IDs desincronizada detectada em turmas_alunos_treinamentos. Corrigindo...');
-                                
+
                                 // Corrigir a sequência
                                 await this.fixTurmasAlunosTreinamentosSequence();
-                                
+
                                 // Criar um novo objeto para garantir que não há ID pré-definido
                                 const novoRegistro = this.uow.turmasAlunosTreinamentosRP.create({
                                     id_turma_aluno: turmaAluno.id,
@@ -2763,7 +2752,7 @@ export class DocumentosService {
                                     forma_pgto: [],
                                     preco_total_pago: 0,
                                 });
-                                
+
                                 // Tentar novamente
                                 turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(novoRegistro);
                                 console.log('Registro criado com sucesso após correção da sequência');
@@ -3107,48 +3096,35 @@ export class DocumentosService {
     private async fixTurmasAlunosTreinamentosSequence(): Promise<void> {
         try {
             const queryRunner = this.uow.turmasAlunosTreinamentosRP.manager.connection.createQueryRunner();
-            
+
             // Obter o schema da tabela (pode ser 'public' ou outro)
             const schema = this.uow.turmasAlunosTreinamentosRP.metadata.schema || 'public';
-            
+
             // Obter o maior ID atual na tabela
-            const result = await queryRunner.query(
-                `SELECT COALESCE(MAX(id::bigint), 0) as max_id FROM ${schema}.turmas_alunos_treinamentos`
-            );
+            const result = await queryRunner.query(`SELECT COALESCE(MAX(id::bigint), 0) as max_id FROM ${schema}.turmas_alunos_treinamentos`);
             const maxId = parseInt(result[0]?.max_id || '0', 10);
-            
+
             // Resetar a sequência para o próximo valor após o maior ID
             const nextId = maxId + 1;
             try {
                 // Tentar com schema
-                await queryRunner.query(
-                    `SELECT setval('${schema}.turmas_alunos_treinamentos_id_seq', $1, false)`,
-                    [nextId]
-                );
+                await queryRunner.query(`SELECT setval('${schema}.turmas_alunos_treinamentos_id_seq', $1, false)`, [nextId]);
             } catch (seqError) {
                 // Se falhar, tentar sem schema (sequência pode estar no schema padrão)
                 try {
-                    await queryRunner.query(
-                        `SELECT setval('turmas_alunos_treinamentos_id_seq', $1, false)`,
-                        [nextId]
-                    );
+                    await queryRunner.query(`SELECT setval('turmas_alunos_treinamentos_id_seq', $1, false)`, [nextId]);
                 } catch (seqError2) {
                     // Se ainda falhar, tentar encontrar o nome real da sequência
-                    const seqResult = await queryRunner.query(
-                        `SELECT pg_get_serial_sequence('${schema}.turmas_alunos_treinamentos', 'id') as seq_name`
-                    );
+                    const seqResult = await queryRunner.query(`SELECT pg_get_serial_sequence('${schema}.turmas_alunos_treinamentos', 'id') as seq_name`);
                     const seqName = seqResult[0]?.seq_name;
                     if (seqName) {
-                        await queryRunner.query(
-                            `SELECT setval($1, $2, false)`,
-                            [seqName, nextId]
-                        );
+                        await queryRunner.query(`SELECT setval($1, $2, false)`, [seqName, nextId]);
                     } else {
                         throw new Error('Não foi possível encontrar a sequência');
                     }
                 }
             }
-            
+
             await queryRunner.release();
             console.log(`Sequência de turmas_alunos_treinamentos corrigida. Próximo ID será: ${nextId}`);
         } catch (error) {

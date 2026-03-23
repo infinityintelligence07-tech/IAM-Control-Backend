@@ -440,8 +440,24 @@ export class HistoricoTransferenciaItemDto {
     id_aluno: number;
     id_turma_de: number;
     id_turma_para: number;
-    turma_de: { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string };
-    turma_para: { id: number; edicao_turma?: string; data_inicio: string; data_final: string; treinamento_nome?: string; sigla_treinamento?: string; polo_nome?: string };
+    turma_de: {
+        id: number;
+        edicao_turma?: string;
+        data_inicio: string;
+        data_final: string;
+        treinamento_nome?: string;
+        sigla_treinamento?: string;
+        polo_nome?: string;
+    };
+    turma_para: {
+        id: number;
+        edicao_turma?: string;
+        data_inicio: string;
+        data_final: string;
+        treinamento_nome?: string;
+        sigla_treinamento?: string;
+        polo_nome?: string;
+    };
     criado_em: Date;
 }
 

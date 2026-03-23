@@ -52,6 +52,13 @@ export class WhatsAppController {
         return this.whatsappService.sendCheckInLinksToStudents(data.students);
     }
 
+    @Post('send-confirmacao-links')
+    @UseGuards(JwtAuthGuard)
+    async sendConfirmacaoLinks(@Body() data: SendCheckInLinksDto) {
+        console.log('Enviando mensagens de confirmação via WhatsApp para:', data.students.length, 'alunos');
+        return this.whatsappService.sendConfirmacaoToStudents(data.students);
+    }
+
     @Get('checkin/:token')
     async processCheckIn(@Param('token') token: string, @Query('student') studentId?: string) {
         console.log('Processando check-in via token:', token, 'para aluno:', studentId);
@@ -132,39 +139,39 @@ export class WhatsAppController {
     @Post('webhook-gupshup')
     async webhookGupshup(@Body() body: any) {
         const timestamp = new Date().toISOString();
-        
+
         console.log('\n' + '═'.repeat(80));
         console.log('📥 WEBHOOK GUPSHUP RECEBIDO');
         console.log('═'.repeat(80));
         console.log(`⏰ Timestamp: ${timestamp}`);
         console.log(`📄 Payload completo:`, JSON.stringify(body, null, 2));
-        
+
         // A Gupshup pode enviar diferentes tipos de eventos:
         // 1. Message status updates (delivered, read, failed)
         // 2. Inbound messages
         // 3. Template status updates
-        
+
         const type = body?.type || body?.payload?.type || 'unknown';
         const status = body?.payload?.payload?.gsId || body?.payload?.id || body?.messageId;
         const destination = body?.payload?.destination || body?.destination;
         const errorCode = body?.payload?.payload?.code || body?.errorCode;
         const errorMessage = body?.payload?.payload?.reason || body?.errorMessage;
-        
+
         console.log(`📊 Tipo de evento: ${type}`);
         console.log(`🆔 Message ID: ${status || 'N/A'}`);
         console.log(`📱 Destinatário: ${destination || 'N/A'}`);
-        
+
         if (errorCode || errorMessage) {
             console.log('❌ ERRO DETECTADO:');
             console.log(`   Código: ${errorCode || 'N/A'}`);
             console.log(`   Mensagem: ${errorMessage || 'N/A'}`);
         }
-        
+
         // Status específicos de entrega
         if (body?.payload?.type === 'message-event') {
             const eventType = body?.payload?.payload?.type;
             console.log(`📬 Status de entrega: ${eventType}`);
-            
+
             if (eventType === 'failed') {
                 console.log('🚨 MENSAGEM FALHOU NA ENTREGA!');
                 console.log(`   Motivo: ${body?.payload?.payload?.reason || 'Não especificado'}`);
@@ -176,14 +183,14 @@ export class WhatsAppController {
                 console.log('📤 Mensagem enviada (aguardando entrega)');
             }
         }
-        
+
         console.log('═'.repeat(80) + '\n');
-        
+
         // Retorna 200 OK para confirmar recebimento
-        return { 
-            status: 'received', 
+        return {
+            status: 'received',
             timestamp,
-            message: 'Webhook processado com sucesso' 
+            message: 'Webhook processado com sucesso',
         };
     }
 
@@ -194,16 +201,16 @@ export class WhatsAppController {
     @Get('webhook-gupshup')
     async webhookGupshupValidation(@Query() query: any) {
         console.log('📥 Validação de webhook Gupshup recebida:', query);
-        
+
         // Se a Gupshup enviar um challenge, retorna ele de volta
         if (query?.challenge) {
             return query.challenge;
         }
-        
-        return { 
-            status: 'ok', 
+
+        return {
+            status: 'ok',
             message: 'Webhook Gupshup endpoint ativo',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
         };
     }
 
@@ -215,7 +222,7 @@ export class WhatsAppController {
     @UseGuards(JwtAuthGuard)
     async diagnostico() {
         console.log('🔍 Executando diagnóstico completo do WhatsApp...');
-        
+
         const resultado: any = {
             timestamp: new Date().toISOString(),
             templates: null,
@@ -232,13 +239,11 @@ export class WhatsAppController {
         try {
             const templatesResult = await this.chatGuruService.listTemplates();
             resultado.templates = templatesResult;
-            
+
             if (templatesResult.success && templatesResult.templates) {
-                const templateConfigurado = process.env.GUPSHUP_TEMPLATE_NAME || 'template_iamcontrol_checkin_aluno';
-                const templateEncontrado = templatesResult.templates.find(
-                    (t: any) => t.elementName === templateConfigurado || t.name === templateConfigurado
-                );
-                
+                const templateConfigurado = process.env.GUPSHUP_TEMPLATE_NAME || 'template_iamcontrol_checkin';
+                const templateEncontrado = templatesResult.templates.find((t: any) => t.elementName === templateConfigurado || t.name === templateConfigurado);
+
                 if (!templateEncontrado) {
                     resultado.recomendacoes.push({
                         tipo: 'ERRO_CRITICO',

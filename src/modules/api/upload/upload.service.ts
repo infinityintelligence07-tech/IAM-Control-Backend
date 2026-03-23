@@ -685,7 +685,7 @@ export class UploadService {
         }
 
         if (statusNormalizado.includes('CONFIRMADO') || statusNormalizado.includes('CONFIRMACAO')) {
-            return EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
+            return EStatusAlunosTurmas.AGUARDANDO_CHECKIN;
         }
 
         return EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;

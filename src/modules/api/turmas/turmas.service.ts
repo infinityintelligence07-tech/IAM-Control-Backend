@@ -429,7 +429,7 @@ export class TurmasService {
                     alunos_confirmados_count:
                         turma.turmasAlunos?.filter(
                             (ta) =>
-                                ta.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO &&
+                                [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(ta.status_aluno_turma as EStatusAlunosTurmas) &&
                                 ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
                         ).length || 0,
                     pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
@@ -538,7 +538,7 @@ export class TurmasService {
                 alunos_confirmados_count:
                     turma.turmasAlunos?.filter(
                         (ta) =>
-                            ta.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO &&
+                            [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(ta.status_aluno_turma as EStatusAlunosTurmas) &&
                             ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
                     ).length || 0,
                 pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,

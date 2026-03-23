@@ -111,9 +111,8 @@ export class CreateTurmaDto {
     @IsNumber()
     capacidade_turma: number;
 
-    @IsOptional()
     @IsNumber()
-    meta?: number;
+    meta: number;
 
     @IsString()
     data_inicio: string;

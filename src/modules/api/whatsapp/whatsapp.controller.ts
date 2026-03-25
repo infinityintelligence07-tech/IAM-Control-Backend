@@ -139,6 +139,8 @@ export class WhatsAppController {
     @Post('webhook-gupshup')
     async webhookGupshup(@Body() body: any) {
         const timestamp = new Date().toISOString();
+        const event = this.chatGuruService.registerWebhookEvent(body);
+        const inboundProcessing = await this.whatsappService.processInboundConfirmacaoWebhook(body);
 
         console.log('\n' + '═'.repeat(80));
         console.log('📥 WEBHOOK GUPSHUP RECEBIDO');
@@ -151,15 +153,18 @@ export class WhatsAppController {
         // 2. Inbound messages
         // 3. Template status updates
 
-        const type = body?.type || body?.payload?.type || 'unknown';
-        const status = body?.payload?.payload?.gsId || body?.payload?.id || body?.messageId;
-        const destination = body?.payload?.destination || body?.destination;
-        const errorCode = body?.payload?.payload?.code || body?.errorCode;
-        const errorMessage = body?.payload?.payload?.reason || body?.errorMessage;
+        const type = event.eventType || 'unknown';
+        const status = event.messageId;
+        const destination = event.destination;
+        const errorCode = event.code;
+        const errorMessage = event.reason;
 
         console.log(`📊 Tipo de evento: ${type}`);
         console.log(`🆔 Message ID: ${status || 'N/A'}`);
         console.log(`📱 Destinatário: ${destination || 'N/A'}`);
+        if (inboundProcessing?.handled) {
+            console.log(`✅ Inbound de confirmação processado:`, JSON.stringify(inboundProcessing, null, 2));
+        }
 
         if (errorCode || errorMessage) {
             console.log('❌ ERRO DETECTADO:');
@@ -191,6 +196,12 @@ export class WhatsAppController {
             status: 'received',
             timestamp,
             message: 'Webhook processado com sucesso',
+            tracked: {
+                messageId: event.messageId,
+                deliveryStatus: event.deliveryStatus,
+                eventType: event.eventType,
+            },
+            inboundProcessing,
         };
     }
 
@@ -212,6 +223,35 @@ export class WhatsAppController {
             message: 'Webhook Gupshup endpoint ativo',
             timestamp: new Date().toISOString(),
         };
+    }
+
+    /**
+     * Consulta eventos de webhook recebidos para um messageId específico
+     * Útil para investigar "submitted" sem entrega e ver motivo de falha.
+     */
+    @Get('webhook-gupshup/status/:messageId')
+    @UseGuards(JwtAuthGuard)
+    async getWebhookStatusByMessageId(@Param('messageId') messageId: string) {
+        console.log('🔎 Consultando histórico de webhook para messageId:', messageId);
+        return this.chatGuruService.getWebhookEventsByMessageId(messageId);
+    }
+
+    /**
+     * Consulta histórico processado das respostas de confirmação (inbound)
+     * Filtros opcionais:
+     * - alunoTurmaId
+     * - phone
+     * - limit (1-500)
+     */
+    @Get('confirmacao-respostas')
+    @UseGuards(JwtAuthGuard)
+    async getConfirmacaoRespostas(@Query('alunoTurmaId') alunoTurmaId?: string, @Query('phone') phone?: string, @Query('limit') limit?: string) {
+        const parsedLimit = limit ? Number(limit) : undefined;
+        return this.whatsappService.getConfirmacaoInboundResponses({
+            alunoTurmaId,
+            phone,
+            limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+        });
     }
 
     /**

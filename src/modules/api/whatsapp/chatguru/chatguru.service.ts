@@ -16,6 +16,9 @@ export class ChatGuruService {
     private readonly gupshupAppName: string;
     private readonly gupshupSource: string;
     private readonly gupshupAppId: string;
+    private readonly webhookEventsByMessageId = new Map<string, any[]>();
+    private static readonly MAX_EVENTS_PER_MESSAGE = 20;
+    private static readonly MAX_TRACKED_MESSAGE_IDS = 500;
 
     constructor(
         private readonly http: HttpService,
@@ -1599,6 +1602,10 @@ export class ChatGuruService {
                 }
                 this.logger.log(`${'='.repeat(80)}\n`);
 
+                if (messageId) {
+                    this.trackMessageDeliveryInBackground(messageId, destination, templateId);
+                }
+
                 // Retorna sucesso mesmo que não tenha messageId (algumas APIs não retornam)
                 return {
                     success: true,
@@ -1693,6 +1700,7 @@ export class ChatGuruService {
                     success: true,
                     messageId,
                     status: response.data,
+                    analysis: this.extractStatusAnalysis(response.data),
                 };
             } catch (error: any) {
                 // Tenta endpoint alternativo
@@ -1717,19 +1725,28 @@ export class ChatGuruService {
                         success: true,
                         messageId,
                         status: response.data,
+                        analysis: this.extractStatusAnalysis(response.data),
                     };
                 } catch (altError: any) {
                     throw error; // Mantém o erro original
                 }
             }
         } catch (error: any) {
-            const errorMessage =
-                error?.response?.data?.message ||
-                error?.response?.data?.error ||
-                (typeof error?.response?.data === 'object' ? JSON.stringify(error?.response?.data) : error?.response?.data) ||
-                error.message;
+            const errorMessage = this.extractHumanReadableError(error);
             const statusCode = error?.response?.status;
             const errorData = error?.response?.data;
+            const endpointNotSupported = this.isUnsupportedStatusEndpoint(statusCode, errorData);
+
+            if (endpointNotSupported) {
+                this.logger.warn(`Consulta de status indisponivel para esta conta/mensagem (HTTP 404). messageId=${messageId}.`);
+                return {
+                    success: false,
+                    messageId,
+                    error: errorMessage,
+                    statusCode,
+                    statusEndpointUnsupported: true,
+                };
+            }
 
             this.logger.error(`\n${'X'.repeat(80)}`);
             this.logger.error(`❌ ERRO AO CONSULTAR STATUS DA MENSAGEM`);
@@ -1750,8 +1767,182 @@ export class ChatGuruService {
                 messageId,
                 error: errorMessage,
                 statusCode,
+                statusEndpointUnsupported: false,
             };
         }
+    }
+
+    registerWebhookEvent(body: any): any {
+        const timestamp = new Date().toISOString();
+        const payload = body?.payload?.payload || {};
+        const eventType = body?.payload?.type || body?.type || 'unknown';
+        const deliveryStatus = payload?.type || body?.status || 'unknown';
+        const messageId = payload?.gsId || body?.messageId || body?.payload?.id || null;
+        const destination = body?.payload?.destination || body?.destination || null;
+        const code = payload?.code || body?.errorCode || null;
+        const reason = payload?.reason || body?.errorMessage || null;
+
+        const event = {
+            timestamp,
+            eventType,
+            deliveryStatus,
+            messageId,
+            destination,
+            code,
+            reason,
+            raw: body,
+        };
+
+        if (messageId) {
+            const currentEvents = this.webhookEventsByMessageId.get(messageId) || [];
+            currentEvents.push(event);
+
+            // Mantém apenas os eventos mais recentes por mensagem
+            if (currentEvents.length > ChatGuruService.MAX_EVENTS_PER_MESSAGE) {
+                currentEvents.shift();
+            }
+
+            this.webhookEventsByMessageId.set(messageId, currentEvents);
+            this.pruneWebhookEventsCache();
+        }
+
+        return event;
+    }
+
+    getWebhookEventsByMessageId(messageId: string): any {
+        const events = this.webhookEventsByMessageId.get(messageId) || [];
+        const latestEvent = events.length > 0 ? events[events.length - 1] : null;
+
+        return {
+            success: true,
+            messageId,
+            found: events.length > 0,
+            totalEvents: events.length,
+            latestEvent,
+            events,
+        };
+    }
+
+    private pruneWebhookEventsCache(): void {
+        while (this.webhookEventsByMessageId.size > ChatGuruService.MAX_TRACKED_MESSAGE_IDS) {
+            const oldestKey = this.webhookEventsByMessageId.keys().next().value;
+            if (!oldestKey) {
+                break;
+            }
+            this.webhookEventsByMessageId.delete(oldestKey);
+        }
+    }
+
+    private extractStatusAnalysis(statusPayload: any): any {
+        const status = statusPayload?.status || statusPayload?.message?.status || statusPayload?.payload?.type || null;
+        const reason = statusPayload?.reason || statusPayload?.error?.reason || statusPayload?.payload?.reason || null;
+        const code = statusPayload?.code || statusPayload?.error?.code || statusPayload?.payload?.code || null;
+        const providerMessageId = statusPayload?.messageId || statusPayload?.id || statusPayload?.gsId || statusPayload?.payload?.gsId || null;
+
+        return {
+            status,
+            reason,
+            code,
+            providerMessageId,
+            isFinalStatus: ['delivered', 'read', 'failed', 'rejected'].includes(String(status).toLowerCase()),
+            hasFailure: ['failed', 'rejected', 'error'].includes(String(status).toLowerCase()) || Boolean(reason || code),
+        };
+    }
+
+    private extractHumanReadableError(error: any): string {
+        const candidates = [error?.response?.data?.message, error?.response?.data?.error, error?.response?.data?.description, error?.response?.data, error?.message];
+
+        for (const candidate of candidates) {
+            const parsed = this.stringifyErrorCandidate(candidate);
+            if (parsed) {
+                return parsed;
+            }
+        }
+
+        return 'Erro desconhecido ao consultar status da mensagem';
+    }
+
+    private stringifyErrorCandidate(value: any): string | null {
+        if (value === null || value === undefined) {
+            return null;
+        }
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return String(value);
+        }
+        if (typeof value === 'object') {
+            if (typeof value.message === 'string') {
+                return value.message;
+            }
+            if (value.message && typeof value.message === 'object') {
+                const nested = this.stringifyErrorCandidate(value.message);
+                if (nested) {
+                    return nested;
+                }
+            }
+            try {
+                return JSON.stringify(value);
+            } catch {
+                return String(value);
+            }
+        }
+        return String(value);
+    }
+
+    private isUnsupportedStatusEndpoint(statusCode: number | undefined, errorData: any): boolean {
+        if (statusCode !== 404) {
+            return false;
+        }
+        const text = this.stringifyErrorCandidate(errorData)?.toLowerCase() || '';
+        return text.includes('resource') && (text.includes('not their') || text.includes('not there'));
+    }
+
+    private trackMessageDeliveryInBackground(messageId: string, destination: string, templateId?: string): void {
+        if (!messageId) {
+            return;
+        }
+
+        void (async () => {
+            const maxAttempts = 6;
+            const delaysMs = [4000, 7000, 10000, 15000, 20000, 30000];
+
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                const delay = delaysMs[Math.min(attempt - 1, delaysMs.length - 1)];
+                await this.delay(delay);
+
+                const statusResult = await this.checkMessageStatus(messageId);
+                if (!statusResult?.success) {
+                    if (statusResult?.statusEndpointUnsupported) {
+                        this.logger.warn(`Rastreio interrompido: endpoint de status da Gupshup indisponivel para messageId ${messageId}.`);
+                        break;
+                    }
+                    this.logger.warn(
+                        `Tentativa ${attempt}/${maxAttempts} de rastreio falhou para messageId ${messageId}: ${statusResult?.error || 'erro desconhecido'}`,
+                    );
+                    continue;
+                }
+
+                const analysis = statusResult.analysis || this.extractStatusAnalysis(statusResult.status);
+                const finalStatus = (analysis?.status || '').toString().toLowerCase();
+
+                this.logger.log(
+                    `📡 Rastreio [${attempt}/${maxAttempts}] messageId=${messageId} destino=${destination} template=${templateId || 'N/A'} status=${analysis?.status || 'N/A'} reason=${analysis?.reason || 'N/A'} code=${analysis?.code || 'N/A'}`,
+                );
+
+                if (analysis?.isFinalStatus || analysis?.hasFailure) {
+                    if (analysis?.hasFailure) {
+                        this.logger.error(
+                            `❌ FALHA FINAL DE ENTREGA | messageId=${messageId} | destino=${destination} | status=${finalStatus || 'N/A'} | reason=${analysis?.reason || 'N/A'} | code=${analysis?.code || 'N/A'}`,
+                        );
+                    } else {
+                        this.logger.log(`✅ ENTREGA FINAL REGISTRADA | messageId=${messageId} | destino=${destination} | status=${finalStatus || 'N/A'}`);
+                    }
+                    break;
+                }
+            }
+        })();
     }
 
     /**
@@ -1889,25 +2080,10 @@ export class ChatGuruService {
 
             this.logger.log(`Iniciando processo de template para ${normalizedNumber}${contactName ? ` (${contactName})` : ''}`);
 
-            // Tenta criar o chat primeiro (sem mensagem inicial)
-            // Se falhar, continua mesmo assim - o template pode criar o chat automaticamente
-            let chatResult = null;
-            try {
-                chatResult = await this.createChat(normalizedNumber, contactName);
-                this.logger.log(`Chat criado com sucesso antes de enviar template`);
-                // Aguarda um pouco para o chat ser processado
-                await this.delay(2000);
-            } catch (chatError: any) {
-                // Se o erro for sobre mensagem inicial inválida ou chat já existe, continua
-                const errorMsg = chatError.message?.toLowerCase() || '';
-                if (errorMsg.includes('mensagem inicial inválida') || errorMsg.includes('já existe') || errorMsg.includes('already exists')) {
-                    this.logger.warn(`Não foi possível criar chat antes do template (pode já existir ou não ser necessário): ${chatError.message}`);
-                    // Continua mesmo assim - o template pode funcionar sem criar o chat primeiro
-                } else {
-                    // Para outros erros, loga mas continua
-                    this.logger.warn(`Erro ao criar chat antes do template: ${chatError.message}. Continuando mesmo assim...`);
-                }
-            }
+            // Não pré-cria chat antes do template.
+            // Em algumas contas, chat_add sem texto retorna 400 ("Mensagem inicial inválida")
+            // e gera erro falso no fluxo de template.
+            const chatResult = null;
 
             // Envia o template (pode criar o chat automaticamente se necessário)
             const templateResult = await this.sendTemplateMessage(normalizedNumber, templateId, templateParams, contactName);

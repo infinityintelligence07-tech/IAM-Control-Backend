@@ -30,6 +30,10 @@ export class WhatsAppService {
     private readonly CHECKIN_TEMPLATE_NAME: string;
 
     // Template de confirmação de presença (Gupshup): {{1}} Nome Treinamento, {{2}} Sigla - Edição, {{3}} Datas, {{4}} Endereço completo
+    // IDs informados para garantir envio no canal correto:
+    // - Facebook Template ID (numérico)
+    // - Gupshup Template ID (UUID)
+    private readonly CONFIRMACAO_TEMPLATE_ID_FACEBOOK = '922339827443422';
     private readonly CONFIRMACAO_TEMPLATE_ID_GUPSHUP = '0e791b97-a9c0-4f3b-993f-034f9ce437e2';
     private readonly CONFIRMACAO_TEMPLATE_NAME = 'template_iamcontrol_confirmacao_aluno';
 
@@ -39,6 +43,8 @@ export class WhatsAppService {
     // Facebook Template ID (pode funcionar melhor que o UUID)
     private readonly QRCODE_TEMPLATE_ID_FACEBOOK = '1187423773526893';
     private readonly QRCODE_TEMPLATE_NAME: string;
+    private readonly confirmacaoInboundResponses: any[] = [];
+    private static readonly MAX_CONFIRMACAO_INBOUND_TRACK = 1000;
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -502,12 +508,102 @@ Vamos Prosperar! 🙌`;
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
                 const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
 
-                let sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_NAME, templateParams, alunoNome);
+                // IMPORTANTE: Estrutura espelhada do check-in para maximizar taxa de entrega
+                // Ordem de tentativas:
+                // 1) Template configurado via env (ID/UUID ou nome)
+                // 2) UUID do template na Gupshup
+                // 3) Facebook Template ID
+                // 4) Nome padrão do template
+                let sendResult: any = { success: false };
+
+                const confirmacaoTemplateFromEnv = process.env.GUPSHUP_CONFIRMACAO_TEMPLATE_NAME;
+                if (
+                    confirmacaoTemplateFromEnv &&
+                    confirmacaoTemplateFromEnv !== this.CONFIRMACAO_TEMPLATE_ID_FACEBOOK &&
+                    confirmacaoTemplateFromEnv !== this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP &&
+                    confirmacaoTemplateFromEnv !== this.CONFIRMACAO_TEMPLATE_NAME
+                ) {
+                    console.log(`📋 Tentativa 1 (confirmação): usando template da variável de ambiente: ${confirmacaoTemplateFromEnv}`);
+                    sendResult = await this.sendTemplateMessage(phone, confirmacaoTemplateFromEnv, templateParams, alunoNome);
+                }
+
                 if (!sendResult.success) {
+                    console.log(`📋 Tentativa 2 (confirmação): usando UUID da Gupshup: ${this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP}`);
                     sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP, templateParams, alunoNome);
                 }
 
+                if (!sendResult.success) {
+                    console.log(`📋 Tentativa 3 (confirmação): usando Facebook Template ID: ${this.CONFIRMACAO_TEMPLATE_ID_FACEBOOK}`);
+                    sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_ID_FACEBOOK, templateParams, alunoNome);
+                }
+
+                if (!sendResult.success) {
+                    console.log(`📋 Tentativa 4 (confirmação): usando nome padrão do template: ${this.CONFIRMACAO_TEMPLATE_NAME}`);
+                    sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_NAME, templateParams, alunoNome);
+                }
+
                 if (sendResult.success) {
+                    const messageId = sendResult?.messageId;
+
+                    // Log estruturado por aluno para rastreabilidade operacional
+                    console.log(
+                        JSON.stringify(
+                            {
+                                event: 'confirmacao_template_enviado',
+                                alunoTurmaId: student.alunoTurmaId,
+                                alunoNome,
+                                telefone: phone,
+                                templateIdUsado: sendResult?.templateId || this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP,
+                                messageId: messageId || null,
+                                envioSuccess: !!sendResult.success,
+                            },
+                            null,
+                            2,
+                        ),
+                    );
+
+                    // Redundância igual ao modelo dos outros fluxos:
+                    // envia também a copy como mensagem livre no ChatGuru para histórico operacional.
+                    const confirmacaoMessage = this.generateConfirmacaoMessage(param1, param2, param3, param4);
+                    let redundancySuccess = false;
+                    let redundancyError: string | undefined;
+
+                    try {
+                        await new Promise((resolve) => setTimeout(resolve, 1000));
+                        const redundancyResult = await this.sendMessage(phone, confirmacaoMessage, alunoNome);
+                        if (redundancyResult.success) {
+                            redundancySuccess = true;
+                            console.log(`✅ Redundância de confirmação enviada com sucesso via ChatGuru (Z-API)`);
+                        } else {
+                            redundancyError = redundancyResult.error;
+                            console.warn(`⚠️ Redundância de confirmação falhou: ${redundancyError}`);
+                        }
+                    } catch (redundancyErrorException: any) {
+                        redundancyError = redundancyErrorException.message;
+                        console.warn(`⚠️ Exceção na redundância de confirmação: ${redundancyError}`);
+                    }
+
+                    if (!redundancySuccess && redundancyError) {
+                        console.warn(`⚠️ Template de confirmação enviado, mas redundância falhou para ${alunoNome}: ${redundancyError}`);
+                    }
+
+                    // Atualiza status operacional após aceite de envio do template.
+                    await this.uow.turmasAlunosRP.update({ id: student.alunoTurmaId }, { status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO });
+
+                    console.log(
+                        JSON.stringify(
+                            {
+                                event: 'confirmacao_status_atualizado',
+                                alunoTurmaId: student.alunoTurmaId,
+                                alunoNome,
+                                messageId: messageId || null,
+                                novoStatusAlunoTurma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+                            },
+                            null,
+                            2,
+                        ),
+                    );
+
                     results.sent++;
                 } else {
                     results.errors.push(`Erro ao enviar confirmação para ${alunoNome}: ${sendResult.error}`);
@@ -520,6 +616,128 @@ Vamos Prosperar! 🙌`;
 
         results.success = results.errors.length === 0;
         return results;
+    }
+
+    async processInboundConfirmacaoWebhook(body: any): Promise<any> {
+        const extracted = this.extractInboundReply(body);
+        if (!extracted.isInboundMessage) {
+            return {
+                handled: false,
+                reason: 'not_inbound_message',
+            };
+        }
+
+        const normalizedPhone = this.normalizePhone(extracted.phone);
+        if (!normalizedPhone) {
+            return {
+                handled: false,
+                reason: 'phone_not_found',
+                extracted,
+            };
+        }
+
+        const normalizedText = this.normalizeText(extracted.text || '');
+        const isPositiveConfirmation = this.isPositiveConfirmacaoReply(normalizedText);
+        const baseTrack = {
+            timestamp: new Date().toISOString(),
+            phone: normalizedPhone,
+            text: extracted.text || null,
+            normalizedText,
+            messageType: extracted.messageType,
+            isPositiveConfirmation,
+            action: isPositiveConfirmation ? 'CONFIRMOU_PRESENCA' : 'IGNORADO',
+            alunoTurmaId: null as string | null,
+            alunoNome: null as string | null,
+            statusBefore: null as string | null,
+            statusAfter: null as string | null,
+            checkinDispatch: null as any,
+            reason: null as string | null,
+        };
+
+        if (!isPositiveConfirmation) {
+            baseTrack.reason = 'message_not_mapped_to_positive_confirmation';
+            this.pushConfirmacaoInboundTrack(baseTrack);
+            return {
+                handled: false,
+                reason: baseTrack.reason,
+                track: baseTrack,
+            };
+        }
+
+        const alunoTurma = await this.findLatestPendingConfirmacaoByPhone(normalizedPhone);
+        if (!alunoTurma || !alunoTurma.id_aluno_fk || !alunoTurma.id_turma_fk) {
+            baseTrack.reason = 'pending_confirmacao_not_found_for_phone';
+            this.pushConfirmacaoInboundTrack(baseTrack);
+            return {
+                handled: false,
+                reason: baseTrack.reason,
+                track: baseTrack,
+            };
+        }
+
+        const alunoNome = alunoTurma.id_aluno_fk.nome || 'Aluno';
+        const treinamentoNome = alunoTurma.id_turma_fk?.id_treinamento_fk?.treinamento || 'Treinamento';
+        const turmaId = alunoTurma.id_turma_fk.id;
+        const alunoTurmaId = alunoTurma.id;
+
+        await this.uow.turmasAlunosRP.update({ id: alunoTurmaId }, { status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN });
+
+        const checkinDispatch = await this.sendCheckInLinksToStudents([
+            {
+                alunoTurmaId,
+                alunoNome,
+                turmaId,
+                treinamentoNome,
+            },
+        ]);
+
+        const finalTrack = {
+            ...baseTrack,
+            alunoTurmaId,
+            alunoNome,
+            statusBefore: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+            statusAfter: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+            checkinDispatch,
+            reason: checkinDispatch?.success ? 'checkin_sent' : 'checkin_dispatch_failed',
+        };
+
+        this.pushConfirmacaoInboundTrack(finalTrack);
+
+        return {
+            handled: true,
+            action: 'CONFIRMOU_PRESENCA',
+            alunoTurmaId,
+            alunoNome,
+            novoStatusAlunoTurma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+            checkinDispatch,
+            track: finalTrack,
+        };
+    }
+
+    getConfirmacaoInboundResponses(filters?: { alunoTurmaId?: string; phone?: string; limit?: number }): any {
+        const alunoTurmaId = filters?.alunoTurmaId?.trim();
+        const normalizedPhone = this.normalizePhone(filters?.phone);
+        const limit = Math.max(1, Math.min(filters?.limit || 50, 500));
+
+        const items = this.confirmacaoInboundResponses
+            .filter((item) => {
+                if (alunoTurmaId && item.alunoTurmaId !== alunoTurmaId) return false;
+                if (normalizedPhone && item.phone !== normalizedPhone) return false;
+                return true;
+            })
+            .slice(0, limit);
+
+        return {
+            success: true,
+            totalTracked: this.confirmacaoInboundResponses.length,
+            returned: items.length,
+            filters: {
+                alunoTurmaId: alunoTurmaId || null,
+                phone: normalizedPhone || null,
+                limit,
+            },
+            items,
+        };
     }
 
     /**
@@ -1465,6 +1683,106 @@ Vamos Prosperar! 🙌`;
 • Salve esta imagem
 • Use na próxima vez para credenciamento rápido
 • Apresente na entrada do evento`;
+    }
+
+    /**
+     * Gera a copy de confirmação no mesmo conteúdo do template aprovado.
+     */
+    private generateConfirmacaoMessage(treinamentoNome: string, siglaEdicao: string, datas: string, localCompleto: string): string {
+        return `O *${treinamentoNome}* já está chegando… ✨
+
+E preciso confirmar algo rápido com você.
+
+Quem decide prosperar de verdade também assume compromisso com os próximos passos da própria vida.
+
+Você estará presente na *${siglaEdicao}*, que ocorrerá nos dias *${datas}*?
+
+📌*LOCAL*: ${localCompleto}
+
+Sua resposta é muito importante para a organização do evento. 🙏`;
+    }
+
+    private pushConfirmacaoInboundTrack(track: any): void {
+        this.confirmacaoInboundResponses.unshift(track);
+        if (this.confirmacaoInboundResponses.length > WhatsAppService.MAX_CONFIRMACAO_INBOUND_TRACK) {
+            this.confirmacaoInboundResponses.length = WhatsAppService.MAX_CONFIRMACAO_INBOUND_TRACK;
+        }
+    }
+
+    private extractInboundReply(body: any): { isInboundMessage: boolean; phone: string | null; text: string | null; messageType: string } {
+        const payload = body?.payload?.payload || {};
+        const topType = String(body?.payload?.type || body?.type || '').toLowerCase();
+        const innerType = String(payload?.type || '').toLowerCase();
+
+        const phoneCandidate = body?.payload?.source || payload?.source || payload?.sender?.phone || payload?.sender?.id || body?.source || body?.from || null;
+
+        const textCandidate =
+            payload?.text ||
+            payload?.title ||
+            payload?.postbackText ||
+            payload?.payload?.text ||
+            body?.text ||
+            body?.message ||
+            body?.buttonText ||
+            body?.interactive?.button_reply?.title ||
+            body?.interactive?.list_reply?.title ||
+            null;
+
+        const isInboundMessage =
+            topType === 'message' || ['text', 'button_reply', 'interactive', 'list_reply'].includes(innerType) || Boolean(textCandidate && phoneCandidate);
+
+        return {
+            isInboundMessage,
+            phone: this.normalizePhone(phoneCandidate),
+            text: typeof textCandidate === 'string' ? textCandidate : null,
+            messageType: innerType || topType || 'unknown',
+        };
+    }
+
+    private normalizeText(text: string): string {
+        return String(text || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+    }
+
+    private normalizePhone(phone: any): string | null {
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (!digits) return null;
+        return digits.startsWith('55') ? digits : `55${digits}`;
+    }
+
+    private buildPhoneCandidates(normalizedPhone: string): string[] {
+        const digits = String(normalizedPhone || '').replace(/\D/g, '');
+        if (!digits) return [];
+        const noCountry = digits.startsWith('55') ? digits.substring(2) : digits;
+        const candidates = new Set<string>([digits, noCountry, `55${noCountry}`]);
+        return Array.from(candidates).filter(Boolean);
+    }
+
+    private isPositiveConfirmacaoReply(normalizedText: string): boolean {
+        if (!normalizedText) return false;
+        return normalizedText.includes('sim estarei presente') || normalizedText.includes('sim estou presente') || normalizedText.includes('sim confirmar');
+    }
+
+    private async findLatestPendingConfirmacaoByPhone(normalizedPhone: string): Promise<any> {
+        const phoneCandidates = this.buildPhoneCandidates(normalizedPhone);
+        if (phoneCandidates.length === 0) {
+            return null;
+        }
+
+        return this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoinAndSelect('ta.id_aluno_fk', 'aluno')
+            .leftJoinAndSelect('ta.id_turma_fk', 'turma')
+            .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+            .where('ta.status_aluno_turma = :status', { status: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO })
+            .andWhere(`regexp_replace(aluno.telefone_um, '[^0-9]', '', 'g') IN (:...phones)`, { phones: phoneCandidates })
+            .orderBy('ta.atualizado_em', 'DESC')
+            .addOrderBy('ta.id', 'DESC')
+            .getOne();
     }
 
     //     private generateCheckInMessage(alunoNome: string, treinamentoNome: string, checkInUrl: string, local?: string, data?: string): string {

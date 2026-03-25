@@ -362,6 +362,8 @@ export class TurmaResponseDto {
     };
     alunos_count?: number;
     alunos_confirmados_count?: number;
+    transferidos_count?: number;
+    vindos_transferencia_count?: number;
     pre_cadastrados_count?: number;
     presentes_count?: number;
     inadimplentes_count?: number;

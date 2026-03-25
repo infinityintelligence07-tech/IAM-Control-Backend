@@ -46,6 +46,20 @@ export class TurmasService {
         };
     }
 
+    private isAlunoTransferidoDaTurma(turmaAluno: any): boolean {
+        return turmaAluno?.id_turma_transferencia_para !== null && turmaAluno?.id_turma_transferencia_para !== undefined;
+    }
+
+    private isAlunoConfirmadoNaTurma(turmaAluno: any): boolean {
+        if (!turmaAluno) return false;
+        if (this.isAlunoTransferidoDaTurma(turmaAluno)) return false;
+
+        return (
+            [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas) &&
+            turmaAluno.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE
+        );
+    }
+
     /**
      * Formatar data para o formato YYYY-MM-DD (apenas data, sem hora)
      */
@@ -427,10 +441,12 @@ export class TurmasService {
                         return turma.turmasAlunos?.length || 0;
                     })(),
                     alunos_confirmados_count:
+                        turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
+                    transferidos_count: turma.turmasAlunos?.filter((ta) => this.isAlunoTransferidoDaTurma(ta)).length || 0,
+                    vindos_transferencia_count:
                         turma.turmasAlunos?.filter(
                             (ta) =>
-                                [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(ta.status_aluno_turma as EStatusAlunosTurmas) &&
-                                ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
+                                ta.origem_aluno === EOrigemAlunos.TRANSFERENCIA && ta.id_turma_transferencia_de !== null && ta.id_turma_transferencia_de !== undefined,
                         ).length || 0,
                     pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
                     presentes_count:
@@ -536,10 +552,12 @@ export class TurmasService {
                     return turma.turmasAlunos?.length || 0;
                 })(),
                 alunos_confirmados_count:
+                    turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
+                transferidos_count: turma.turmasAlunos?.filter((ta) => this.isAlunoTransferidoDaTurma(ta)).length || 0,
+                vindos_transferencia_count:
                     turma.turmasAlunos?.filter(
                         (ta) =>
-                            [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(ta.status_aluno_turma as EStatusAlunosTurmas) &&
-                            ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
+                            ta.origem_aluno === EOrigemAlunos.TRANSFERENCIA && ta.id_turma_transferencia_de !== null && ta.id_turma_transferencia_de !== undefined,
                     ).length || 0,
                 pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
                 presentes_count:
@@ -1759,25 +1777,36 @@ export class TurmasService {
         const jaNaTurmaDestino = await this.uow.turmasAlunosRP.findOne({
             where: { id_turma: id_turma_destino, id_aluno: turmaAlunoOrigem.id_aluno, deletado_em: null },
         });
-        if (jaNaTurmaDestino) throw new BadRequestException('Aluno já está na turma de destino');
-
-        const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
         const nomeCracha = turmaAlunoOrigem.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome || 'Aluno';
 
+        // Aluno permanece na turma de origem, mas deixa de ser confirmado nela e passa a ser contabilizado como transferido.
         turmaAlunoOrigem.id_turma_transferencia_para = id_turma_destino;
+        turmaAlunoOrigem.status_aluno_turma = EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO;
+        turmaAlunoOrigem.presenca_turma = null;
         await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
 
-        const turmaAlunoDestino = this.uow.turmasAlunosRP.create({
-            id_turma: id_turma_destino,
-            id_aluno: turmaAlunoOrigem.id_aluno,
-            nome_cracha: nomeCracha,
-            numero_cracha: numeroCracha,
-            vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
-            origem_aluno: EOrigemAlunos.TRANSFERENCIA,
-            status_aluno_turma: turmaAlunoOrigem.status_aluno_turma ?? EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
-            id_turma_transferencia_de: turmaOrigem.id,
-        });
-        const turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
+        let turmaAlunoDestinoSalvo: any;
+        if (jaNaTurmaDestino) {
+            // Se já existir vínculo na turma destino, reaproveita-o e marca como vindo de transferência.
+            jaNaTurmaDestino.origem_aluno = EOrigemAlunos.TRANSFERENCIA;
+            jaNaTurmaDestino.id_turma_transferencia_de = turmaOrigem.id;
+            jaNaTurmaDestino.nome_cracha = jaNaTurmaDestino.nome_cracha || nomeCracha;
+            jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO;
+            turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(jaNaTurmaDestino);
+        } else {
+            const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
+            const turmaAlunoDestino = this.uow.turmasAlunosRP.create({
+                id_turma: id_turma_destino,
+                id_aluno: turmaAlunoOrigem.id_aluno,
+                nome_cracha: nomeCracha,
+                numero_cracha: numeroCracha,
+                vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
+                origem_aluno: EOrigemAlunos.TRANSFERENCIA,
+                status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+                id_turma_transferencia_de: turmaOrigem.id,
+            });
+            turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
+        }
 
         const historico = this.uow.historicoTransferenciasRP.create({
             id_aluno: idAluno,

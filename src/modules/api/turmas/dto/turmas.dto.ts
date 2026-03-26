@@ -441,6 +441,7 @@ export class HistoricoTransferenciaItemDto {
     id_aluno: number;
     id_turma_de: number;
     id_turma_para: number;
+    origem_label?: string;
     turma_de: {
         id: number;
         edicao_turma?: string;

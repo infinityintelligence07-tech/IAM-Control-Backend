@@ -860,6 +860,7 @@ export class TurmasService {
             presenca_turma: string | null;
             criado_em: Date;
             tipo: 'palestra' | 'treinamento';
+            origem_label?: string;
             turma: {
                 id: number;
                 nome_evento: string;
@@ -991,30 +992,68 @@ export class TurmasService {
             };
 
             // Mapear turmas normais
+            const historicoTimeVendas = await this.uow.historicoTransferenciasRP.find({
+                where: {
+                    id_aluno,
+                },
+            });
+            const historicoTimeVendasByTurmaAluno = new Map<string, Date>();
+            historicoTimeVendas.forEach((h) => {
+                if (
+                    h.id_turma_aluno_para &&
+                    h.id_turma_de === h.id_turma_para
+                ) {
+                    historicoTimeVendasByTurmaAluno.set(
+                        String(h.id_turma_aluno_para),
+                        h.criado_em,
+                    );
+                }
+            });
+
             const trilhaTurmas = turmasAluno.map((ta) => {
                 const turma = ta.id_turma_fk;
                 const treinamento = turma?.id_treinamento_fk;
                 const polo = turma?.id_polo_fk;
+                const origemTimeVendasData = historicoTimeVendasByTurmaAluno.get(
+                    String(ta.id),
+                );
+                const isTimeVendas = Boolean(origemTimeVendasData);
 
                 const localParts: string[] = [];
-                if (turma?.cidade) localParts.push(turma.cidade);
-                if (turma?.estado) localParts.push(turma.estado);
+                if (isTimeVendas) {
+                    localParts.push('Americana');
+                } else {
+                    if (turma?.cidade) localParts.push(turma.cidade);
+                    if (turma?.estado) localParts.push(turma.estado);
+                }
                 const local = localParts.join(' - ');
+                const dataEventoOrigem = origemTimeVendasData
+                    ? origemTimeVendasData.toISOString().split('T')[0]
+                    : '';
 
                 return {
                     id_turma_aluno: ta.id,
-                    status_aluno_turma: ta.status_aluno_turma || null,
+                    status_aluno_turma: isTimeVendas
+                        ? EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO
+                        : ta.status_aluno_turma || null,
                     presenca_turma: ta.presenca_turma || null,
-                    criado_em: ta.criado_em,
+                    criado_em: origemTimeVendasData || ta.criado_em,
                     tipo: determinarTipo(treinamento),
+                    origem_label: isTimeVendas ? 'Time de Vendas - IAM' : undefined,
                     turma: {
                         id: turma?.id || 0,
-                        nome_evento: treinamento?.treinamento || '',
+                        nome_evento: isTimeVendas
+                            ? 'Time de Vendas - IAM'
+                            : treinamento?.treinamento || '',
                         sigla_evento: treinamento?.sigla_treinamento || treinamento?.treinamento || '',
                         edicao_turma: turma?.edicao_turma || undefined,
                         local,
-                        data_inicio: turma?.data_inicio || '',
-                        data_final: turma?.data_final || '',
+                        data_inicio: isTimeVendas
+                            ? dataEventoOrigem
+                            : turma?.data_inicio || '',
+                        data_final: isTimeVendas
+                            ? dataEventoOrigem
+                            : turma?.data_final || '',
                         polo: polo
                             ? {
                                   nome: polo.polo,
@@ -1869,6 +1908,7 @@ export class TurmasService {
             id_aluno: h.id_aluno,
             id_turma_de: h.id_turma_de,
             id_turma_para: h.id_turma_para,
+            origem_label: h.id_turma_de === h.id_turma_para ? 'Time de Vendas IAM' : undefined,
             turma_de: {
                 id: h.id_turma_de_fk?.id ?? h.id_turma_de,
                 edicao_turma: h.id_turma_de_fk?.edicao_turma,

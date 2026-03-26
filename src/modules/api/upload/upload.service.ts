@@ -7,7 +7,7 @@ import { google } from 'googleapis';
 import * as XLSX from 'xlsx';
 import { ILike, In } from 'typeorm';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
-import { EOrigemAlunos, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
+import { EOrigemAlunos, EStatusAlunosTurmas, ETipoVinculoAluno } from '@/modules/config/entities/enum';
 
 /** Pasta "Alunos" no Drive: https://drive.google.com/drive/u/0/folders/1wF3z55eRG937fI3O5MXNNPP8nTUws3uD */
 const DRIVE_FOLDER_ALUNOS_ID = '1wF3z55eRG937fI3O5MXNNPP8nTUws3uD';
@@ -17,11 +17,18 @@ type ImportActionType = 'CRIAR' | 'ATUALIZAR' | 'IGNORAR';
 interface ImportPreviewItem {
     linha: number;
     nome_cracha: string;
+    nome?: string;
+    cpf_cnpj?: string;
     email: string;
     telefone: string;
+    turma_origem_codigo?: string;
+    turma_origem_descricao?: string;
+    turma_destino_codigo?: string;
     email_gerado_automaticamente: boolean;
     acao: ImportActionType;
     turma_destino_id: number;
+    quantidade_bonus?: number;
+    data_inclusao?: string;
     status_planilha: string;
     status_final: EStatusAlunosTurmas;
     origem_final: EOrigemAlunos;
@@ -207,6 +214,13 @@ export class UploadService {
                 deletado_em: null,
             },
         });
+        const turmaJuridico = await this.uow.turmasRP.findOne({
+            where: {
+                id_treinamento: turmaSelecionada.id_treinamento,
+                edicao_turma: ILike('JURIDICO'),
+                deletado_em: null,
+            },
+        });
         const turmaInadimplente = await this.uow.turmasRP.findOne({
             where: {
                 id_treinamento: turmaSelecionada.id_treinamento,
@@ -214,12 +228,6 @@ export class UploadService {
                 deletado_em: null,
             },
         });
-
-        if (!turmaSemTurma) {
-            throw new BadRequestException(
-                `Não foi encontrada edição SEM_TURMA para o treinamento ${turmaSelecionada.id_treinamento}. Cadastre a turma SEM_TURMA antes de importar.`,
-            );
-        }
 
         const rows = this.parseXlsxRows(file.buffer);
         const parsed = this.parseSpreadsheetRows(rows);
@@ -282,10 +290,66 @@ export class UploadService {
             const obsNormalizada = this.normalizeText(row.obs);
             const statusAlunoTurma = this.mapStatusToAlunoTurma(statusNormalizado);
             const enviarParaInadimplente = statusNormalizado.includes('NEGATIVADO') || statusNormalizado.includes('NEGATIVACAO');
-            const enviarParaSemTurma = statusNormalizado.includes('EXCLUIR') || statusNormalizado.includes('CANCELADO');
+            const enviarParaJuridico = statusNormalizado.includes('CANCELADO');
+            const enviarParaSemTurma = statusNormalizado.includes('EXCLUIR');
+            const isTransferenciaPorStatus = statusNormalizado.includes('TRANSFER');
             let idTurmaDestino = turmaSelecionada.id;
+            let idTurmaTransferenciaDeByStatus: number | null = null;
 
-            if (enviarParaInadimplente) {
+            if (isTransferenciaPorStatus) {
+                const codigoTransferenciaRaw = (row.turmaTransferenciaDestino || '').trim();
+                const codigoTransferencia = this.normalizeCodeKey(codigoTransferenciaRaw);
+                if (!codigoTransferenciaRaw) {
+                    erros.push(`Linha ${row.linha}: status "${row.status}" exige turma de destino na coluna de transferência.`);
+                    preview.push({
+                        linha: row.linha,
+                        nome_cracha: row.nome || '',
+                        email: emailNormalizado,
+                        telefone: telefoneNormalizado,
+                        email_gerado_automaticamente: emailGeradoAutomaticamente,
+                        acao: 'IGNORAR',
+                        turma_destino_id: idTurmaSelecionada,
+                        status_planilha: row.status || '',
+                        status_final: statusAlunoTurma,
+                        origem_final: EOrigemAlunos.TRANSFERENCIA,
+                    });
+                    continue;
+                }
+
+                let turmaDestinoTransferenciaId = origemTurmaMap.get(codigoTransferencia) || null;
+                if (!turmaDestinoTransferenciaId) {
+                    const turmaPorEdicao = await this.uow.turmasRP.findOne({
+                        where: {
+                            id_treinamento: turmaSelecionada.id_treinamento,
+                            edicao_turma: ILike(codigoTransferenciaRaw),
+                            deletado_em: null,
+                        },
+                    });
+                    turmaDestinoTransferenciaId = turmaPorEdicao?.id || null;
+                }
+
+                if (!turmaDestinoTransferenciaId) {
+                    erros.push(
+                        `Linha ${row.linha}: turma de transferência "${codigoTransferenciaRaw}" não encontrada para o treinamento ${turmaSelecionada.id_treinamento}.`,
+                    );
+                    preview.push({
+                        linha: row.linha,
+                        nome_cracha: row.nome || '',
+                        email: emailNormalizado,
+                        telefone: telefoneNormalizado,
+                        email_gerado_automaticamente: emailGeradoAutomaticamente,
+                        acao: 'IGNORAR',
+                        turma_destino_id: idTurmaSelecionada,
+                        status_planilha: row.status || '',
+                        status_final: statusAlunoTurma,
+                        origem_final: EOrigemAlunos.TRANSFERENCIA,
+                    });
+                    continue;
+                }
+
+                idTurmaDestino = turmaDestinoTransferenciaId;
+                idTurmaTransferenciaDeByStatus = turmaSelecionada.id;
+            } else if (enviarParaInadimplente) {
                 if (!turmaInadimplente) {
                     erros.push(
                         `Linha ${row.linha}: status "${row.status}" exige turma INADIMPLENTE para o treinamento ${turmaSelecionada.id_treinamento}, mas ela não foi encontrada.`,
@@ -306,7 +370,45 @@ export class UploadService {
                 }
 
                 idTurmaDestino = turmaInadimplente.id;
+            } else if (enviarParaJuridico) {
+                if (!turmaJuridico) {
+                    erros.push(
+                        `Linha ${row.linha}: status "${row.status}" exige turma JURIDICO para o treinamento ${turmaSelecionada.id_treinamento}, mas ela não foi encontrada.`,
+                    );
+                    preview.push({
+                        linha: row.linha,
+                        nome_cracha: row.nome || '',
+                        email: emailNormalizado,
+                        telefone: telefoneNormalizado,
+                        email_gerado_automaticamente: emailGeradoAutomaticamente,
+                        acao: 'IGNORAR',
+                        turma_destino_id: idTurmaSelecionada,
+                        status_planilha: row.status || '',
+                        status_final: statusAlunoTurma,
+                        origem_final: EOrigemAlunos.COMPROU_INGRESSO,
+                    });
+                    continue;
+                }
+                idTurmaDestino = turmaJuridico.id;
             } else if (enviarParaSemTurma) {
+                if (!turmaSemTurma) {
+                    erros.push(
+                        `Linha ${row.linha}: status "${row.status}" exige turma SEM_TURMA para o treinamento ${turmaSelecionada.id_treinamento}, mas ela não foi encontrada.`,
+                    );
+                    preview.push({
+                        linha: row.linha,
+                        nome_cracha: row.nome || '',
+                        email: emailNormalizado,
+                        telefone: telefoneNormalizado,
+                        email_gerado_automaticamente: emailGeradoAutomaticamente,
+                        acao: 'IGNORAR',
+                        turma_destino_id: idTurmaSelecionada,
+                        status_planilha: row.status || '',
+                        status_final: statusAlunoTurma,
+                        origem_final: EOrigemAlunos.COMPROU_INGRESSO,
+                    });
+                    continue;
+                }
                 idTurmaDestino = turmaSemTurma.id;
             }
 
@@ -315,15 +417,20 @@ export class UploadService {
             }
 
             const codigoTurmaOrigem = this.extractCodigoTurmaOrigem(row.obs);
-            const isBonus = obsNormalizada.includes('BONUS');
-            const origemAluno = this.mapOrigemAluno({
+            const isBonus = row.isBonus || obsNormalizada.includes('BONUS');
+            let origemAluno = this.mapOrigemAluno({
                 isBonus,
                 codigoTurmaOrigem,
                 occurrence: nextOccurrence,
             });
+            if (isTransferenciaPorStatus) {
+                origemAluno = EOrigemAlunos.TRANSFERENCIA;
+            }
 
             let idTurmaTransferenciaDe: number | null = null;
-            if (codigoTurmaOrigem) {
+            if (idTurmaTransferenciaDeByStatus) {
+                idTurmaTransferenciaDe = idTurmaTransferenciaDeByStatus;
+            } else if (codigoTurmaOrigem) {
                 idTurmaTransferenciaDe = origemTurmaMap.get(codigoTurmaOrigem) || null;
                 if (!idTurmaTransferenciaDe) {
                     avisos.push(`Linha ${row.linha}: código de turma de origem "${codigoTurmaOrigem}" não encontrado no cadastro.`);
@@ -387,11 +494,12 @@ export class UploadService {
         }
 
         const idsAlunosExistentes = Array.from(new Set(Array.from(alunoByEmail.values()).map((aluno) => String(aluno.id))));
+        const turmaIdsDestino = Array.from(new Set(candidates.map((c) => c.turmaDestinoId)));
         const vinculosExistentes =
-            idsAlunosExistentes.length > 0
+            idsAlunosExistentes.length > 0 && turmaIdsDestino.length > 0
                 ? await this.uow.turmasAlunosRP.find({
                       where: {
-                          id_turma: In([turmaSelecionada.id, turmaSemTurma.id]),
+                          id_turma: In(turmaIdsDestino),
                           id_aluno: In(idsAlunosExistentes),
                           deletado_em: null,
                       },
@@ -403,13 +511,15 @@ export class UploadService {
         );
         const runtimeVinculoKeys = new Set(vinculosExistentes.map((v) => `${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`));
 
-        const numerosCrachaExistentes = await this.uow.turmasAlunosRP.find({
-            where: {
-                id_turma: In([turmaSelecionada.id, turmaSemTurma.id]),
-                deletado_em: null,
-            },
-            select: ['id_turma', 'numero_cracha'],
-        });
+        const numerosCrachaExistentes = turmaIdsDestino.length
+            ? await this.uow.turmasAlunosRP.find({
+                  where: {
+                      id_turma: In(turmaIdsDestino),
+                      deletado_em: null,
+                  },
+                  select: ['id_turma', 'numero_cracha'],
+              })
+            : [];
         const crachaSetByTurma = new Map<number, Set<string>>();
         for (const row of numerosCrachaExistentes) {
             const keyTurma = row.id_turma;
@@ -486,7 +596,11 @@ export class UploadService {
                     if (!crachaSetByTurma.has(item.turmaDestinoId)) {
                         crachaSetByTurma.set(item.turmaDestinoId, new Set());
                     }
-                    const numeroCracha = this.generateCrachaNumberFromSet(crachaSetByTurma.get(item.turmaDestinoId)!);
+                    const crachaSet = crachaSetByTurma.get(item.turmaDestinoId);
+                    if (!crachaSet) {
+                        throw new Error(`Não foi possível obter controle de crachá para turma ${item.turmaDestinoId}`);
+                    }
+                    const numeroCracha = this.generateCrachaNumberFromSet(crachaSet);
                     createsToSave.push({
                         id_turma: item.turmaDestinoId,
                         id_aluno: String(aluno.id),
@@ -549,7 +663,7 @@ export class UploadService {
         const acaoFinal = confirmar ? 'processado(s)' : 'pronto(s) para processamento';
 
         return {
-            message: `${tituloModo}. ${totalProcessadas} vínculo(s) ${acaoFinal}, ${totalSemTurma} enviado(s) para SEM_TURMA.`,
+            message: `${tituloModo}. ${totalProcessadas} vínculo(s) ${acaoFinal}, ${totalSemTurma} enviado(s) para SEM_TURMA por status EXCLUIR.`,
             total_linhas: parsed.length,
             total_processadas: totalProcessadas,
             total_criadas: totalCriadas,
@@ -561,6 +675,458 @@ export class UploadService {
             exige_confirmacao: !confirmar,
             confirmado: confirmar,
             preview: previewLimit,
+            tempo_total_ms: Date.now() - startedAt,
+            lotes_executados: lotesAlunosCriados + lotesVinculosAtualizados + lotesVinculosCriados,
+            lotes_detalhe: {
+                alunos_criados: lotesAlunosCriados,
+                vinculos_atualizados: lotesVinculosAtualizados,
+                vinculos_criados: lotesVinculosCriados,
+            },
+        };
+    }
+
+    async importarAlunosMasterclassPlanilha(file: Express.Multer.File, confirmar = false): Promise<ImportarAlunosPlanilhaResponse> {
+        const startedAt = Date.now();
+        const alunosChunkSize = 300;
+        const vinculosChunkSize = 250;
+        let lotesAlunosCriados = 0;
+        let lotesVinculosAtualizados = 0;
+        let lotesVinculosCriados = 0;
+
+        if (!file?.buffer) {
+            throw new BadRequestException('Arquivo inválido');
+        }
+
+        const allowed = ['.xls', '.xlsx'];
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        if (!allowed.includes(ext)) {
+            throw new BadRequestException('Formato inválido. Envie um arquivo .xls ou .xlsx');
+        }
+
+        const rows = this.parseXlsxRows(file.buffer);
+        const parsedRows = this.parseMasterclassSpreadsheetRows(rows);
+        const turmaCodigoMap = await this.buildTurmaCodigoMap();
+
+        const erros: string[] = [];
+        const avisos: string[] = [];
+        const preview: ImportPreviewItem[] = [];
+        let totalCriadas = 0;
+        let totalAtualizadas = 0;
+        let totalSemTurma = 0;
+        const occurrenceByPessoa = new Map<string, number>();
+
+        const candidates: Array<{
+            linha: number;
+            nomeOriginal: string;
+            nomeCracha: string;
+            cpfCnpj: string;
+            email: string;
+            titularEmail: string;
+            emailGeradoAutomaticamente: boolean;
+            telefone: string;
+            turmaDestinoId: number;
+            turmaDestinoCodigo: string;
+            turmaOrigemCodigo: string;
+            turmaOrigemDescricao: string;
+            dataInclusao: string;
+            quantidadeBonus: number;
+            isTimeDeVendas: boolean;
+            isBonusEntry: boolean;
+            statusPlanilha: string;
+            statusFinal: EStatusAlunosTurmas;
+            origemFinal: EOrigemAlunos;
+            idTurmaTransferenciaDe: number | null;
+        }> = [];
+
+        for (const row of parsedRows) {
+            const nomeNormalizado = this.normalizeText(row.nome);
+            const telefoneNormalizado = this.normalizePhone(row.telefone);
+            const emailNormalizadoRaw = this.normalizeEmail(row.email);
+            const emailNormalizado = emailNormalizadoRaw || this.buildFallbackEmail(row.nome || '', telefoneNormalizado);
+            const emailGeradoAutomaticamente = !emailNormalizadoRaw;
+
+            if (!nomeNormalizado) {
+                erros.push(`Linha ${row.linha}: nome não informado`);
+                continue;
+            }
+
+            if (!telefoneNormalizado && !emailNormalizadoRaw) {
+                erros.push(`Linha ${row.linha}: informe pelo menos telefone ou e-mail válido`);
+                continue;
+            }
+
+            const codigoDestino = this.normalizeText(row.turmaDestinoCodigo).replace(/\s+/g, '_');
+            const turmaDestinoId = turmaCodigoMap.get(codigoDestino);
+            if (!turmaDestinoId) {
+                totalSemTurma++;
+                erros.push(`Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" não encontrada`);
+                continue;
+            }
+
+            const codigoOrigem = this.normalizeText(row.turmaOrigemCodigo).replace(/\s+/g, '_');
+            const origemVenda = codigoOrigem.includes('TIME_DE_VENDAS');
+            const idTurmaTransferenciaDe = origemVenda ? null : turmaCodigoMap.get(codigoOrigem) || null;
+            if (!origemVenda && !idTurmaTransferenciaDe && codigoOrigem) {
+                avisos.push(`Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" não encontrada; será importado sem vínculo de transferência.`);
+            }
+
+            // Detectar se esta linha é repetição de mesmo nome+origem (bônus por duplicação)
+            const dedupeKey = `${nomeNormalizado}|${codigoOrigem}|${codigoDestino}`;
+            const prevOccurrence = occurrenceByPessoa.get(dedupeKey) || 0;
+            occurrenceByPessoa.set(dedupeKey, prevOccurrence + 1);
+            const isLinhaRepetida = prevOccurrence > 0;
+
+            const quantidadeInscricoes = Math.max(1, row.quantidadeInscricoes || 1);
+
+            // Total de candidatos a gerar: inscrições da coluna + se for repetida, a própria linha é bônus
+            const startIndex = isLinhaRepetida ? 0 : 0;
+            const totalSlots = isLinhaRepetida ? quantidadeInscricoes : quantidadeInscricoes;
+            // Offset global para numerar bônus: acumulado de ocorrências anteriores
+            const globalBonusOffset = isLinhaRepetida ? prevOccurrence * Math.max(1, quantidadeInscricoes) : 0;
+
+            for (let i = startIndex; i < totalSlots; i++) {
+                const globalIndex = globalBonusOffset + i;
+                const isBonus = isLinhaRepetida || i > 0;
+                const nomeCracha = globalIndex === 0 ? row.nome.trim() : `${row.nome.trim()} ${globalIndex + 1}`;
+                const origemFinal = isBonus ? EOrigemAlunos.ALUNO_BONUS : idTurmaTransferenciaDe ? EOrigemAlunos.TRANSFERENCIA : EOrigemAlunos.COMPROU_INGRESSO;
+                const emailCandidato = isBonus ? this.buildBonusEmailFromBase(emailNormalizado, globalIndex) : emailNormalizado;
+
+                candidates.push({
+                    linha: row.linha,
+                    nomeOriginal: row.nome.trim(),
+                    nomeCracha,
+                    cpfCnpj: row.cpfCnpj,
+                    email: emailCandidato,
+                    titularEmail: emailNormalizado,
+                    emailGeradoAutomaticamente,
+                    telefone: telefoneNormalizado,
+                    turmaDestinoId,
+                    turmaDestinoCodigo: row.turmaDestinoCodigo,
+                    turmaOrigemCodigo: row.turmaOrigemCodigo,
+                    turmaOrigemDescricao: origemVenda ? 'Time de Vendas IAM' : row.turmaOrigemCodigo,
+                    dataInclusao: row.dataInclusao,
+                    quantidadeBonus: Math.max(0, quantidadeInscricoes - 1) + (isLinhaRepetida ? quantidadeInscricoes : 0),
+                    isTimeDeVendas: origemVenda,
+                    isBonusEntry: isBonus,
+                    statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
+                    statusFinal: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                    origemFinal,
+                    idTurmaTransferenciaDe: isBonus ? null : idTurmaTransferenciaDe,
+                });
+            }
+        }
+
+        const emailsUnicos = Array.from(new Set(candidates.map((c) => c.email)));
+        const alunosExistentes = emailsUnicos.length
+            ? await this.uow.alunosRP.find({
+                  where: { email: In(emailsUnicos) },
+              })
+            : [];
+        const alunoByEmail = new Map(alunosExistentes.map((aluno) => [aluno.email, aluno]));
+
+        if (confirmar) {
+            const emailsFaltantes = emailsUnicos.filter((email) => !alunoByEmail.has(email));
+            const novosAlunos = emailsFaltantes
+                .map((email) => {
+                    const base = candidates.find((c) => c.email === email);
+                    if (!base) return null;
+                    return this.uow.alunosRP.create({
+                        nome: base.nomeOriginal || 'Aluno',
+                        nome_cracha: base.nomeOriginal || 'Aluno',
+                        email,
+                        cpf: base.cpfCnpj || null,
+                        telefone_um: base.telefone || '00000000000',
+                        possui_deficiencia: false,
+                    });
+                })
+                .filter((a): a is NonNullable<typeof a> => Boolean(a));
+
+            if (novosAlunos.length > 0) {
+                await this.uow.alunosRP.save(novosAlunos, { chunk: alunosChunkSize });
+                lotesAlunosCriados += Math.ceil(novosAlunos.length / alunosChunkSize);
+            }
+
+            const alunosRecarregados = emailsUnicos.length
+                ? await this.uow.alunosRP.find({
+                      where: { email: In(emailsUnicos) },
+                  })
+                : [];
+            for (const aluno of alunosRecarregados) {
+                alunoByEmail.set(aluno.email, aluno);
+            }
+        }
+
+        const idsAlunosExistentes = Array.from(new Set(Array.from(alunoByEmail.values()).map((aluno) => String(aluno.id))));
+        const turmaIdsDestino = Array.from(new Set(candidates.map((c) => c.turmaDestinoId)));
+        const vinculosExistentes =
+            idsAlunosExistentes.length > 0 && turmaIdsDestino.length > 0
+                ? await this.uow.turmasAlunosRP.find({
+                      where: {
+                          id_turma: In(turmaIdsDestino),
+                          id_aluno: In(idsAlunosExistentes),
+                          deletado_em: null,
+                      },
+                  })
+                : [];
+
+        const vinculoByKey = new Map<string, (typeof vinculosExistentes)[number]>(
+            vinculosExistentes.map((v) => [`${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`, v]),
+        );
+        const runtimeVinculoKeys = new Set(vinculosExistentes.map((v) => `${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`));
+
+        const numerosCrachaExistentes = turmaIdsDestino.length
+            ? await this.uow.turmasAlunosRP.find({
+                  where: {
+                      id_turma: In(turmaIdsDestino),
+                      deletado_em: null,
+                  },
+                  select: ['id_turma', 'numero_cracha'],
+              })
+            : [];
+
+        const crachaSetByTurma = new Map<number, Set<string>>();
+        for (const row of numerosCrachaExistentes) {
+            if (!crachaSetByTurma.has(row.id_turma)) {
+                crachaSetByTurma.set(row.id_turma, new Set());
+            }
+            crachaSetByTurma.get(row.id_turma)?.add(row.numero_cracha);
+        }
+
+        const updatesToSave: typeof vinculosExistentes = [];
+        const createsToSave: Array<{
+            id_turma: number;
+            id_aluno: string;
+            nome_cracha: string;
+            numero_cracha: string;
+            origem_aluno: EOrigemAlunos;
+            status_aluno_turma: EStatusAlunosTurmas;
+            vaga_bonus: boolean;
+            id_aluno_bonus: string | null;
+            id_turma_transferencia_de: number | null;
+        }> = [];
+
+        const firstAlunoIdByLinha = new Map<number, string>();
+        for (const item of candidates) {
+            try {
+                const aluno = alunoByEmail.get(item.email) || null;
+                const alunoId = aluno ? String(aluno.id) : '';
+                const vinculoKey = `${item.turmaDestinoId}|${alunoId}|${item.nomeCracha}`;
+                const existeVinculo = Boolean(aluno && runtimeVinculoKeys.has(vinculoKey));
+                const vinculoPersistido = aluno ? vinculoByKey.get(vinculoKey) : undefined;
+                const isBonus = item.origemFinal === EOrigemAlunos.ALUNO_BONUS;
+                const idAlunoBonus = isBonus ? firstAlunoIdByLinha.get(item.linha) || null : null;
+
+                if (existeVinculo) {
+                    if (!isBonus && aluno && !firstAlunoIdByLinha.has(item.linha)) {
+                        firstAlunoIdByLinha.set(item.linha, String(aluno.id));
+                    }
+                    if (confirmar && vinculoPersistido) {
+                        vinculoPersistido.status_aluno_turma = item.statusFinal;
+                        vinculoPersistido.origem_aluno = item.origemFinal;
+                        vinculoPersistido.id_aluno_bonus = idAlunoBonus;
+                        vinculoPersistido.id_turma_transferencia_de = item.idTurmaTransferenciaDe;
+                        updatesToSave.push(vinculoPersistido);
+                    }
+                    totalAtualizadas++;
+                    preview.push({
+                        linha: item.linha,
+                        nome_cracha: item.nomeCracha,
+                        nome: item.nomeOriginal,
+                        cpf_cnpj: item.cpfCnpj,
+                        email: item.email,
+                        telefone: item.telefone,
+                        turma_origem_codigo: item.turmaOrigemCodigo,
+                        turma_origem_descricao: item.turmaOrigemDescricao,
+                        turma_destino_codigo: item.turmaDestinoCodigo,
+                        email_gerado_automaticamente: item.emailGeradoAutomaticamente,
+                        acao: 'ATUALIZAR',
+                        turma_destino_id: item.turmaDestinoId,
+                        quantidade_bonus: item.quantidadeBonus,
+                        data_inclusao: item.dataInclusao,
+                        status_planilha: item.statusPlanilha,
+                        status_final: item.statusFinal,
+                        origem_final: item.origemFinal,
+                    });
+                    continue;
+                }
+
+                if (!aluno && !confirmar) {
+                    totalCriadas++;
+                    preview.push({
+                        linha: item.linha,
+                        nome_cracha: item.nomeCracha,
+                        nome: item.nomeOriginal,
+                        cpf_cnpj: item.cpfCnpj,
+                        email: item.email,
+                        telefone: item.telefone,
+                        turma_origem_codigo: item.turmaOrigemCodigo,
+                        turma_origem_descricao: item.turmaOrigemDescricao,
+                        turma_destino_codigo: item.turmaDestinoCodigo,
+                        email_gerado_automaticamente: item.emailGeradoAutomaticamente,
+                        acao: 'CRIAR',
+                        turma_destino_id: item.turmaDestinoId,
+                        quantidade_bonus: item.quantidadeBonus,
+                        data_inclusao: item.dataInclusao,
+                        status_planilha: item.statusPlanilha,
+                        status_final: item.statusFinal,
+                        origem_final: item.origemFinal,
+                    });
+                    continue;
+                }
+
+                if (!aluno) {
+                    throw new Error('Não foi possível criar/alocar o aluno para importação');
+                }
+
+                if (!isBonus && !firstAlunoIdByLinha.has(item.linha)) {
+                    firstAlunoIdByLinha.set(item.linha, String(aluno.id));
+                }
+
+                if (confirmar) {
+                    if (!crachaSetByTurma.has(item.turmaDestinoId)) {
+                        crachaSetByTurma.set(item.turmaDestinoId, new Set());
+                    }
+                    const crachaSet = crachaSetByTurma.get(item.turmaDestinoId);
+                    if (!crachaSet) {
+                        throw new Error(`Não foi possível obter controle de crachá para turma ${item.turmaDestinoId}`);
+                    }
+                    const numeroCracha = this.generateCrachaNumberFromSet(crachaSet);
+                    createsToSave.push({
+                        id_turma: item.turmaDestinoId,
+                        id_aluno: String(aluno.id),
+                        nome_cracha: item.nomeCracha,
+                        numero_cracha: numeroCracha,
+                        origem_aluno: item.origemFinal,
+                        status_aluno_turma: item.statusFinal,
+                        vaga_bonus: isBonus,
+                        id_aluno_bonus: idAlunoBonus,
+                        id_turma_transferencia_de: item.idTurmaTransferenciaDe,
+                    });
+                }
+
+                runtimeVinculoKeys.add(`${item.turmaDestinoId}|${aluno.id}|${item.nomeCracha}`);
+                totalCriadas++;
+                preview.push({
+                    linha: item.linha,
+                    nome_cracha: item.nomeCracha,
+                    nome: item.nomeOriginal,
+                    cpf_cnpj: item.cpfCnpj,
+                    email: item.email,
+                    telefone: item.telefone,
+                    turma_origem_codigo: item.turmaOrigemCodigo,
+                    turma_origem_descricao: item.turmaOrigemDescricao,
+                    turma_destino_codigo: item.turmaDestinoCodigo,
+                    email_gerado_automaticamente: item.emailGeradoAutomaticamente,
+                    acao: 'CRIAR',
+                    turma_destino_id: item.turmaDestinoId,
+                    quantidade_bonus: item.quantidadeBonus,
+                    data_inclusao: item.dataInclusao,
+                    status_planilha: item.statusPlanilha,
+                    status_final: item.statusFinal,
+                    origem_final: item.origemFinal,
+                });
+            } catch (error) {
+                const msg = error instanceof Error ? error.message : 'Erro desconhecido';
+                erros.push(`Linha ${item.linha}: ${msg}`);
+            }
+        }
+
+        if (confirmar) {
+            if (updatesToSave.length > 0) {
+                await this.uow.turmasAlunosRP.save(updatesToSave, { chunk: vinculosChunkSize });
+                lotesVinculosAtualizados += Math.ceil(updatesToSave.length / vinculosChunkSize);
+            }
+
+            if (createsToSave.length > 0) {
+                const entities = createsToSave.map((data) => this.uow.turmasAlunosRP.create(data));
+                await this.uow.turmasAlunosRP.save(entities, { chunk: vinculosChunkSize });
+                lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
+            }
+
+            // Para cada candidato, buscar o vínculo salvo e criar histórico + vínculo de bônus
+            for (const cand of candidates) {
+                const aluno = alunoByEmail.get(cand.email);
+                if (!aluno) continue;
+
+                const vinculoSalvo = await this.uow.turmasAlunosRP.findOne({
+                    where: {
+                        id_turma: cand.turmaDestinoId,
+                        id_aluno: String(aluno.id),
+                        nome_cracha: cand.nomeCracha,
+                        deletado_em: null,
+                    },
+                });
+                if (!vinculoSalvo) continue;
+
+                // Criar histórico para Time de Vendas ou transferência de masterclass
+                if (cand.isTimeDeVendas || cand.idTurmaTransferenciaDe) {
+                    const existsHistorico = await this.uow.historicoTransferenciasRP.findOne({
+                        where: {
+                            id_aluno: aluno.id,
+                            id_turma_para: cand.turmaDestinoId,
+                            id_turma_aluno_para: vinculoSalvo.id,
+                        },
+                    });
+                    if (!existsHistorico) {
+                        const historico = this.uow.historicoTransferenciasRP.create({
+                            id_aluno: aluno.id,
+                            id_turma_de: cand.idTurmaTransferenciaDe || cand.turmaDestinoId,
+                            id_turma_para: cand.turmaDestinoId,
+                            id_turma_aluno_de: null,
+                            id_turma_aluno_para: vinculoSalvo.id,
+                        });
+                        const dataInclusaoDate = this.parseDateFromSpreadsheet(cand.dataInclusao);
+                        if (dataInclusaoDate) {
+                            historico.criado_em = dataInclusaoDate;
+                            historico.atualizado_em = dataInclusaoDate;
+                        }
+                        await this.uow.historicoTransferenciasRP.save(historico);
+                    }
+                }
+
+                // Criar vínculo de bônus na tabela alunos_vinculos
+                if (cand.isBonusEntry) {
+                    const titularAluno = alunoByEmail.get(cand.titularEmail);
+                    if (titularAluno && titularAluno.id !== aluno.id) {
+                        const existsVinculoBonus = await this.uow.alunosVinculosRP.findOne({
+                            where: {
+                                id_aluno: aluno.id,
+                                id_aluno_vinculado: titularAluno.id,
+                                tipo_vinculo: ETipoVinculoAluno.BONUS,
+                                id_turma: cand.turmaDestinoId,
+                                deletado_em: null,
+                            },
+                        });
+                        if (!existsVinculoBonus) {
+                            const vinculoBonus = this.uow.alunosVinculosRP.create({
+                                id_aluno: aluno.id,
+                                id_aluno_vinculado: titularAluno.id,
+                                tipo_vinculo: ETipoVinculoAluno.BONUS,
+                                id_turma: cand.turmaDestinoId,
+                            });
+                            await this.uow.alunosVinculosRP.save(vinculoBonus);
+                        }
+                    }
+                }
+            }
+        }
+
+        const totalProcessadas = totalCriadas + totalAtualizadas;
+        const tituloModo = confirmar ? 'Importação de masterclass concluída' : 'Pré-visualização de masterclass concluída';
+
+        return {
+            message: `${tituloModo}. ${totalProcessadas} vínculo(s) processado(s).`,
+            total_linhas: parsedRows.length,
+            total_processadas: totalProcessadas,
+            total_criadas: totalCriadas,
+            total_atualizadas: totalAtualizadas,
+            total_erros: erros.length,
+            total_sem_turma: totalSemTurma,
+            erros,
+            avisos,
+            exige_confirmacao: !confirmar,
+            confirmado: confirmar,
+            preview: preview.slice(0, 120),
             tempo_total_ms: Date.now() - startedAt,
             lotes_executados: lotesAlunosCriados + lotesVinculosAtualizados + lotesVinculosCriados,
             lotes_detalhe: {
@@ -583,10 +1149,122 @@ export class UploadService {
         }
 
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        return XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
+        return XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
     }
 
-    private parseSpreadsheetRows(rows: any[][]): Array<{ linha: number; nome: string; email: string; telefone: string; obs: string; status: string }> {
+    private parseMasterclassSpreadsheetRows(rows: any[][]): Array<{
+        linha: number;
+        turmaOrigemCodigo: string;
+        dataInclusao: string;
+        nome: string;
+        cpfCnpj: string;
+        telefone: string;
+        email: string;
+        turmaDestinoCodigo: string;
+        quantidadeInscricoes: number;
+    }> {
+        if (rows.length < 2) {
+            throw new BadRequestException('A planilha precisa conter cabeçalho e dados');
+        }
+
+        const headerRow = (rows[0] || []).map((cell) => this.normalizeText(String(cell || '')));
+        const idxTurmaOrigem = headerRow.findIndex((h) => h.includes('TURMA ORIGEM'));
+        const idxDataInclusao = headerRow.findIndex((h) => h.includes('DATA DA INCLUSAO'));
+        const idxNome = headerRow.findIndex((h) => h.includes('PARCEIRO DE NEGOCIO'));
+        const idxCpfCnpj = headerRow.findIndex((h) => h === 'CPF' || h.includes('CNPJ'));
+        const idxTelefone = headerRow.findIndex((h) => h.includes('TELEFONE'));
+        const idxEmail = headerRow.findIndex((h) => h.includes('E-MAIL') || h === 'EMAIL');
+        const idxTurmaDestino = headerRow.findIndex((h) => h.includes('TURMA DESTINO'));
+        const idxInscricoes = headerRow.findIndex((h) => h.includes('NUMERO DE INSCRICOES'));
+
+        if ([idxTurmaOrigem, idxNome, idxTelefone, idxEmail, idxTurmaDestino, idxInscricoes].some((idx) => idx < 0)) {
+            throw new BadRequestException('Modelo de planilha inválido para importação de masterclass');
+        }
+
+        const parsed: Array<{
+            linha: number;
+            turmaOrigemCodigo: string;
+            dataInclusao: string;
+            nome: string;
+            cpfCnpj: string;
+            telefone: string;
+            email: string;
+            turmaDestinoCodigo: string;
+            quantidadeInscricoes: number;
+        }> = [];
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i] || [];
+            const turmaOrigemCodigo = String(row[idxTurmaOrigem] ?? '').trim();
+            const dataInclusao = idxDataInclusao >= 0 ? String(row[idxDataInclusao] ?? '').trim() : '';
+            const nome = String(row[idxNome] ?? '').trim();
+            const cpfCnpj = idxCpfCnpj >= 0 ? String(row[idxCpfCnpj] ?? '').trim() : '';
+            const telefone = String(row[idxTelefone] ?? '').trim();
+            const email = String(row[idxEmail] ?? '').trim();
+            const turmaDestinoCodigo = String(row[idxTurmaDestino] ?? '').trim();
+            const inscricoesRaw = String(row[idxInscricoes] ?? '').trim();
+            const quantidadeInscricoes = Math.max(1, parseInt(inscricoesRaw, 10) || 1);
+
+            if (!turmaOrigemCodigo && !nome && !telefone && !email && !turmaDestinoCodigo) {
+                continue;
+            }
+
+            parsed.push({
+                linha: i + 1,
+                turmaOrigemCodigo,
+                dataInclusao,
+                nome,
+                cpfCnpj,
+                telefone,
+                email,
+                turmaDestinoCodigo,
+                quantidadeInscricoes,
+            });
+        }
+
+        return parsed;
+    }
+
+    private parseDateFromSpreadsheet(value: string): Date | null {
+        const raw = (value || '').trim();
+        if (!raw) return null;
+
+        const direct = new Date(raw);
+        if (!Number.isNaN(direct.getTime())) return direct;
+
+        const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (m) {
+            const d = Number(m[1]);
+            const mo = Number(m[2]) - 1;
+            const y = Number(m[3]);
+            const dt = new Date(y, mo, d, 0, 0, 0, 0);
+            if (!Number.isNaN(dt.getTime())) return dt;
+        }
+
+        return null;
+    }
+
+    private buildBonusEmailFromBase(email: string, bonusIndex: number): string {
+        const normalized = (email || '').trim().toLowerCase();
+        const atIndex = normalized.indexOf('@');
+        if (atIndex <= 0) {
+            return `${normalized}+bonus${bonusIndex}@sememail.com`;
+        }
+        const local = normalized.slice(0, atIndex);
+        const domain = normalized.slice(atIndex + 1);
+        return `${local}+bonus${bonusIndex}@${domain}`;
+    }
+
+    private parseSpreadsheetRows(rows: any[][]): Array<{
+        linha: number;
+        nome: string;
+        email: string;
+        telefone: string;
+        obs: string;
+        status: string;
+        turmaTransferenciaDestino?: string;
+        isBonus?: boolean;
+    }> {
         if (rows.length < 2) {
             throw new BadRequestException('A planilha precisa conter cabeçalho e dados');
         }
@@ -594,9 +1272,74 @@ export class UploadService {
         const headerIndex = this.findHeaderIndex(rows);
         const dataStart = headerIndex + 1;
         const headerRow = rows[headerIndex] || [];
+        const normalizedHeaders = headerRow.map((v) => this.normalizeText(String(v ?? '')));
+        const idxNomeParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'NOME');
+        const idxStatusPrincipal = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'STATUS');
+        const idxStatusFin = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('STATUS FIN'));
+        const isLayoutTreinamentosGerais = idxNomeParticipante >= 0 && idxStatusPrincipal >= 0 && idxStatusPrincipal !== idxStatusFin;
         const hasStatusH = this.isStatusHeader(headerRow[7]);
         const hasStatusI = this.isStatusHeader(headerRow[8]);
-        const parsed: Array<{ linha: number; nome: string; email: string; telefone: string; obs: string; status: string }> = [];
+        const parsed: Array<{
+            linha: number;
+            nome: string;
+            email: string;
+            telefone: string;
+            obs: string;
+            status: string;
+            turmaTransferenciaDestino?: string;
+            isBonus?: boolean;
+        }> = [];
+
+        if (isLayoutTreinamentosGerais) {
+            const idxParceiro = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('PARCEIRO'));
+            const idxObs = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('OBSERV'));
+            const idxTelefoneComprador = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => h.includes('TELEFONE') && idx < idxNomeParticipante);
+            const idxEmailComprador = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => (h === 'E-MAIL' || h === 'EMAIL') && idx < idxNomeParticipante);
+            const idxTelefoneParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => h.includes('TELEFONE') && idx > idxNomeParticipante);
+            const idxEmailParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => (h === 'E-MAIL' || h === 'EMAIL') && idx > idxNomeParticipante);
+            let idxTransferencia = this.findHeaderColumnIndex(
+                normalizedHeaders,
+                (h, idx) => (h.includes('TRANSFER') || h.includes('TRANFER')) && idx > idxStatusPrincipal,
+            );
+            if (idxTransferencia < 0 && idxStatusPrincipal >= 0 && idxStatusPrincipal + 1 < headerRow.length) {
+                idxTransferencia = idxStatusPrincipal + 1;
+            }
+
+            for (let i = dataStart; i < rows.length; i++) {
+                const row = rows[i] || [];
+                const parceiroNome = String(row[idxParceiro] ?? '').trim();
+                const participanteNome = String(row[idxNomeParticipante] ?? '').trim();
+                const compradorEmail = String(row[idxEmailComprador] ?? '').trim();
+                const participanteEmail = String(row[idxEmailParticipante] ?? '').trim();
+                const compradorTelefone = String(row[idxTelefoneComprador] ?? '').trim();
+                const participanteTelefone = String(row[idxTelefoneParticipante] ?? '').trim();
+                const obs = idxObs >= 0 ? String(row[idxObs] ?? '').trim() : '';
+                const status = String(row[idxStatusPrincipal] ?? '').trim();
+                const turmaTransferenciaDestino = idxTransferencia >= 0 ? String(row[idxTransferencia] ?? '').trim() : '';
+
+                const nome = participanteNome || parceiroNome;
+                const email = participanteEmail || compradorEmail;
+                const telefone = participanteTelefone || compradorTelefone;
+                const isBonus = Boolean(participanteNome || participanteEmail || participanteTelefone);
+
+                if (!nome && !email && !telefone && !obs && !status && !turmaTransferenciaDestino) {
+                    continue;
+                }
+
+                parsed.push({
+                    linha: i + 1,
+                    nome,
+                    email,
+                    telefone,
+                    obs,
+                    status,
+                    turmaTransferenciaDestino,
+                    isBonus,
+                });
+            }
+
+            return parsed;
+        }
 
         for (let i = dataStart; i < rows.length; i++) {
             const row = rows[i] || [];
@@ -619,6 +1362,8 @@ export class UploadService {
                 telefone,
                 obs,
                 status,
+                turmaTransferenciaDestino: '',
+                isBonus: false,
             });
         }
 
@@ -640,6 +1385,13 @@ export class UploadService {
         return 1;
     }
 
+    private findHeaderColumnIndex(headers: string[], matcher: (header: string, index: number) => boolean): number {
+        for (let i = 0; i < headers.length; i++) {
+            if (matcher(headers[i], i)) return i;
+        }
+        return -1;
+    }
+
     private chooseStatus(statusH: string, statusI: string, hasStatusH: boolean, hasStatusI: boolean): string {
         const h = this.normalizeText(statusH);
         const i = this.normalizeText(statusI);
@@ -657,7 +1409,7 @@ export class UploadService {
     }
 
     private isStatusHeader(value: unknown): boolean {
-        const normalized = this.normalizeText(String(value || ''));
+        const normalized = this.normalizeText(typeof value === 'string' || typeof value === 'number' ? String(value) : '');
         return normalized.includes('STATUS');
     }
 
@@ -670,6 +1422,10 @@ export class UploadService {
             .trim();
     }
 
+    private normalizeCodeKey(value: string): string {
+        return this.normalizeText(value).replace(/\s+/g, '_');
+    }
+
     private normalizeEmail(value: string): string {
         const raw = (value || '').trim().toLowerCase();
         const matched = raw.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
@@ -677,7 +1433,7 @@ export class UploadService {
             return matched[0].toLowerCase().trim();
         }
 
-        let cleaned = raw
+        const cleaned = raw
             .replace(/e-?mail\s*:/gi, '')
             .replace(/\s+/g, '')
             .replace(/[<>'"()[\]]/g, '')

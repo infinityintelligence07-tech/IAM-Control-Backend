@@ -207,6 +207,13 @@ export class UploadService {
                 deletado_em: null,
             },
         });
+        const turmaInadimplente = await this.uow.turmasRP.findOne({
+            where: {
+                id_treinamento: turmaSelecionada.id_treinamento,
+                edicao_turma: ILike('INADIMPLENTE'),
+                deletado_em: null,
+            },
+        });
 
         if (!turmaSemTurma) {
             throw new BadRequestException(
@@ -274,8 +281,34 @@ export class UploadService {
             const statusNormalizado = this.normalizeText(row.status);
             const obsNormalizada = this.normalizeText(row.obs);
             const statusAlunoTurma = this.mapStatusToAlunoTurma(statusNormalizado);
+            const enviarParaInadimplente = statusNormalizado.includes('NEGATIVADO') || statusNormalizado.includes('NEGATIVACAO');
             const enviarParaSemTurma = statusNormalizado.includes('EXCLUIR') || statusNormalizado.includes('CANCELADO');
-            const idTurmaDestino = enviarParaSemTurma ? turmaSemTurma.id : turmaSelecionada.id;
+            let idTurmaDestino = turmaSelecionada.id;
+
+            if (enviarParaInadimplente) {
+                if (!turmaInadimplente) {
+                    erros.push(
+                        `Linha ${row.linha}: status "${row.status}" exige turma INADIMPLENTE para o treinamento ${turmaSelecionada.id_treinamento}, mas ela não foi encontrada.`,
+                    );
+                    preview.push({
+                        linha: row.linha,
+                        nome_cracha: row.nome || '',
+                        email: emailNormalizado,
+                        telefone: telefoneNormalizado,
+                        email_gerado_automaticamente: emailGeradoAutomaticamente,
+                        acao: 'IGNORAR',
+                        turma_destino_id: idTurmaSelecionada,
+                        status_planilha: row.status || '',
+                        status_final: statusAlunoTurma,
+                        origem_final: EOrigemAlunos.COMPROU_INGRESSO,
+                    });
+                    continue;
+                }
+
+                idTurmaDestino = turmaInadimplente.id;
+            } else if (enviarParaSemTurma) {
+                idTurmaDestino = turmaSemTurma.id;
+            }
 
             if (enviarParaSemTurma) {
                 totalSemTurma++;
@@ -597,7 +630,10 @@ export class UploadService {
         for (let i = 0; i < maxScan; i++) {
             const row = rows[i] || [];
             const joined = this.normalizeText(row.map((v) => String(v ?? '')).join(' '));
-            if (joined.includes('PARCEIRO') && joined.includes('E-MAIL') && joined.includes('TELEFONE')) {
+            const hasParceiro = joined.includes('PARCEIRO');
+            const hasEmail = joined.includes('E-MAIL') || joined.includes('EMAIL');
+            const hasTelefone = joined.includes('TELEFONE') || joined.includes('FONE');
+            if (hasParceiro && hasEmail && hasTelefone) {
                 return i;
             }
         }
@@ -607,13 +643,15 @@ export class UploadService {
     private chooseStatus(statusH: string, statusI: string, hasStatusH: boolean, hasStatusI: boolean): string {
         const h = this.normalizeText(statusH);
         const i = this.normalizeText(statusI);
-        const known = ['CONFIRMADO', 'CONFIRMACAO', 'EXCLUIR', 'CANCELADO'];
+        const known = ['CONFIRMADO', 'CONFIRMADOS', 'CONFIRMACAO', 'CONFIRMACOES', 'EXCLUIR', 'CANCELADO'];
 
-        if (hasStatusI && known.some((k) => i.includes(k))) return statusI;
-        if (hasStatusH && known.some((k) => h.includes(k))) return statusH;
+        if (known.some((k) => i.includes(k))) return statusI;
+        if (known.some((k) => h.includes(k))) return statusH;
 
         if (hasStatusI && statusI) return statusI;
         if (hasStatusH && statusH) return statusH;
+        if (statusI) return statusI;
+        if (statusH) return statusH;
 
         return '';
     }
@@ -670,7 +708,11 @@ export class UploadService {
     }
 
     private buildFallbackEmail(nome: string, telefone: string): string {
-        const nomeToken = this.normalizeText(nome).replace(/[^A-Z0-9]/g, '').toLowerCase().slice(0, 12) || 'aluno';
+        const nomeToken =
+            this.normalizeText(nome)
+                .replace(/[^A-Z0-9]/g, '')
+                .toLowerCase()
+                .slice(0, 12) || 'aluno';
         const telToken = (telefone || '').replace(/\D/g, '').slice(-11) || '00000000000';
         return `sememail+${nomeToken}${telToken}@sememail.com`;
     }
@@ -684,7 +726,9 @@ export class UploadService {
             return EStatusAlunosTurmas.CANCELADO;
         }
 
-        if (statusNormalizado.includes('CONFIRMADO') || statusNormalizado.includes('CONFIRMACAO')) {
+        const statusNaoConfirmado = statusNormalizado.includes('NAO CONFIRM');
+        const statusConfirmado = /CONFIRMAD|CONFIRMACA/.test(statusNormalizado);
+        if (statusConfirmado && !statusNaoConfirmado) {
             return EStatusAlunosTurmas.AGUARDANDO_CHECKIN;
         }
 

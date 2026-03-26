@@ -54,9 +54,8 @@ export class TurmasService {
         if (!turmaAluno) return false;
         if (this.isAlunoTransferidoDaTurma(turmaAluno)) return false;
 
-        return (
-            [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas) &&
-            turmaAluno.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE
+        return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(
+            turmaAluno.status_aluno_turma as EStatusAlunosTurmas,
         );
     }
 
@@ -1751,6 +1750,9 @@ export class TurmasService {
         if (turmaOrigem.id_treinamento_fk?.tipo_palestra === true) {
             throw new BadRequestException('Transferência só é permitida para treinamentos, não para palestras');
         }
+        if (this.isAlunoTransferidoDaTurma(turmaAlunoOrigem)) {
+            throw new BadRequestException('Este vínculo já foi transferido desta turma. Utilize a matrícula ativa para nova transferência');
+        }
 
         const turmaDestino = await this.uow.turmasRP.findOne({
             where: { id: id_turma_destino },
@@ -1778,6 +1780,8 @@ export class TurmasService {
             where: { id_turma: id_turma_destino, id_aluno: turmaAlunoOrigem.id_aluno, deletado_em: null },
         });
         const nomeCracha = turmaAlunoOrigem.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome || 'Aluno';
+        // Preserva a primeira turma de origem ao longo de múltiplas transferências.
+        const idTurmaOrigemHistorica = turmaAlunoOrigem.id_turma_transferencia_de ?? turmaOrigem.id;
 
         // Aluno permanece na turma de origem, mas deixa de ser confirmado nela e passa a ser contabilizado como transferido.
         turmaAlunoOrigem.id_turma_transferencia_para = id_turma_destino;
@@ -1789,7 +1793,7 @@ export class TurmasService {
         if (jaNaTurmaDestino) {
             // Se já existir vínculo na turma destino, reaproveita-o e marca como vindo de transferência.
             jaNaTurmaDestino.origem_aluno = EOrigemAlunos.TRANSFERENCIA;
-            jaNaTurmaDestino.id_turma_transferencia_de = turmaOrigem.id;
+            jaNaTurmaDestino.id_turma_transferencia_de = jaNaTurmaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
             jaNaTurmaDestino.nome_cracha = jaNaTurmaDestino.nome_cracha || nomeCracha;
             jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO;
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(jaNaTurmaDestino);
@@ -1803,7 +1807,7 @@ export class TurmasService {
                 vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
                 origem_aluno: EOrigemAlunos.TRANSFERENCIA,
                 status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
-                id_turma_transferencia_de: turmaOrigem.id,
+                id_turma_transferencia_de: idTurmaOrigemHistorica,
             });
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
         }

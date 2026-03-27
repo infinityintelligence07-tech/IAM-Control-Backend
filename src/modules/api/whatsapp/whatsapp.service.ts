@@ -562,30 +562,30 @@ Vamos Prosperar! 🙌`;
                         ),
                     );
 
-                    // Redundância igual ao modelo dos outros fluxos:
-                    // envia também a copy como mensagem livre no ChatGuru para histórico operacional.
-                    const confirmacaoMessage = this.generateConfirmacaoMessage(param1, param2, param3, param4);
-                    let redundancySuccess = false;
-                    let redundancyError: string | undefined;
+                    // // Redundância igual ao modelo dos outros fluxos:
+                    // // envia também a copy como mensagem livre no ChatGuru para histórico operacional.
+                    // const confirmacaoMessage = this.generateConfirmacaoMessage(param1, param2, param3, param4);
+                    // let redundancySuccess = false;
+                    // let redundancyError: string | undefined;
 
-                    try {
-                        await new Promise((resolve) => setTimeout(resolve, 1000));
-                        const redundancyResult = await this.sendMessage(phone, confirmacaoMessage, alunoNome);
-                        if (redundancyResult.success) {
-                            redundancySuccess = true;
-                            console.log(`✅ Redundância de confirmação enviada com sucesso via ChatGuru (Z-API)`);
-                        } else {
-                            redundancyError = redundancyResult.error;
-                            console.warn(`⚠️ Redundância de confirmação falhou: ${redundancyError}`);
-                        }
-                    } catch (redundancyErrorException: any) {
-                        redundancyError = redundancyErrorException.message;
-                        console.warn(`⚠️ Exceção na redundância de confirmação: ${redundancyError}`);
-                    }
+                    // try {
+                    //     await new Promise((resolve) => setTimeout(resolve, 1000));
+                    //     const redundancyResult = await this.sendMessage(phone, confirmacaoMessage, alunoNome);
+                    //     if (redundancyResult.success) {
+                    //         redundancySuccess = true;
+                    //         console.log(`✅ Redundância de confirmação enviada com sucesso via ChatGuru (Z-API)`);
+                    //     } else {
+                    //         redundancyError = redundancyResult.error;
+                    //         console.warn(`⚠️ Redundância de confirmação falhou: ${redundancyError}`);
+                    //     }
+                    // } catch (redundancyErrorException: any) {
+                    //     redundancyError = redundancyErrorException.message;
+                    //     console.warn(`⚠️ Exceção na redundância de confirmação: ${redundancyError}`);
+                    // }
 
-                    if (!redundancySuccess && redundancyError) {
-                        console.warn(`⚠️ Template de confirmação enviado, mas redundância falhou para ${alunoNome}: ${redundancyError}`);
-                    }
+                    // if (!redundancySuccess && redundancyError) {
+                    //     console.warn(`⚠️ Template de confirmação enviado, mas redundância falhou para ${alunoNome}: ${redundancyError}`);
+                    // }
 
                     // Atualiza status operacional após aceite de envio do template.
                     await this.uow.turmasAlunosRP.update({ id: student.alunoTurmaId }, { status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO });
@@ -635,12 +635,14 @@ Vamos Prosperar! 🙌`;
                 extracted,
             };
         }
+        const phoneCandidates = this.buildPhoneCandidates(normalizedPhone);
 
         const normalizedText = this.normalizeText(extracted.text || '');
         const isPositiveConfirmation = this.isPositiveConfirmacaoReply(normalizedText);
         const baseTrack = {
             timestamp: new Date().toISOString(),
             phone: normalizedPhone,
+            phoneCandidates,
             text: extracted.text || null,
             normalizedText,
             messageType: extracted.messageType,
@@ -1277,57 +1279,57 @@ Vamos Prosperar! 🙌`;
                 console.log(`📞 Telefone: ${cleanPhone}`);
                 console.log(`👤 Contato: ${data.alunoNome}`);
 
-                let redundancySuccess = false;
-                let redundancyError: string | undefined;
+                // let redundancySuccess = false;
+                // let redundancyError: string | undefined;
 
-                try {
-                    // Aguarda um pequeno delay antes de enviar a redundância
-                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                // try {
+                //     // Aguarda um pequeno delay antes de enviar a redundância
+                //     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-                    // Gera mensagem no formato do template para enviar antes da imagem
-                    const qrCodeMessage = this.generateQRCodeMessage(data.alunoNome, data.treinamentoNome);
+                //     // Gera mensagem no formato do template para enviar antes da imagem
+                //     const qrCodeMessage = this.generateQRCodeMessage(data.alunoNome, data.treinamentoNome);
 
-                    // Envia a imagem do QR Code via ChatGuru (Z-API) como redundância
-                    // Passa a mensagem do template para ser enviada antes da imagem
-                    const redundancyResult = await this.sendImageMessage(
-                        cleanPhone,
-                        qrCodeImage,
-                        `QR Code de Credenciamento - ${data.treinamentoNome}`,
-                        data.alunoNome,
-                        qrCodeMessage, // Mensagem no formato do template
-                    );
+                //     // Envia a imagem do QR Code via ChatGuru (Z-API) como redundância
+                //     // Passa a mensagem do template para ser enviada antes da imagem
+                //     const redundancyResult = await this.sendImageMessage(
+                //         cleanPhone,
+                //         qrCodeImage,
+                //         `QR Code de Credenciamento - ${data.treinamentoNome}`,
+                //         data.alunoNome,
+                //         qrCodeMessage, // Mensagem no formato do template
+                //     );
 
-                    if (redundancyResult.success) {
-                        redundancySuccess = true;
-                        console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
-                        console.log(`   A mensagem agora está no histórico do ChatGuru`);
-                    } else {
-                        redundancyError = redundancyResult.error;
-                        console.warn(`⚠️ Redundância via ChatGuru falhou: ${redundancyError}`);
-                        console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
-                        console.warn(`   Verifique os logs acima para mais detalhes sobre o erro`);
-                    }
-                } catch (redundancyErrorException: any) {
-                    redundancyError = redundancyErrorException.message;
-                    console.error(`❌ Exceção ao enviar redundância via ChatGuru: ${redundancyError}`);
-                    console.error(`   Stack: ${redundancyErrorException.stack}`);
-                    console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
-                }
+                //     if (redundancyResult.success) {
+                //         redundancySuccess = true;
+                //         console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
+                //         console.log(`   A mensagem agora está no histórico do ChatGuru`);
+                //     } else {
+                //         redundancyError = redundancyResult.error;
+                //         console.warn(`⚠️ Redundância via ChatGuru falhou: ${redundancyError}`);
+                //         console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
+                //         console.warn(`   Verifique os logs acima para mais detalhes sobre o erro`);
+                //     }
+                // } catch (redundancyErrorException: any) {
+                //     redundancyError = redundancyErrorException.message;
+                //     console.error(`❌ Exceção ao enviar redundância via ChatGuru: ${redundancyError}`);
+                //     console.error(`   Stack: ${redundancyErrorException.stack}`);
+                //     console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
+                // }
 
-                console.log(`${'═'.repeat(80)}`);
-                console.log(`📊 RESUMO DA REDUNDÂNCIA:`);
-                console.log(`   ✅ Template Gupshup: Enviado (Message ID: ${messageId})`);
-                console.log(`   ${redundancySuccess ? '✅' : '❌'} Redundância Z-API: ${redundancySuccess ? 'Enviado' : 'Falhou'}`);
-                if (redundancyError) {
-                    console.log(`   📄 Erro: ${redundancyError}`);
-                }
-                console.log(`${'═'.repeat(80)}\n`);
+                // console.log(`${'═'.repeat(80)}`);
+                // console.log(`📊 RESUMO DA REDUNDÂNCIA:`);
+                // console.log(`   ✅ Template Gupshup: Enviado (Message ID: ${messageId})`);
+                // console.log(`   ${redundancySuccess ? '✅' : '❌'} Redundância Z-API: ${redundancySuccess ? 'Enviado' : 'Falhou'}`);
+                // if (redundancyError) {
+                //     console.log(`   📄 Erro: ${redundancyError}`);
+                // }
+                // console.log(`${'═'.repeat(80)}\n`);
 
                 return {
                     success: true,
                     message: `QR code enviado com sucesso via template aprovado. Message ID: ${messageId}`,
                     messageId: messageId,
-                    redundancySent: redundancySuccess,
+                    // redundancySent: redundancySuccess,
                 };
             }
 
@@ -1759,6 +1761,19 @@ Sua resposta é muito importante para a organização do evento. 🙏`;
         if (!digits) return [];
         const noCountry = digits.startsWith('55') ? digits.substring(2) : digits;
         const candidates = new Set<string>([digits, noCountry, `55${noCountry}`]);
+
+        // Compatibilidade Brasil: tenta variações com e sem o "9" após o DDD
+        // Exemplo: 42988131649 <-> 4288131649
+        if (noCountry.length === 11 && noCountry.charAt(2) === '9') {
+            const withoutNine = `${noCountry.substring(0, 2)}${noCountry.substring(3)}`;
+            candidates.add(withoutNine);
+            candidates.add(`55${withoutNine}`);
+        } else if (noCountry.length === 10) {
+            const withNine = `${noCountry.substring(0, 2)}9${noCountry.substring(2)}`;
+            candidates.add(withNine);
+            candidates.add(`55${withNine}`);
+        }
+
         return Array.from(candidates).filter(Boolean);
     }
 

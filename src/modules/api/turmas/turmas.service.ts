@@ -1574,6 +1574,7 @@ export class TurmasService {
                           id: turmaAluno.id_aluno_fk.id,
                           nome: turmaAluno.id_aluno_fk.nome,
                           email: turmaAluno.id_aluno_fk.email,
+                          telefone: turmaAluno.id_aluno_fk.telefone_um,
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
                           cpf: turmaAluno.id_aluno_fk.cpf,
                           status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,

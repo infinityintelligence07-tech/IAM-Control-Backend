@@ -417,6 +417,7 @@ export class AlunoTurmaResponseDto {
         id: number;
         nome: string;
         email: string;
+        telefone?: string;
         nome_cracha: string;
         cpf?: string;
         status_aluno_geral?: string;

@@ -496,6 +496,22 @@ export class AlunosDisponiveisResponseDto {
     totalPages: number;
 }
 
+export class TurmaStatusResumoResponseDto {
+    id_turma: number;
+    inscritos: number;
+    transferidos: number;
+    transferidos_dessa_turma_para_outra: number;
+    transferidos_de_outra_turma_para_essa: number;
+    falta_enviar_confirmacao: number;
+    aguardando_confirmacao: number;
+    falta_enviar_checkin: number;
+    aguardando_checkin: number;
+    checkin_realizado: number;
+    cancelados: number;
+    inadimplentes: number;
+    status_counts: Record<string, number>;
+}
+
 export class SoftDeleteTurmaDto {
     @IsString()
     deletado_em: string;

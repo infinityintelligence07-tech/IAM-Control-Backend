@@ -15,6 +15,7 @@ import {
     SoftDeleteTurmaDto,
     OpcoesTransferenciaResponseDto,
     HistoricoTransferenciasResponseDto,
+    TurmaStatusResumoResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
@@ -152,6 +153,12 @@ export class TurmasController {
     async findById(@Param('id', ParseIntPipe) id: number): Promise<TurmaResponseDto | null> {
         console.log('Buscando turma por ID:', id);
         return await this.turmasService.findById(id);
+    }
+
+    @Get(':id/status-resumo')
+    @UseGuards(JwtAuthGuard)
+    async getTurmaStatusResumo(@Param('id', ParseIntPipe) id: number): Promise<TurmaStatusResumoResponseDto> {
+        return this.turmasService.getTurmaStatusResumo(id);
     }
 
     @Post()

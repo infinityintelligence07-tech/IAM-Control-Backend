@@ -12,6 +12,7 @@ import {
     AlunosTurmaListResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
+    TurmaStatusResumoResponseDto,
     SoftDeleteTurmaDto,
     OpcoesTransferenciaResponseDto,
     HistoricoTransferenciaItemDto,
@@ -54,9 +55,28 @@ export class TurmasService {
         if (!turmaAluno) return false;
         if (this.isAlunoTransferidoDaTurma(turmaAluno)) return false;
 
-        return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(
-            turmaAluno.status_aluno_turma as EStatusAlunosTurmas,
-        );
+        return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas);
+    }
+
+    private async getTransferidosCountByTurmas(turmaIds: number[]): Promise<Record<number, number>> {
+        if (!turmaIds.length) return {};
+
+        const raw = await this.uow.historicoTransferenciasRP
+            .createQueryBuilder('h')
+            .select('h.id_turma_de', 'id_turma_de')
+            .addSelect('COUNT(*)::int', 'total')
+            .where('h.id_turma_de IN (:...turmaIds)', { turmaIds })
+            .andWhere('h.id_turma_de <> h.id_turma_para')
+            .andWhere('h.deletado_em IS NULL')
+            .groupBy('h.id_turma_de')
+            .getRawMany();
+
+        const map: Record<number, number> = {};
+        for (const row of raw) {
+            const id = Number(row.id_turma_de);
+            map[id] = Number(row.total || 0);
+        }
+        return map;
     }
 
     /**
@@ -318,6 +338,13 @@ export class TurmasService {
 
             console.log(`Encontradas ${turmas.length} turmas de um total de ${total}`);
 
+            // Segurança: garante que vínculos soft-deletados não entrem em listas/métricas.
+            for (const turma of turmas) {
+                if (Array.isArray(turma?.turmasAlunos)) {
+                    turma.turmasAlunos = turma.turmasAlunos.filter((ta: any) => !ta?.deletado_em);
+                }
+            }
+
             // Filtrar por tipo de treinamento se especificado
             let turmasFiltradas = turmas;
             if (tipo_treinamento) {
@@ -365,6 +392,7 @@ export class TurmasService {
             const turmasPalestrasIds = turmasPalestras.map((t) => t.id);
             console.log(`🎯 [DEBUG] Turmas identificadas como palestras: ${turmasPalestrasIds.join(', ')}`);
             const preCadastrosCount = await this.getPreCadastrosCountByTurmas(turmasPalestrasIds);
+            const transferidosCountByTurma = await this.getTransferidosCountByTurmas(turmasFiltradas.map((t) => t.id));
 
             // Transformar dados para o formato de resposta
             const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => {
@@ -439,13 +467,14 @@ export class TurmasService {
                         }
                         return turma.turmasAlunos?.length || 0;
                     })(),
-                    alunos_confirmados_count:
-                        turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
-                    transferidos_count: turma.turmasAlunos?.filter((ta) => this.isAlunoTransferidoDaTurma(ta)).length || 0,
+                    alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
+                    transferidos_count: transferidosCountByTurma[turma.id] || 0,
                     vindos_transferencia_count:
                         turma.turmasAlunos?.filter(
                             (ta) =>
-                                ta.origem_aluno === EOrigemAlunos.TRANSFERENCIA && ta.id_turma_transferencia_de !== null && ta.id_turma_transferencia_de !== undefined,
+                                ta.origem_aluno === EOrigemAlunos.TRANSFERENCIA &&
+                                ta.id_turma_transferencia_de !== null &&
+                                ta.id_turma_transferencia_de !== undefined,
                         ).length || 0,
                     pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
                     presentes_count:
@@ -492,6 +521,10 @@ export class TurmasService {
             // Buscar contadores de pré-cadastrados apenas se for palestra/masterclass
             const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
             const preCadastrosCount = isPalestra ? await this.getPreCadastrosCountByTurmas([turma.id]) : {};
+            if (Array.isArray(turma?.turmasAlunos)) {
+                turma.turmasAlunos = turma.turmasAlunos.filter((ta: any) => !ta?.deletado_em);
+            }
+            const transferidosCountByTurma = await this.getTransferidosCountByTurmas([turma.id]);
 
             return {
                 id: turma.id,
@@ -550,9 +583,8 @@ export class TurmasService {
                     }
                     return turma.turmasAlunos?.length || 0;
                 })(),
-                alunos_confirmados_count:
-                    turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
-                transferidos_count: turma.turmasAlunos?.filter((ta) => this.isAlunoTransferidoDaTurma(ta)).length || 0,
+                alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
+                transferidos_count: transferidosCountByTurma[turma.id] || 0,
                 vindos_transferencia_count:
                     turma.turmasAlunos?.filter(
                         (ta) =>
@@ -999,14 +1031,8 @@ export class TurmasService {
             });
             const historicoTimeVendasByTurmaAluno = new Map<string, Date>();
             historicoTimeVendas.forEach((h) => {
-                if (
-                    h.id_turma_aluno_para &&
-                    h.id_turma_de === h.id_turma_para
-                ) {
-                    historicoTimeVendasByTurmaAluno.set(
-                        String(h.id_turma_aluno_para),
-                        h.criado_em,
-                    );
+                if (h.id_turma_aluno_para && h.id_turma_de === h.id_turma_para) {
+                    historicoTimeVendasByTurmaAluno.set(String(h.id_turma_aluno_para), h.criado_em);
                 }
             });
 
@@ -1014,9 +1040,7 @@ export class TurmasService {
                 const turma = ta.id_turma_fk;
                 const treinamento = turma?.id_treinamento_fk;
                 const polo = turma?.id_polo_fk;
-                const origemTimeVendasData = historicoTimeVendasByTurmaAluno.get(
-                    String(ta.id),
-                );
+                const origemTimeVendasData = historicoTimeVendasByTurmaAluno.get(String(ta.id));
                 const isTimeVendas = Boolean(origemTimeVendasData);
 
                 const localParts: string[] = [];
@@ -1027,33 +1051,23 @@ export class TurmasService {
                     if (turma?.estado) localParts.push(turma.estado);
                 }
                 const local = localParts.join(' - ');
-                const dataEventoOrigem = origemTimeVendasData
-                    ? origemTimeVendasData.toISOString().split('T')[0]
-                    : '';
+                const dataEventoOrigem = origemTimeVendasData ? origemTimeVendasData.toISOString().split('T')[0] : '';
 
                 return {
                     id_turma_aluno: ta.id,
-                    status_aluno_turma: isTimeVendas
-                        ? EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO
-                        : ta.status_aluno_turma || null,
+                    status_aluno_turma: isTimeVendas ? EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO : ta.status_aluno_turma || null,
                     presenca_turma: ta.presenca_turma || null,
                     criado_em: origemTimeVendasData || ta.criado_em,
                     tipo: determinarTipo(treinamento),
                     origem_label: isTimeVendas ? 'Time de Vendas - IAM' : undefined,
                     turma: {
                         id: turma?.id || 0,
-                        nome_evento: isTimeVendas
-                            ? 'Time de Vendas - IAM'
-                            : treinamento?.treinamento || '',
+                        nome_evento: isTimeVendas ? 'Time de Vendas - IAM' : treinamento?.treinamento || '',
                         sigla_evento: treinamento?.sigla_treinamento || treinamento?.treinamento || '',
                         edicao_turma: turma?.edicao_turma || undefined,
                         local,
-                        data_inicio: isTimeVendas
-                            ? dataEventoOrigem
-                            : turma?.data_inicio || '',
-                        data_final: isTimeVendas
-                            ? dataEventoOrigem
-                            : turma?.data_final || '',
+                        data_inicio: isTimeVendas ? dataEventoOrigem : turma?.data_inicio || '',
+                        data_final: isTimeVendas ? dataEventoOrigem : turma?.data_final || '',
                         polo: polo
                             ? {
                                   nome: polo.polo,
@@ -1776,11 +1790,12 @@ export class TurmasService {
     }
 
     /**
-     * Transfere o aluno para outra turma (mesmo treinamento, outra edição). Não remove da turma atual; marca com tag e cria vínculo na turma destino.
+     * Transfere o aluno para outra turma (mesmo treinamento, outra edição).
+     * Remove o vínculo ativo da turma de origem (soft delete), mantendo lastro no histórico de transferências.
      */
     async transferirAluno(id_turma_aluno: string, id_turma_destino: number): Promise<AlunoTurmaResponseDto> {
         const turmaAlunoOrigem = await this.uow.turmasAlunosRP.findOne({
-            where: { id: id_turma_aluno },
+            where: { id: id_turma_aluno, deletado_em: null },
             relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
         });
         if (!turmaAlunoOrigem) throw new NotFoundException('Aluno não encontrado na turma');
@@ -1791,7 +1806,23 @@ export class TurmasService {
             throw new BadRequestException('Transferência só é permitida para treinamentos, não para palestras');
         }
         if (this.isAlunoTransferidoDaTurma(turmaAlunoOrigem)) {
-            throw new BadRequestException('Este vínculo já foi transferido desta turma. Utilize a matrícula ativa para nova transferência');
+            const idTurmaDestinoMarcada = Number(turmaAlunoOrigem.id_turma_transferencia_para);
+            const matriculaDestinoAtiva = await this.uow.turmasAlunosRP.findOne({
+                where: {
+                    id_turma: idTurmaDestinoMarcada,
+                    id_aluno: turmaAlunoOrigem.id_aluno,
+                    deletado_em: null,
+                },
+            });
+
+            // Se não existe matrícula ativa na turma de destino marcada (ex.: foi soft delete),
+            // limpamos o flag de transferência antiga para permitir uma nova transferência.
+            if (!matriculaDestinoAtiva) {
+                turmaAlunoOrigem.id_turma_transferencia_para = null;
+                await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
+            } else {
+                throw new BadRequestException('Este vínculo já foi transferido desta turma. Utilize a matrícula ativa para nova transferência');
+            }
         }
 
         const turmaDestino = await this.uow.turmasRP.findOne({
@@ -1823,19 +1854,13 @@ export class TurmasService {
         // Preserva a primeira turma de origem ao longo de múltiplas transferências.
         const idTurmaOrigemHistorica = turmaAlunoOrigem.id_turma_transferencia_de ?? turmaOrigem.id;
 
-        // Aluno permanece na turma de origem, mas deixa de ser confirmado nela e passa a ser contabilizado como transferido.
-        turmaAlunoOrigem.id_turma_transferencia_para = id_turma_destino;
-        turmaAlunoOrigem.status_aluno_turma = EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO;
-        turmaAlunoOrigem.presenca_turma = null;
-        await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
-
         let turmaAlunoDestinoSalvo: any;
         if (jaNaTurmaDestino) {
             // Se já existir vínculo na turma destino, reaproveita-o e marca como vindo de transferência.
             jaNaTurmaDestino.origem_aluno = EOrigemAlunos.TRANSFERENCIA;
             jaNaTurmaDestino.id_turma_transferencia_de = jaNaTurmaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
             jaNaTurmaDestino.nome_cracha = jaNaTurmaDestino.nome_cracha || nomeCracha;
-            jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO;
+            jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(jaNaTurmaDestino);
         } else {
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
@@ -1846,7 +1871,7 @@ export class TurmasService {
                 numero_cracha: numeroCracha,
                 vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
                 origem_aluno: EOrigemAlunos.TRANSFERENCIA,
-                status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+                status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                 id_turma_transferencia_de: idTurmaOrigemHistorica,
             });
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
@@ -1860,6 +1885,12 @@ export class TurmasService {
             id_turma_aluno_para: turmaAlunoDestinoSalvo.id,
         });
         await this.uow.historicoTransferenciasRP.save(historico);
+
+        // Remove o aluno da turma de origem sem perder rastreabilidade.
+        turmaAlunoOrigem.id_turma_transferencia_para = id_turma_destino;
+        turmaAlunoOrigem.presenca_turma = null;
+        turmaAlunoOrigem.deletado_em = new Date();
+        await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
 
         const turmaAlunoCompleta = await this.uow.turmasAlunosRP.findOne({
             where: { id: turmaAlunoDestinoSalvo.id },
@@ -1893,7 +1924,7 @@ export class TurmasService {
      */
     async getHistoricoTransferencias(id_aluno: number): Promise<HistoricoTransferenciasResponseDto> {
         const list = await this.uow.historicoTransferenciasRP.find({
-            where: { id_aluno },
+            where: { id_aluno, deletado_em: null },
             relations: [
                 'id_turma_de_fk',
                 'id_turma_de_fk.id_treinamento_fk',
@@ -1998,6 +2029,42 @@ export class TurmasService {
                 await this.uow.turmasAlunosTreinamentosBonusRP.save(bonus);
             }
 
+            // Remover lastro de transferência relacionado a esta matrícula excluída.
+            // Regra de negócio: ao apagar uma matrícula (origem ou destino), apaga também o registro de transferência.
+            const historicosTransferencia = await this.uow.historicoTransferenciasRP.find({
+                where: [
+                    { id_turma_aluno_de: id_turma_aluno, deletado_em: null },
+                    { id_turma_aluno_para: id_turma_aluno, deletado_em: null },
+                ],
+            });
+
+            for (const historico of historicosTransferencia) {
+                // Limpa referência "transferência para" na matrícula de origem, se existir e estiver ativa.
+                if (historico.id_turma_aluno_de && historico.id_turma_aluno_de !== id_turma_aluno) {
+                    const matriculaOrigem = await this.uow.turmasAlunosRP.findOne({
+                        where: { id: historico.id_turma_aluno_de, deletado_em: null },
+                    });
+                    if (matriculaOrigem) {
+                        matriculaOrigem.id_turma_transferencia_para = null;
+                        await this.uow.turmasAlunosRP.save(matriculaOrigem);
+                    }
+                }
+
+                // Limpa referência "transferência de" na matrícula de destino, se existir e estiver ativa.
+                if (historico.id_turma_aluno_para && historico.id_turma_aluno_para !== id_turma_aluno) {
+                    const matriculaDestino = await this.uow.turmasAlunosRP.findOne({
+                        where: { id: historico.id_turma_aluno_para, deletado_em: null },
+                    });
+                    if (matriculaDestino) {
+                        matriculaDestino.id_turma_transferencia_de = null;
+                        await this.uow.turmasAlunosRP.save(matriculaDestino);
+                    }
+                }
+
+                historico.deletado_em = new Date();
+                await this.uow.historicoTransferenciasRP.save(historico);
+            }
+
             // Finally, soft delete the turmas_alunos record
             turmaAluno.deletado_em = new Date();
             await this.uow.turmasAlunosRP.save(turmaAluno);
@@ -2008,6 +2075,76 @@ export class TurmasService {
             }
             throw new Error('Erro interno do servidor ao remover aluno da turma');
         }
+    }
+
+    async getTurmaStatusResumo(id_turma: number): Promise<TurmaStatusResumoResponseDto> {
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: null },
+        });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        const rawStatus = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .select('ta.status_aluno_turma', 'status')
+            .addSelect('COUNT(*)::int', 'total')
+            .where('ta.id_turma = :id_turma', { id_turma })
+            .andWhere('ta.deletado_em IS NULL')
+            .groupBy('ta.status_aluno_turma')
+            .getRawMany();
+
+        const statusCounts: Record<string, number> = {};
+        Object.values(EStatusAlunosTurmas).forEach((status) => {
+            statusCounts[status] = 0;
+        });
+
+        for (const row of rawStatus) {
+            const key = row.status || 'SEM_STATUS';
+            statusCounts[key] = Number(row.total || 0);
+        }
+
+        const inscritos = await this.uow.turmasAlunosRP.count({
+            where: { id_turma, deletado_em: null },
+        });
+
+        const transferidosDessaTurmaParaOutra = await this.uow.historicoTransferenciasRP.count({
+            where: {
+                id_turma_de: id_turma,
+                deletado_em: null,
+            },
+        });
+
+        const transferidosDeOutraTurmaParaEssa = await this.uow.historicoTransferenciasRP.count({
+            where: {
+                id_turma_para: id_turma,
+                deletado_em: null,
+            },
+        });
+
+        const inadimplentes = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .where('ta.id_turma = :id_turma', { id_turma })
+            .andWhere('ta.deletado_em IS NULL')
+            .andWhere('aluno.status_aluno_geral = :status', { status: EStatusAlunosGeral.INADIMPLENTE })
+            .getCount();
+
+        return {
+            id_turma,
+            inscritos,
+            transferidos: transferidosDessaTurmaParaOutra + transferidosDeOutraTurmaParaEssa,
+            transferidos_dessa_turma_para_outra: transferidosDessaTurmaParaOutra,
+            transferidos_de_outra_turma_para_essa: transferidosDeOutraTurmaParaEssa,
+            falta_enviar_confirmacao: statusCounts[EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO] || 0,
+            aguardando_confirmacao: statusCounts[EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO] || 0,
+            falta_enviar_checkin: statusCounts.FALTA_ENVIAR_LINK_CHECKIN || 0,
+            aguardando_checkin: statusCounts[EStatusAlunosTurmas.AGUARDANDO_CHECKIN] || 0,
+            checkin_realizado: statusCounts[EStatusAlunosTurmas.CHECKIN_REALIZADO] || 0,
+            cancelados: statusCounts[EStatusAlunosTurmas.CANCELADO] || 0,
+            inadimplentes,
+            status_counts: statusCounts,
+        };
     }
 
     async updateAlunoTurma(id_turma_aluno: string, updateAlunoDto: UpdateAlunoTurmaDto): Promise<AlunoTurmaResponseDto> {

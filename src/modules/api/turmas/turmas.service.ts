@@ -2029,8 +2029,8 @@ export class TurmasService {
                 await this.uow.turmasAlunosTreinamentosBonusRP.save(bonus);
             }
 
-            // Remover lastro de transferência relacionado a esta matrícula excluída.
-            // Regra de negócio: ao apagar uma matrícula (origem ou destino), apaga também o registro de transferência.
+            // Ao remover uma matrícula, manter o histórico de transferência para fins de auditoria.
+            // Apenas limpamos referências diretas em matrículas ativas relacionadas.
             const historicosTransferencia = await this.uow.historicoTransferenciasRP.find({
                 where: [
                     { id_turma_aluno_de: id_turma_aluno, deletado_em: null },
@@ -2061,8 +2061,7 @@ export class TurmasService {
                     }
                 }
 
-                historico.deletado_em = new Date();
-                await this.uow.historicoTransferenciasRP.save(historico);
+                // Mantém o histórico ativo (não remover da tabela de transferência).
             }
 
             // Finally, soft delete the turmas_alunos record

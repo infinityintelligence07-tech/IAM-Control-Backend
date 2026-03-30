@@ -246,6 +246,7 @@ export class UploadService {
             nomeOriginal: string;
             nomeCracha: string;
             email: string;
+            titularEmail: string;
             emailGeradoAutomaticamente: boolean;
             telefone: string;
             turmaDestinoId: number;
@@ -253,6 +254,7 @@ export class UploadService {
             statusFinal: EStatusAlunosTurmas;
             origemFinal: EOrigemAlunos;
             idTurmaTransferenciaDe: number | null;
+            isBonusEntry: boolean;
         }> = [];
 
         for (const row of parsed) {
@@ -261,8 +263,13 @@ export class UploadService {
             const emailNormalizadoRaw = this.normalizeEmail(row.email);
             const emailNormalizado = emailNormalizadoRaw || this.buildFallbackEmail(row.nome || '', telefoneNormalizado);
             const emailGeradoAutomaticamente = !emailNormalizadoRaw;
+            const statusNormalizado = this.normalizeText(row.status);
+            const enviarParaSemTurma = statusNormalizado.includes('EXCLUIR') || statusNormalizado.includes('CANCELADO');
 
             if (!nomeNormalizado || !telefoneNormalizado) {
+                if (enviarParaSemTurma) {
+                    totalSemTurma++;
+                }
                 erros.push(
                     `Linha ${row.linha}: dados obrigatórios incompletos (nome/telefone). Nome="${row.nome}", Email="${row.email}", Telefone="${row.telefone}"`,
                 );
@@ -284,14 +291,16 @@ export class UploadService {
             const dedupeKey = `${nomeNormalizado}|${emailNormalizado}|${telefoneNormalizado}`;
             const nextOccurrence = (occurrenceByPessoa.get(dedupeKey) || 0) + 1;
             occurrenceByPessoa.set(dedupeKey, nextOccurrence);
+            const isBonusByDuplicate = nextOccurrence > 1;
+            const emailCandidato = isBonusByDuplicate
+                ? this.buildBonusEmailFromBase(emailNormalizado, nextOccurrence - 1)
+                : emailNormalizado;
 
             const nomeCracha = nextOccurrence === 1 ? row.nome.trim() : `${row.nome.trim()} ${nextOccurrence}`;
-            const statusNormalizado = this.normalizeText(row.status);
             const obsNormalizada = this.normalizeText(row.obs);
             const statusAlunoTurma = this.mapStatusToAlunoTurma(statusNormalizado);
             const enviarParaInadimplente = statusNormalizado.includes('NEGATIVADO') || statusNormalizado.includes('NEGATIVACAO');
-            const enviarParaJuridico = statusNormalizado.includes('CANCELADO');
-            const enviarParaSemTurma = statusNormalizado.includes('EXCLUIR');
+            const enviarParaJuridico = statusNormalizado.includes('JURIDICO');
             const isTransferenciaPorStatus = statusNormalizado.includes('TRANSFER');
             let idTurmaDestino = turmaSelecionada.id;
             let idTurmaTransferenciaDeByStatus: number | null = null;
@@ -392,6 +401,7 @@ export class UploadService {
                 idTurmaDestino = turmaJuridico.id;
             } else if (enviarParaSemTurma) {
                 if (!turmaSemTurma) {
+                    totalSemTurma++;
                     erros.push(
                         `Linha ${row.linha}: status "${row.status}" exige turma SEM_TURMA para o treinamento ${turmaSelecionada.id_treinamento}, mas ela não foi encontrada.`,
                     );
@@ -417,7 +427,10 @@ export class UploadService {
             }
 
             const codigoTurmaOrigem = this.extractCodigoTurmaOrigem(row.obs);
-            const isBonus = row.isBonus || obsNormalizada.includes('BONUS');
+            // A 1a ocorrência do titular deve permanecer como ingresso.
+            // "BONUS" em observação só reforça vínculo em repetições.
+            const isBonusFromObs = isBonusByDuplicate && obsNormalizada.includes('BONUS');
+            const isBonus = isBonusByDuplicate || row.isBonus || isBonusFromObs;
             let origemAluno = this.mapOrigemAluno({
                 isBonus,
                 codigoTurmaOrigem,
@@ -441,7 +454,8 @@ export class UploadService {
                 linha: row.linha,
                 nomeOriginal: row.nome.trim(),
                 nomeCracha,
-                email: emailNormalizado,
+                email: emailCandidato,
+                titularEmail: emailNormalizado,
                 emailGeradoAutomaticamente,
                 telefone: telefoneNormalizado,
                 turmaDestinoId: idTurmaDestino,
@@ -449,6 +463,7 @@ export class UploadService {
                 statusFinal: statusAlunoTurma,
                 origemFinal: origemAluno,
                 idTurmaTransferenciaDe,
+                isBonusEntry: isBonus,
             });
         }
 
@@ -608,7 +623,7 @@ export class UploadService {
                         numero_cracha: numeroCracha,
                         origem_aluno: item.origemFinal,
                         status_aluno_turma: item.statusFinal,
-                        vaga_bonus: false,
+                        vaga_bonus: item.isBonusEntry,
                         id_turma_transferencia_de: item.idTurmaTransferenciaDe,
                     });
                 }
@@ -655,6 +670,21 @@ export class UploadService {
                 await this.uow.turmasAlunosRP.save(entities, { chunk: vinculosChunkSize });
                 lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
             }
+
+            for (const cand of candidates) {
+                if (!cand.isBonusEntry) continue;
+                const alunoBonus = alunoByEmail.get(cand.email);
+                const alunoTitular = alunoByEmail.get(cand.titularEmail);
+                if (!alunoBonus || !alunoTitular) continue;
+                if (alunoBonus.id === alunoTitular.id) continue;
+
+                await this.ensureBidirectionalAlunoVinculo({
+                    titularAlunoId: alunoTitular.id,
+                    bonusAlunoId: alunoBonus.id,
+                    turmaId: cand.turmaDestinoId,
+                    tipoVinculo: ETipoVinculoAluno.BONUS,
+                });
+            }
         }
 
         const totalProcessadas = totalCriadas + totalAtualizadas;
@@ -663,7 +693,7 @@ export class UploadService {
         const acaoFinal = confirmar ? 'processado(s)' : 'pronto(s) para processamento';
 
         return {
-            message: `${tituloModo}. ${totalProcessadas} vínculo(s) ${acaoFinal}, ${totalSemTurma} enviado(s) para SEM_TURMA por status EXCLUIR.`,
+            message: `${tituloModo}. ${totalProcessadas} vínculo(s) ${acaoFinal}, ${totalSemTurma} enviado(s) para SEM_TURMA por status EXCLUIR/CANCELADO.`,
             total_linhas: parsed.length,
             total_processadas: totalProcessadas,
             total_criadas: totalCriadas,
@@ -1088,24 +1118,12 @@ export class UploadService {
                 if (cand.isBonusEntry) {
                     const titularAluno = alunoByEmail.get(cand.titularEmail);
                     if (titularAluno && titularAluno.id !== aluno.id) {
-                        const existsVinculoBonus = await this.uow.alunosVinculosRP.findOne({
-                            where: {
-                                id_aluno: aluno.id,
-                                id_aluno_vinculado: titularAluno.id,
-                                tipo_vinculo: ETipoVinculoAluno.BONUS,
-                                id_turma: cand.turmaDestinoId,
-                                deletado_em: null,
-                            },
+                        await this.ensureBidirectionalAlunoVinculo({
+                            titularAlunoId: titularAluno.id,
+                            bonusAlunoId: aluno.id,
+                            turmaId: cand.turmaDestinoId,
+                            tipoVinculo: ETipoVinculoAluno.BONUS,
                         });
-                        if (!existsVinculoBonus) {
-                            const vinculoBonus = this.uow.alunosVinculosRP.create({
-                                id_aluno: aluno.id,
-                                id_aluno_vinculado: titularAluno.id,
-                                tipo_vinculo: ETipoVinculoAluno.BONUS,
-                                id_turma: cand.turmaDestinoId,
-                            });
-                            await this.uow.alunosVinculosRP.save(vinculoBonus);
-                        }
                     }
                 }
             }
@@ -1273,7 +1291,10 @@ export class UploadService {
         const dataStart = headerIndex + 1;
         const headerRow = rows[headerIndex] || [];
         const normalizedHeaders = headerRow.map((v) => this.normalizeText(String(v ?? '')));
-        const idxNomeParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'NOME');
+        const idxNomeParticipante = this.findHeaderColumnIndex(
+            normalizedHeaders,
+            (h) => h === 'NOME' || h.includes('NOME CONV'),
+        );
         const idxStatusPrincipal = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'STATUS');
         const idxStatusFin = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('STATUS FIN'));
         const isLayoutTreinamentosGerais = idxNomeParticipante >= 0 && idxStatusPrincipal >= 0 && idxStatusPrincipal !== idxStatusFin;
@@ -1292,10 +1313,16 @@ export class UploadService {
 
         if (isLayoutTreinamentosGerais) {
             const idxParceiro = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('PARCEIRO'));
-            const idxObs = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('OBSERV'));
-            const idxTelefoneComprador = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => h.includes('TELEFONE') && idx < idxNomeParticipante);
+            const idxObs = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('OBSERV') || h.includes('OBS'));
+            const idxTelefoneComprador = this.findHeaderColumnIndex(
+                normalizedHeaders,
+                (h, idx) => (h.includes('TELEFONE') || h.includes('TEL') || h.includes('FONE')) && idx < idxNomeParticipante,
+            );
             const idxEmailComprador = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => (h === 'E-MAIL' || h === 'EMAIL') && idx < idxNomeParticipante);
-            const idxTelefoneParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => h.includes('TELEFONE') && idx > idxNomeParticipante);
+            const idxTelefoneParticipante = this.findHeaderColumnIndex(
+                normalizedHeaders,
+                (h, idx) => (h.includes('TELEFONE') || h.includes('TEL') || h.includes('FONE')) && idx > idxNomeParticipante,
+            );
             const idxEmailParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => (h === 'E-MAIL' || h === 'EMAIL') && idx > idxNomeParticipante);
             let idxTransferencia = this.findHeaderColumnIndex(
                 normalizedHeaders,
@@ -1420,6 +1447,39 @@ export class UploadService {
             .toUpperCase()
             .replace(/\s+/g, ' ')
             .trim();
+    }
+
+    private async ensureBidirectionalAlunoVinculo(params: {
+        titularAlunoId: number;
+        bonusAlunoId: number;
+        turmaId: number;
+        tipoVinculo: ETipoVinculoAluno;
+    }): Promise<void> {
+        const relationsToEnsure = [
+            { id_aluno: params.titularAlunoId, id_aluno_vinculado: params.bonusAlunoId },
+            { id_aluno: params.bonusAlunoId, id_aluno_vinculado: params.titularAlunoId },
+        ];
+
+        for (const rel of relationsToEnsure) {
+            const exists = await this.uow.alunosVinculosRP.findOne({
+                where: {
+                    id_aluno: rel.id_aluno,
+                    id_aluno_vinculado: rel.id_aluno_vinculado,
+                    tipo_vinculo: params.tipoVinculo,
+                    id_turma: params.turmaId,
+                    deletado_em: null,
+                },
+            });
+            if (exists) continue;
+
+            const vinculo = this.uow.alunosVinculosRP.create({
+                id_aluno: rel.id_aluno,
+                id_aluno_vinculado: rel.id_aluno_vinculado,
+                tipo_vinculo: params.tipoVinculo,
+                id_turma: params.turmaId,
+            });
+            await this.uow.alunosVinculosRP.save(vinculo);
+        }
     }
 
     private normalizeCodeKey(value: string): string {

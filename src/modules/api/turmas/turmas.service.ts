@@ -723,6 +723,11 @@ export class TurmasService {
             const isPalestra = treinamento.tipo_palestra === true;
             const turmaAberta = createTurmaDto.turma_aberta !== undefined ? createTurmaDto.turma_aberta : isPalestra ? true : false;
 
+            // Palestras/masterclass iniciam com inscrições abertas; treinamentos mantêm o fluxo anterior (padrão do DTO)
+            const statusTurmaFinal = isPalestra
+                ? EStatusTurmas.INSCRICOES_ABERTAS
+                : createTurmaDto.status_turma ?? EStatusTurmas.AGUARDANDO_LIBERACAO;
+
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
                 ...createData,
@@ -730,6 +735,7 @@ export class TurmasService {
                 data_inicio: dataInicioFormatada,
                 data_final: dataFinalFormatada,
                 turma_aberta: turmaAberta,
+                status_turma: statusTurmaFinal,
                 id_turma_bonus: createTurmaDto.id_turma_bonus || null,
                 detalhamento_bonus,
                 criado_por: createTurmaDto.criado_por,

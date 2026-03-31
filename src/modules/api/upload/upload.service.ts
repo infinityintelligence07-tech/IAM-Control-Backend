@@ -243,6 +243,7 @@ export class UploadService {
         const avisos: string[] = [];
         const preview: ImportPreviewItem[] = [];
         const occurrenceByPessoa = new Map<string, number>();
+        const bonusIndexByTitularKey = new Map<string, number>();
 
         const candidates: Array<{
             linha: number;
@@ -295,11 +296,11 @@ export class UploadService {
             const nextOccurrence = (occurrenceByPessoa.get(dedupeKey) || 0) + 1;
             occurrenceByPessoa.set(dedupeKey, nextOccurrence);
             const isBonusByDuplicate = nextOccurrence > 1;
-            const emailCandidato = isBonusByDuplicate ? this.buildBonusEmailFromBase(emailNormalizado, nextOccurrence - 1) : emailNormalizado;
+            let emailCandidato = isBonusByDuplicate ? this.buildBonusEmailFromBase(emailNormalizado, nextOccurrence - 1) : emailNormalizado;
 
             const nomeCracha = nextOccurrence === 1 ? row.nome.trim() : `${row.nome.trim()} ${nextOccurrence}`;
             const obsNormalizada = this.normalizeText(row.obs);
-            const statusAlunoTurma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
+            const statusAlunoTurma = this.mapStatusToAlunoTurma(statusNormalizado);
             const enviarParaInadimplente = statusNormalizado.includes('NEGATIVADO') || statusNormalizado.includes('NEGATIVACAO');
             const enviarParaJuridico = statusNormalizado.includes('JURIDICO');
             const isTransferenciaPorStatus = statusNormalizado.includes('TRANSFER');
@@ -432,6 +433,16 @@ export class UploadService {
             // "BONUS" em observação só reforça vínculo em repetições.
             const isBonusFromObs = isBonusByDuplicate && obsNormalizada.includes('BONUS');
             const isBonus = isBonusByDuplicate || row.isBonus || isBonusFromObs;
+
+            // Se houver linha de bônus/convidado sem e-mail do bônus, replicar e-mail do titular com +bonusN.
+            if (isBonus && row.isBonus && !row.hasEmailBonus) {
+                const emailTitular = this.normalizeEmail(row.emailTitular || '') || emailNormalizado;
+                const telefoneTitular = this.normalizePhone(row.telefoneTitular || '') || telefoneNormalizado;
+                const bonusKeyTitular = `${emailTitular}|${telefoneTitular}`;
+                const nextBonusIndex = (bonusIndexByTitularKey.get(bonusKeyTitular) || 0) + 1;
+                bonusIndexByTitularKey.set(bonusKeyTitular, nextBonusIndex);
+                emailCandidato = this.buildBonusEmailFromBase(emailTitular, nextBonusIndex);
+            }
             let origemAluno = this.mapOrigemAluno({
                 isBonus,
                 codigoTurmaOrigem,
@@ -1393,6 +1404,10 @@ export class UploadService {
         status: string;
         turmaTransferenciaDestino?: string;
         isBonus?: boolean;
+        emailTitular?: string;
+        telefoneTitular?: string;
+        hasEmailBonus?: boolean;
+        hasTelefoneBonus?: boolean;
     }> {
         if (rows.length < 2) {
             throw new BadRequestException('A planilha precisa conter cabeçalho e dados');
@@ -1417,6 +1432,10 @@ export class UploadService {
             status: string;
             turmaTransferenciaDestino?: string;
             isBonus?: boolean;
+            emailTitular?: string;
+            telefoneTitular?: string;
+            hasEmailBonus?: boolean;
+            hasTelefoneBonus?: boolean;
         }> = [];
 
         if (isLayoutTreinamentosGerais) {
@@ -1470,6 +1489,10 @@ export class UploadService {
                     status,
                     turmaTransferenciaDestino,
                     isBonus,
+                    emailTitular: compradorEmail,
+                    telefoneTitular: compradorTelefone,
+                    hasEmailBonus: Boolean(participanteEmail),
+                    hasTelefoneBonus: Boolean(participanteTelefone),
                 });
             }
 
@@ -1499,6 +1522,10 @@ export class UploadService {
                 status,
                 turmaTransferenciaDestino: '',
                 isBonus: false,
+                emailTitular: '',
+                telefoneTitular: '',
+                hasEmailBonus: false,
+                hasTelefoneBonus: false,
             });
         }
 
@@ -1697,11 +1724,10 @@ export class UploadService {
         if (statusNormalizado.includes('CANCELADO') || statusNormalizado.includes('EXCLUIR')) {
             return EStatusAlunosTurmas.CANCELADO;
         }
-
         const statusNaoConfirmado = statusNormalizado.includes('NAO CONFIRM');
         const statusConfirmado = /CONFIRMAD|CONFIRMACA/.test(statusNormalizado);
         if (statusConfirmado && !statusNaoConfirmado) {
-            return EStatusAlunosTurmas.AGUARDANDO_CHECKIN;
+            return EStatusAlunosTurmas.CHECKIN_REALIZADO;
         }
 
         return EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;

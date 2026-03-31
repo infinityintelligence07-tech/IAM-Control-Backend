@@ -28,7 +28,10 @@ interface ImportPreviewItem {
     acao: ImportActionType;
     turma_destino_id: number;
     quantidade_bonus?: number;
+    quantidade_bonus_extra_por_pessoa?: number;
     data_inclusao?: string;
+    turma_bonus_codigo?: string;
+    tipo_linha?: 'PRINCIPAL' | 'BONUS_INSCRICAO' | 'BONUS_EXTRA';
     status_planilha: string;
     status_final: EStatusAlunosTurmas;
     origem_final: EOrigemAlunos;
@@ -292,13 +295,11 @@ export class UploadService {
             const nextOccurrence = (occurrenceByPessoa.get(dedupeKey) || 0) + 1;
             occurrenceByPessoa.set(dedupeKey, nextOccurrence);
             const isBonusByDuplicate = nextOccurrence > 1;
-            const emailCandidato = isBonusByDuplicate
-                ? this.buildBonusEmailFromBase(emailNormalizado, nextOccurrence - 1)
-                : emailNormalizado;
+            const emailCandidato = isBonusByDuplicate ? this.buildBonusEmailFromBase(emailNormalizado, nextOccurrence - 1) : emailNormalizado;
 
             const nomeCracha = nextOccurrence === 1 ? row.nome.trim() : `${row.nome.trim()} ${nextOccurrence}`;
             const obsNormalizada = this.normalizeText(row.obs);
-            const statusAlunoTurma = this.mapStatusToAlunoTurma(statusNormalizado);
+            const statusAlunoTurma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             const enviarParaInadimplente = statusNormalizado.includes('NEGATIVADO') || statusNormalizado.includes('NEGATIVACAO');
             const enviarParaJuridico = statusNormalizado.includes('JURIDICO');
             const isTransferenciaPorStatus = statusNormalizado.includes('TRANSFER');
@@ -760,8 +761,11 @@ export class UploadService {
             turmaOrigemDescricao: string;
             dataInclusao: string;
             quantidadeBonus: number;
+            quantidadeBonusExtraPorPessoa: number;
+            turmaBonusCodigo?: string;
             isTimeDeVendas: boolean;
             isBonusEntry: boolean;
+            isBonusExtraEntry: boolean;
             statusPlanilha: string;
             statusFinal: EStatusAlunosTurmas;
             origemFinal: EOrigemAlunos;
@@ -785,21 +789,34 @@ export class UploadService {
                 continue;
             }
 
-            const codigoDestino = this.normalizeText(row.turmaDestinoCodigo).replace(/\s+/g, '_');
-            const turmaDestinoId = turmaCodigoMap.get(codigoDestino);
+            const destinoLookup = await this.resolveTurmaIdByCodigo({
+                codigoRaw: row.turmaDestinoCodigo,
+                turmaCodigoMap,
+            });
+            if (destinoLookup.matchType === 'edicao') {
+                avisos.push(`Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" encontrada por edição.`);
+            }
+            if (destinoLookup.matchType === 'ambigua') {
+                erros.push(
+                    `Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" é ambígua (mais de uma turma com essa edição). Informe o código completo da turma (SIGLA_CURSO_SIGLA_POLO_EDICAO).`,
+                );
+                continue;
+            }
+            const turmaDestinoId = destinoLookup.turmaId;
             if (!turmaDestinoId) {
                 totalSemTurma++;
                 erros.push(`Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" não encontrada`);
                 continue;
             }
 
-            const codigoOrigem = this.normalizeText(row.turmaOrigemCodigo).replace(/\s+/g, '_');
-            const origemVenda = codigoOrigem.includes('TIME_DE_VENDAS');
+            const codigoOrigem = this.normalizeCodeKey(row.turmaOrigemCodigo);
+            const origemVenda = codigoOrigem.includes('TIME_DE_VENDAS') || codigoOrigem.includes('TIMEDEVENDAS');
             const idTurmaTransferenciaDe = origemVenda ? null : turmaCodigoMap.get(codigoOrigem) || null;
             if (!origemVenda && !idTurmaTransferenciaDe && codigoOrigem) {
                 avisos.push(`Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" não encontrada; será importado sem vínculo de transferência.`);
             }
 
+            const codigoDestino = this.normalizeCodeKey(row.turmaDestinoCodigo);
             // Detectar se esta linha é repetição de mesmo nome+origem (bônus por duplicação)
             const dedupeKey = `${nomeNormalizado}|${codigoOrigem}|${codigoDestino}`;
             const prevOccurrence = occurrenceByPessoa.get(dedupeKey) || 0;
@@ -807,6 +824,31 @@ export class UploadService {
             const isLinhaRepetida = prevOccurrence > 0;
 
             const quantidadeInscricoes = Math.max(1, row.quantidadeInscricoes || 1);
+            const quantidadeBonusExtraPorPessoa = Math.max(0, row.quantidadeBonusTurma || 0);
+            let turmaBonusId: number | null = null;
+            let turmaBonusCodigoFinal = row.turmaBonusCodigo || '';
+
+            if (quantidadeBonusExtraPorPessoa > 0) {
+                if (!turmaBonusCodigoFinal) {
+                    avisos.push(
+                        `Linha ${row.linha}: quantidade de bônus (${quantidadeBonusExtraPorPessoa}) informada sem "BÔNUS PARA QUAL TURMA?". Bônus extra ignorado.`,
+                    );
+                } else {
+                    const bonusLookup = await this.resolveTurmaIdByCodigo({
+                        codigoRaw: turmaBonusCodigoFinal,
+                        turmaCodigoMap,
+                    });
+                    if (bonusLookup.matchType === 'edicao') {
+                        avisos.push(`Linha ${row.linha}: turma de bônus "${turmaBonusCodigoFinal}" encontrada por edição.`);
+                    } else if (bonusLookup.matchType === 'ambigua') {
+                        erros.push(
+                            `Linha ${row.linha}: turma de bônus "${turmaBonusCodigoFinal}" é ambígua. Informe o código completo da turma (SIGLA_CURSO_SIGLA_POLO_EDICAO).`,
+                        );
+                    }
+                    turmaBonusId = bonusLookup.turmaId;
+                    turmaBonusCodigoFinal = bonusLookup.turmaCodigoNormalizado || turmaBonusCodigoFinal;
+                }
+            }
 
             // Total de candidatos a gerar: inscrições da coluna + se for repetida, a própria linha é bônus
             const startIndex = isLinhaRepetida ? 0 : 0;
@@ -818,8 +860,12 @@ export class UploadService {
                 const globalIndex = globalBonusOffset + i;
                 const isBonus = isLinhaRepetida || i > 0;
                 const nomeCracha = globalIndex === 0 ? row.nome.trim() : `${row.nome.trim()} ${globalIndex + 1}`;
-                const origemFinal = isBonus ? EOrigemAlunos.ALUNO_BONUS : idTurmaTransferenciaDe ? EOrigemAlunos.TRANSFERENCIA : EOrigemAlunos.COMPROU_INGRESSO;
+                const origemFinal = isBonus ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO;
                 const emailCandidato = isBonus ? this.buildBonusEmailFromBase(emailNormalizado, globalIndex) : emailNormalizado;
+                const quantidadeBonusRegraAtual = Math.max(0, quantidadeInscricoes - 1) + (isLinhaRepetida ? quantidadeInscricoes : 0);
+                const quantidadeBonusTotalLinha = quantidadeBonusRegraAtual + quantidadeBonusExtraPorPessoa;
+                const statusImportacao = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
+                const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
 
                 candidates.push({
                     linha: row.linha,
@@ -835,14 +881,53 @@ export class UploadService {
                     turmaOrigemCodigo: row.turmaOrigemCodigo,
                     turmaOrigemDescricao: origemVenda ? 'Time de Vendas IAM' : row.turmaOrigemCodigo,
                     dataInclusao: row.dataInclusao,
-                    quantidadeBonus: Math.max(0, quantidadeInscricoes - 1) + (isLinhaRepetida ? quantidadeInscricoes : 0),
+                    quantidadeBonus: quantidadeBonusTotalLinha,
+                    quantidadeBonusExtraPorPessoa,
+                    turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
                     isTimeDeVendas: origemVenda,
                     isBonusEntry: isBonus,
+                    isBonusExtraEntry: false,
                     statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
-                    statusFinal: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                    statusFinal: statusImportacao,
                     origemFinal,
                     idTurmaTransferenciaDe: isBonus ? null : idTurmaTransferenciaDe,
                 });
+
+                if (!turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
+                    continue;
+                }
+
+                for (let bonusExtraPos = 0; bonusExtraPos < quantidadeBonusExtraPorPessoa; bonusExtraPos++) {
+                    const numeradorExtra = globalIndex * quantidadeBonusExtraPorPessoa + bonusExtraPos + 1;
+                    const nomeCrachaBonusExtra = `${row.nome.trim()} ${numeradorExtra} ${row.turmaDestinoCodigo}`.trim();
+                    const emailBonusExtra = this.buildBonusEmailFromBaseWithEvent(emailCandidato, numeradorExtra, slugEvento);
+
+                    candidates.push({
+                        linha: row.linha,
+                        nomeOriginal: row.nome.trim(),
+                        nomeCracha: nomeCrachaBonusExtra,
+                        cpfCnpj: row.cpfCnpj,
+                        email: emailBonusExtra,
+                        titularEmail: emailCandidato,
+                        emailGeradoAutomaticamente: true,
+                        telefone: telefoneNormalizado,
+                        turmaDestinoId: turmaBonusId,
+                        turmaDestinoCodigo: turmaBonusCodigoFinal,
+                        turmaOrigemCodigo: row.turmaOrigemCodigo,
+                        turmaOrigemDescricao: `Bônus de ${row.turmaDestinoCodigo}`,
+                        dataInclusao: row.dataInclusao,
+                        quantidadeBonus: 0,
+                        quantidadeBonusExtraPorPessoa,
+                        turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
+                        isTimeDeVendas: origemVenda,
+                        isBonusEntry: true,
+                        isBonusExtraEntry: true,
+                        statusPlanilha: `BONUS_EXTRA:${row.dataInclusao || '-'}`,
+                        statusFinal: statusImportacao,
+                        origemFinal: EOrigemAlunos.ALUNO_BONUS,
+                        idTurmaTransferenciaDe: null,
+                    });
+                }
             }
         }
 
@@ -972,7 +1057,10 @@ export class UploadService {
                         acao: 'ATUALIZAR',
                         turma_destino_id: item.turmaDestinoId,
                         quantidade_bonus: item.quantidadeBonus,
+                        quantidade_bonus_extra_por_pessoa: item.quantidadeBonusExtraPorPessoa,
                         data_inclusao: item.dataInclusao,
+                        turma_bonus_codigo: item.turmaBonusCodigo,
+                        tipo_linha: item.isBonusExtraEntry ? 'BONUS_EXTRA' : item.isBonusEntry ? 'BONUS_INSCRICAO' : 'PRINCIPAL',
                         status_planilha: item.statusPlanilha,
                         status_final: item.statusFinal,
                         origem_final: item.origemFinal,
@@ -996,7 +1084,10 @@ export class UploadService {
                         acao: 'CRIAR',
                         turma_destino_id: item.turmaDestinoId,
                         quantidade_bonus: item.quantidadeBonus,
+                        quantidade_bonus_extra_por_pessoa: item.quantidadeBonusExtraPorPessoa,
                         data_inclusao: item.dataInclusao,
+                        turma_bonus_codigo: item.turmaBonusCodigo,
+                        tipo_linha: item.isBonusExtraEntry ? 'BONUS_EXTRA' : item.isBonusEntry ? 'BONUS_INSCRICAO' : 'PRINCIPAL',
                         status_planilha: item.statusPlanilha,
                         status_final: item.statusFinal,
                         origem_final: item.origemFinal,
@@ -1050,7 +1141,10 @@ export class UploadService {
                     acao: 'CRIAR',
                     turma_destino_id: item.turmaDestinoId,
                     quantidade_bonus: item.quantidadeBonus,
+                    quantidade_bonus_extra_por_pessoa: item.quantidadeBonusExtraPorPessoa,
                     data_inclusao: item.dataInclusao,
+                    turma_bonus_codigo: item.turmaBonusCodigo,
+                    tipo_linha: item.isBonusExtraEntry ? 'BONUS_EXTRA' : item.isBonusEntry ? 'BONUS_INSCRICAO' : 'PRINCIPAL',
                     status_planilha: item.statusPlanilha,
                     status_final: item.statusFinal,
                     origem_final: item.origemFinal,
@@ -1166,7 +1260,13 @@ export class UploadService {
             throw new BadRequestException('Planilha sem abas');
         }
 
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const abaSubirAluno = workbook.SheetNames.find((sheetName) => this.normalizeText(String(sheetName || '')).includes('SUBIR ALUNO'));
+
+        if (!abaSubirAluno) {
+            throw new BadRequestException('A planilha deve conter uma aba com "Subir aluno" no nome');
+        }
+
+        const worksheet = workbook.Sheets[abaSubirAluno];
         return XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
     }
 
@@ -1180,6 +1280,8 @@ export class UploadService {
         email: string;
         turmaDestinoCodigo: string;
         quantidadeInscricoes: number;
+        quantidadeBonusTurma: number;
+        turmaBonusCodigo: string;
     }> {
         if (rows.length < 2) {
             throw new BadRequestException('A planilha precisa conter cabeçalho e dados');
@@ -1188,12 +1290,14 @@ export class UploadService {
         const headerRow = (rows[0] || []).map((cell) => this.normalizeText(String(cell || '')));
         const idxTurmaOrigem = headerRow.findIndex((h) => h.includes('TURMA ORIGEM'));
         const idxDataInclusao = headerRow.findIndex((h) => h.includes('DATA DA INCLUSAO'));
-        const idxNome = headerRow.findIndex((h) => h.includes('PARCEIRO DE NEGOCIO'));
+        const idxNome = headerRow.findIndex((h) => h.includes('PARCEIRO DE NEGOCIO') || h === 'CLIENTE' || h.includes(' CLIENTE') || h.includes('CLIENTE '));
         const idxCpfCnpj = headerRow.findIndex((h) => h === 'CPF' || h.includes('CNPJ'));
         const idxTelefone = headerRow.findIndex((h) => h.includes('TELEFONE'));
         const idxEmail = headerRow.findIndex((h) => h.includes('E-MAIL') || h === 'EMAIL');
         const idxTurmaDestino = headerRow.findIndex((h) => h.includes('TURMA DESTINO'));
         const idxInscricoes = headerRow.findIndex((h) => h.includes('NUMERO DE INSCRICOES'));
+        const idxQuantidadeBonusTurma = headerRow.findIndex((h) => h.includes('QUANTIDADE DE BONUS'));
+        const idxTurmaBonus = headerRow.findIndex((h) => h.includes('BONUS PARA QUAL TURMA'));
 
         if ([idxTurmaOrigem, idxNome, idxTelefone, idxEmail, idxTurmaDestino, idxInscricoes].some((idx) => idx < 0)) {
             throw new BadRequestException('Modelo de planilha inválido para importação de masterclass');
@@ -1209,6 +1313,8 @@ export class UploadService {
             email: string;
             turmaDestinoCodigo: string;
             quantidadeInscricoes: number;
+            quantidadeBonusTurma: number;
+            turmaBonusCodigo: string;
         }> = [];
 
         for (let i = 1; i < rows.length; i++) {
@@ -1222,6 +1328,9 @@ export class UploadService {
             const turmaDestinoCodigo = String(row[idxTurmaDestino] ?? '').trim();
             const inscricoesRaw = String(row[idxInscricoes] ?? '').trim();
             const quantidadeInscricoes = Math.max(1, parseInt(inscricoesRaw, 10) || 1);
+            const quantidadeBonusTurmaRaw = idxQuantidadeBonusTurma >= 0 ? String(row[idxQuantidadeBonusTurma] ?? '').trim() : '';
+            const quantidadeBonusTurma = Math.max(0, parseInt(quantidadeBonusTurmaRaw, 10) || 0);
+            const turmaBonusCodigo = idxTurmaBonus >= 0 ? String(row[idxTurmaBonus] ?? '').trim() : '';
 
             if (!turmaOrigemCodigo && !nome && !telefone && !email && !turmaDestinoCodigo) {
                 continue;
@@ -1237,6 +1346,8 @@ export class UploadService {
                 email,
                 turmaDestinoCodigo,
                 quantidadeInscricoes,
+                quantidadeBonusTurma,
+                turmaBonusCodigo,
             });
         }
 
@@ -1291,10 +1402,7 @@ export class UploadService {
         const dataStart = headerIndex + 1;
         const headerRow = rows[headerIndex] || [];
         const normalizedHeaders = headerRow.map((v) => this.normalizeText(String(v ?? '')));
-        const idxNomeParticipante = this.findHeaderColumnIndex(
-            normalizedHeaders,
-            (h) => h === 'NOME' || h.includes('NOME CONV'),
-        );
+        const idxNomeParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'NOME' || h.includes('NOME CONV'));
         const idxStatusPrincipal = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'STATUS');
         const idxStatusFin = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('STATUS FIN'));
         const isLayoutTreinamentosGerais = idxNomeParticipante >= 0 && idxStatusPrincipal >= 0 && idxStatusPrincipal !== idxStatusFin;
@@ -1484,6 +1592,54 @@ export class UploadService {
 
     private normalizeCodeKey(value: string): string {
         return this.normalizeText(value).replace(/\s+/g, '_');
+    }
+
+    private buildBonusEmailFromBaseWithEvent(email: string, bonusIndex: number, eventoSlug: string): string {
+        const normalized = (email || '').trim().toLowerCase();
+        const safeEvento = (eventoSlug || 'evento').replace(/[^a-z0-9_-]/g, '').slice(0, 40) || 'evento';
+        const atIndex = normalized.indexOf('@');
+        if (atIndex <= 0) {
+            return `${normalized}+bonus${bonusIndex}-${safeEvento}@sememail.com`;
+        }
+        const local = normalized.slice(0, atIndex);
+        const domain = normalized.slice(atIndex + 1);
+        return `${local}+bonus${bonusIndex}-${safeEvento}@${domain}`;
+    }
+
+    private async resolveTurmaIdByCodigo(params: { codigoRaw: string; turmaCodigoMap: Map<string, number> }): Promise<{
+        turmaId: number | null;
+        matchType: 'codigo' | 'edicao' | 'ambigua' | 'nao_encontrada';
+        turmaCodigoNormalizado: string;
+    }> {
+        const codigoRaw = (params.codigoRaw || '').trim();
+        const codigoNormalizado = this.normalizeCodeKey(codigoRaw);
+        if (!codigoRaw) {
+            return { turmaId: null, matchType: 'nao_encontrada', turmaCodigoNormalizado: codigoNormalizado };
+        }
+
+        const turmaByCodigo = params.turmaCodigoMap.get(codigoNormalizado) || null;
+        if (turmaByCodigo) {
+            return { turmaId: turmaByCodigo, matchType: 'codigo', turmaCodigoNormalizado: codigoNormalizado };
+        }
+
+        const turmasPorEdicao = await this.uow.turmasRP.find({
+            where: {
+                edicao_turma: ILike(codigoRaw),
+                deletado_em: null,
+            },
+        });
+        if (turmasPorEdicao.length === 1) {
+            return {
+                turmaId: turmasPorEdicao[0].id,
+                matchType: 'edicao',
+                turmaCodigoNormalizado: codigoNormalizado,
+            };
+        }
+        if (turmasPorEdicao.length > 1) {
+            return { turmaId: null, matchType: 'ambigua', turmaCodigoNormalizado: codigoNormalizado };
+        }
+
+        return { turmaId: null, matchType: 'nao_encontrada', turmaCodigoNormalizado: codigoNormalizado };
     }
 
     private normalizeEmail(value: string): string {

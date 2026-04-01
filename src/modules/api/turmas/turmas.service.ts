@@ -13,6 +13,8 @@ import {
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
     TurmaStatusResumoResponseDto,
+    TurmaStatusAlunosResponseDto,
+    TurmaStatusAlunosItemDto,
     SoftDeleteTurmaDto,
     OpcoesTransferenciaResponseDto,
     HistoricoTransferenciaItemDto,
@@ -724,9 +726,7 @@ export class TurmasService {
             const turmaAberta = createTurmaDto.turma_aberta !== undefined ? createTurmaDto.turma_aberta : isPalestra ? true : false;
 
             // Palestras/masterclass iniciam com inscrições abertas; treinamentos mantêm o fluxo anterior (padrão do DTO)
-            const statusTurmaFinal = isPalestra
-                ? EStatusTurmas.INSCRICOES_ABERTAS
-                : createTurmaDto.status_turma ?? EStatusTurmas.AGUARDANDO_LIBERACAO;
+            const statusTurmaFinal = isPalestra ? EStatusTurmas.INSCRICOES_ABERTAS : (createTurmaDto.status_turma ?? EStatusTurmas.AGUARDANDO_LIBERACAO);
 
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
@@ -2149,6 +2149,266 @@ export class TurmasService {
             cancelados: statusCounts[EStatusAlunosTurmas.CANCELADO] || 0,
             inadimplentes,
             status_counts: statusCounts,
+        };
+    }
+
+    async getTurmaStatusAlunos(id_turma: number, tipo: string): Promise<TurmaStatusAlunosResponseDto> {
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: null },
+        });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        const qb = this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .select('ta.id', 'id_turma_aluno')
+            .addSelect('aluno.id', 'id_aluno')
+            .addSelect('aluno.nome', 'nome')
+            .addSelect('aluno.email', 'email')
+            .addSelect('aluno.telefone_um', 'telefone')
+            .addSelect('ta.status_aluno_turma', 'status_aluno_turma')
+            .where('ta.id_turma = :id_turma', { id_turma })
+            .andWhere('ta.deletado_em IS NULL');
+
+        let titulo = '';
+        const formatTurmaRelacionada = (
+            siglaTreinamento?: string | null,
+            siglaPolo?: string | null,
+            edicao?: string | null,
+            turmaId?: number | null,
+        ): string | null => {
+            const treino = (siglaTreinamento || '').trim().toUpperCase();
+            const polo = (siglaPolo || '').trim().toUpperCase();
+            const ed = (edicao || '').trim().toUpperCase();
+            if (treino && polo && ed) return `${treino}_${polo}_${ed}`;
+            if (ed) return ed;
+            return turmaId ? `Turma #${turmaId}` : null;
+        };
+
+        switch (tipo) {
+            case 'inscritos':
+                titulo = 'Inscritos';
+                break;
+            case 'transferidos':
+                titulo = 'Transferidos';
+                {
+                    const rawTransferidos = await this.uow.historicoTransferenciasRP
+                        .createQueryBuilder('ht')
+                        .leftJoin('ht.id_aluno_fk', 'aluno')
+                        .leftJoin('ht.id_turma_aluno_para_fk', 'taPara')
+                        .leftJoin('ht.id_turma_aluno_de_fk', 'taDe')
+                        .leftJoin('ht.id_turma_de_fk', 'turmaDe')
+                        .leftJoin('ht.id_turma_para_fk', 'turmaPara')
+                        .leftJoin('turmaDe.id_treinamento_fk', 'treinoDe')
+                        .leftJoin('turmaDe.id_polo_fk', 'poloDe')
+                        .leftJoin('turmaPara.id_treinamento_fk', 'treinoPara')
+                        .leftJoin('turmaPara.id_polo_fk', 'poloPara')
+                        .select('COALESCE(ht.id_turma_aluno_para::text, ht.id_turma_aluno_de::text, ht.id::text)', 'id_turma_aluno')
+                        .addSelect('aluno.id', 'id_aluno')
+                        .addSelect('aluno.nome', 'nome')
+                        .addSelect('aluno.email', 'email')
+                        .addSelect('aluno.telefone_um', 'telefone')
+                        .addSelect('COALESCE(taPara.status_aluno_turma, taDe.status_aluno_turma)', 'status_aluno_turma')
+                        .addSelect('ht.id_turma_de', 'id_turma_de')
+                        .addSelect('ht.id_turma_para', 'id_turma_para')
+                        .addSelect('turmaDe.edicao_turma', 'turma_de_edicao')
+                        .addSelect('turmaPara.edicao_turma', 'turma_para_edicao')
+                        .addSelect('treinoDe.sigla_treinamento', 'turma_de_sigla_treinamento')
+                        .addSelect('poloDe.sigla_polo', 'turma_de_sigla_polo')
+                        .addSelect('treinoPara.sigla_treinamento', 'turma_para_sigla_treinamento')
+                        .addSelect('poloPara.sigla_polo', 'turma_para_sigla_polo')
+                        .where('(ht.id_turma_de = :id_turma OR ht.id_turma_para = :id_turma)', { id_turma })
+                        .andWhere('ht.deletado_em IS NULL')
+                        .orderBy('aluno.nome', 'ASC')
+                        .getRawMany();
+
+                    const alunosTransferidos: TurmaStatusAlunosItemDto[] = rawTransferidos.map((row) => ({
+                        id_turma_aluno: String(row.id_turma_aluno),
+                        id_aluno: Number(row.id_aluno),
+                        nome: row.nome,
+                        email: row.email,
+                        telefone: row.telefone,
+                        status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+                        transferencia_direcao: Number(row.id_turma_para) === id_turma ? 'Transferido De' : 'Transferido Para',
+                        transferencia_turma_relacionada:
+                            Number(row.id_turma_para) === id_turma
+                                ? formatTurmaRelacionada(row.turma_de_sigla_treinamento, row.turma_de_sigla_polo, row.turma_de_edicao, Number(row.id_turma_de))
+                                : formatTurmaRelacionada(
+                                      row.turma_para_sigla_treinamento,
+                                      row.turma_para_sigla_polo,
+                                      row.turma_para_edicao,
+                                      Number(row.id_turma_para),
+                                  ),
+                    }));
+
+                    return {
+                        id_turma,
+                        tipo,
+                        titulo,
+                        total: alunosTransferidos.length,
+                        alunos: alunosTransferidos,
+                    };
+                }
+            case 'transferidos_para_essa':
+                titulo = 'Transferência para essa turma';
+                {
+                    const rawTransferidosParaEssa = await this.uow.historicoTransferenciasRP
+                        .createQueryBuilder('ht')
+                        .leftJoin('ht.id_aluno_fk', 'aluno')
+                        .leftJoin('ht.id_turma_aluno_para_fk', 'taPara')
+                        .leftJoin('ht.id_turma_de_fk', 'turmaDe')
+                        .leftJoin('turmaDe.id_treinamento_fk', 'treinoDe')
+                        .leftJoin('turmaDe.id_polo_fk', 'poloDe')
+                        .select('COALESCE(ht.id_turma_aluno_para::text, ht.id::text)', 'id_turma_aluno')
+                        .addSelect('aluno.id', 'id_aluno')
+                        .addSelect('aluno.nome', 'nome')
+                        .addSelect('aluno.email', 'email')
+                        .addSelect('aluno.telefone_um', 'telefone')
+                        .addSelect('taPara.status_aluno_turma', 'status_aluno_turma')
+                        .addSelect('ht.id_turma_de', 'id_turma_de')
+                        .addSelect('turmaDe.edicao_turma', 'turma_de_edicao')
+                        .addSelect('treinoDe.sigla_treinamento', 'turma_de_sigla_treinamento')
+                        .addSelect('poloDe.sigla_polo', 'turma_de_sigla_polo')
+                        .where('ht.id_turma_para = :id_turma', { id_turma })
+                        .andWhere('ht.deletado_em IS NULL')
+                        .orderBy('aluno.nome', 'ASC')
+                        .getRawMany();
+
+                    const alunosTransferidosParaEssa: TurmaStatusAlunosItemDto[] = rawTransferidosParaEssa.map((row) => ({
+                        id_turma_aluno: String(row.id_turma_aluno),
+                        id_aluno: Number(row.id_aluno),
+                        nome: row.nome,
+                        email: row.email,
+                        telefone: row.telefone,
+                        status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+                        transferencia_direcao: 'Transferido De',
+                        transferencia_turma_relacionada: formatTurmaRelacionada(
+                            row.turma_de_sigla_treinamento,
+                            row.turma_de_sigla_polo,
+                            row.turma_de_edicao,
+                            Number(row.id_turma_de),
+                        ),
+                    }));
+
+                    return {
+                        id_turma,
+                        tipo,
+                        titulo,
+                        total: alunosTransferidosParaEssa.length,
+                        alunos: alunosTransferidosParaEssa,
+                    };
+                }
+            case 'transferidos_para_outra':
+                titulo = 'Transferências para outra turma';
+                {
+                    const rawTransferidosParaOutra = await this.uow.historicoTransferenciasRP
+                        .createQueryBuilder('ht')
+                        .leftJoin('ht.id_aluno_fk', 'aluno')
+                        .leftJoin('ht.id_turma_aluno_de_fk', 'taDe')
+                        .leftJoin('ht.id_turma_para_fk', 'turmaPara')
+                        .leftJoin('turmaPara.id_treinamento_fk', 'treinoPara')
+                        .leftJoin('turmaPara.id_polo_fk', 'poloPara')
+                        .select('COALESCE(ht.id_turma_aluno_de::text, ht.id::text)', 'id_turma_aluno')
+                        .addSelect('aluno.id', 'id_aluno')
+                        .addSelect('aluno.nome', 'nome')
+                        .addSelect('aluno.email', 'email')
+                        .addSelect('aluno.telefone_um', 'telefone')
+                        .addSelect('taDe.status_aluno_turma', 'status_aluno_turma')
+                        .addSelect('ht.id_turma_para', 'id_turma_para')
+                        .addSelect('turmaPara.edicao_turma', 'turma_para_edicao')
+                        .addSelect('treinoPara.sigla_treinamento', 'turma_para_sigla_treinamento')
+                        .addSelect('poloPara.sigla_polo', 'turma_para_sigla_polo')
+                        .where('ht.id_turma_de = :id_turma', { id_turma })
+                        .andWhere('ht.deletado_em IS NULL')
+                        .orderBy('aluno.nome', 'ASC')
+                        .getRawMany();
+
+                    const alunosTransferidosParaOutra: TurmaStatusAlunosItemDto[] = rawTransferidosParaOutra.map((row) => ({
+                        id_turma_aluno: String(row.id_turma_aluno),
+                        id_aluno: Number(row.id_aluno),
+                        nome: row.nome,
+                        email: row.email,
+                        telefone: row.telefone,
+                        status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+                        transferencia_direcao: 'Transferido Para',
+                        transferencia_turma_relacionada: formatTurmaRelacionada(
+                            row.turma_para_sigla_treinamento,
+                            row.turma_para_sigla_polo,
+                            row.turma_para_edicao,
+                            Number(row.id_turma_para),
+                        ),
+                    }));
+
+                    return {
+                        id_turma,
+                        tipo,
+                        titulo,
+                        total: alunosTransferidosParaOutra.length,
+                        alunos: alunosTransferidosParaOutra,
+                    };
+                }
+            case 'confirmados':
+                titulo = 'Confirmados';
+                qb.andWhere('ta.status_aluno_turma IN (:...status)', {
+                    status: [EStatusAlunosTurmas.AGUARDANDO_CHECKIN, EStatusAlunosTurmas.CHECKIN_REALIZADO],
+                });
+                break;
+            case 'confirmacao_aguardando':
+                titulo = 'Aguardando confirmação';
+                qb.andWhere('ta.status_aluno_turma IN (:...status)', {
+                    status: [EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO, EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO],
+                });
+                break;
+            case 'checkin_aguardando':
+                titulo = 'Aguardando check-in';
+                qb.andWhere('ta.status_aluno_turma IN (:...status)', {
+                    status: ['FALTA_ENVIAR_LINK_CHECKIN', EStatusAlunosTurmas.AGUARDANDO_CHECKIN],
+                });
+                break;
+            case 'checkin_realizado':
+                titulo = 'Check-in realizado';
+                qb.andWhere('ta.status_aluno_turma = :status', {
+                    status: EStatusAlunosTurmas.CHECKIN_REALIZADO,
+                });
+                break;
+            case 'cancelados':
+                titulo = 'Cancelados';
+                qb.andWhere('ta.status_aluno_turma = :status', {
+                    status: EStatusAlunosTurmas.CANCELADO,
+                });
+                break;
+            case 'inadimplentes':
+                titulo = 'Inadimplentes';
+                qb.andWhere('aluno.status_aluno_geral = :status', {
+                    status: EStatusAlunosGeral.INADIMPLENTE,
+                });
+                break;
+            default:
+                titulo = 'Inscritos';
+                break;
+        }
+
+        qb.orderBy('aluno.nome', 'ASC');
+
+        const raw = await qb.getRawMany();
+
+        const alunos: TurmaStatusAlunosItemDto[] = raw.map((row) => ({
+            id_turma_aluno: String(row.id_turma_aluno),
+            id_aluno: Number(row.id_aluno),
+            nome: row.nome,
+            email: row.email,
+            telefone: row.telefone,
+            status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+        }));
+
+        return {
+            id_turma,
+            tipo,
+            titulo,
+            total: alunos.length,
+            alunos,
         };
     }
 

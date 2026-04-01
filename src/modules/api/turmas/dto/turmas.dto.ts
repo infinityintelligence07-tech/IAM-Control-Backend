@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { EStatusTurmas } from '../../../config/entities/enum';
+import { EStatusTurmas, EStatusAlunosTurmas } from '../../../config/entities/enum';
 
 export class GetTurmasDto {
     @IsOptional()
@@ -510,6 +510,25 @@ export class TurmaStatusResumoResponseDto {
     cancelados: number;
     inadimplentes: number;
     status_counts: Record<string, number>;
+}
+
+export class TurmaStatusAlunosItemDto {
+    id_turma_aluno: string;
+    id_aluno: number;
+    nome: string;
+    email: string;
+    telefone: string | null;
+    status_aluno_turma: EStatusAlunosTurmas | null;
+    transferencia_direcao?: 'Transferido De' | 'Transferido Para' | null;
+    transferencia_turma_relacionada?: string | null;
+}
+
+export class TurmaStatusAlunosResponseDto {
+    id_turma: number;
+    tipo: string;
+    titulo: string;
+    total: number;
+    alunos: TurmaStatusAlunosItemDto[];
 }
 
 export class SoftDeleteTurmaDto {

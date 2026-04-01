@@ -1271,10 +1271,16 @@ export class UploadService {
             throw new BadRequestException('Planilha sem abas');
         }
 
-        const abaSubirAluno = workbook.SheetNames.find((sheetName) => this.normalizeText(String(sheetName || '')).includes('SUBIR ALUNO'));
+        const abaSubirAluno = workbook.SheetNames.find((sheetName) => {
+            const normalized = this.normalizeText(String(sheetName || ''));
+            const allowedPatterns = ['SUBIR ALUNO', 'SUBIR', 'IAM CONTROL'];
+            return allowedPatterns.some((pattern) => normalized === pattern || normalized.includes(pattern));
+        });
 
         if (!abaSubirAluno) {
-            throw new BadRequestException('A planilha deve conter uma aba com "Subir aluno" no nome');
+            throw new BadRequestException(
+                'A planilha deve conter uma aba com "Subir aluno", "Subir" ou "IAM Control" no nome',
+            );
         }
 
         const worksheet = workbook.Sheets[abaSubirAluno];

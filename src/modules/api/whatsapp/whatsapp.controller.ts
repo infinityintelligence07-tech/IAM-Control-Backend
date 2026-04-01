@@ -30,6 +30,10 @@ export interface SendQRCodeDto {
     dataEvento: string;
 }
 
+export interface GenerateCheckInLinkDto {
+    alunoTurmaId: string;
+}
+
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -57,6 +61,13 @@ export class WhatsAppController {
     async sendConfirmacaoLinks(@Body() data: SendCheckInLinksDto) {
         console.log('Enviando mensagens de confirmação via WhatsApp para:', data.students.length, 'alunos');
         return this.whatsappService.sendConfirmacaoToStudents(data.students);
+    }
+
+    @Post('generate-checkin-link')
+    @UseGuards(JwtAuthGuard)
+    async generateCheckInLink(@Body() data: GenerateCheckInLinkDto) {
+        console.log('Gerando link de preenchimento por alunoTurmaId:', data.alunoTurmaId);
+        return this.whatsappService.generateCheckInLink(data.alunoTurmaId);
     }
 
     @Get('checkin/:token')

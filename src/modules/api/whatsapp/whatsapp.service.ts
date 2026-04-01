@@ -423,6 +423,51 @@ Vamos Prosperar! 🙌`;
         return results;
     }
 
+    async generateCheckInLink(alunoTurmaId: string): Promise<{ success: boolean; link?: string; token?: string; error?: string }> {
+        try {
+            if (!alunoTurmaId) {
+                throw new BadRequestException('alunoTurmaId é obrigatório');
+            }
+
+            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
+                where: { id: alunoTurmaId },
+                relations: ['id_turma_fk'],
+            });
+
+            if (!alunoTurma || !alunoTurma.id_turma_fk) {
+                throw new NotFoundException('Aluno não encontrado na turma');
+            }
+
+            const token = jwt.sign(
+                {
+                    alunoTurmaId,
+                    turmaId: alunoTurma.id_turma_fk.id,
+                    timestamp: Date.now(),
+                },
+                this.jwtSecret,
+                { expiresIn: '7d' },
+            );
+
+            const link = `${this.frontendUrl}/preencherdadosaluno?token=${token}`;
+
+            return {
+                success: true,
+                link,
+                token,
+            };
+        } catch (error: unknown) {
+            if (error instanceof BadRequestException || error instanceof NotFoundException) {
+                throw error;
+            }
+
+            const message = error instanceof Error ? error.message : 'Erro ao gerar link';
+            return {
+                success: false,
+                error: message,
+            };
+        }
+    }
+
     async sendConfirmacaoToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
         const results = { success: true, sent: 0, errors: [] as string[] };
 

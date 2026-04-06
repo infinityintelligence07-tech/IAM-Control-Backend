@@ -1278,9 +1278,7 @@ export class UploadService {
         });
 
         if (!abaSubirAluno) {
-            throw new BadRequestException(
-                'A planilha deve conter uma aba com "Subir aluno", "Subir" ou "IAM Control" no nome',
-            );
+            throw new BadRequestException('A planilha deve conter uma aba com "Subir aluno", "Subir" ou "IAM Control" no nome');
         }
 
         const worksheet = workbook.Sheets[abaSubirAluno];

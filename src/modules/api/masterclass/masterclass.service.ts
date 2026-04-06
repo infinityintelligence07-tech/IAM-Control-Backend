@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { In, LessThanOrEqual } from 'typeorm';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EStatusAlunosGeral, EStatusTurmas } from '../../config/entities/enum';
+import { EStatusAlunosGeral } from '../../config/entities/enum';
 import { MasterclassPreCadastros } from '../../config/entities/masterclassPreCadastros.entity';
 import {
     CreateMasterclassEventoDto,
@@ -447,12 +447,7 @@ export class MasterclassService {
         try {
             console.log('🔍 Iniciando listagem de eventos de masterclass...');
 
-            // Data atual para filtrar apenas masterclasses encerradas
-            const hoje = new Date();
-            hoje.setHours(0, 0, 0, 0);
-
-            // NOVA ABORDAGEM: Buscar primeiro as turmas de palestra/masterclass
-            // Filtrar apenas turmas encerradas (data_final < hoje OU status = ENCERRADA)
+            // Buscar turmas de palestra/masterclass
             const turmasMasterclass = await this.uow.turmasRP.find({
                 relations: ['id_treinamento_fk', 'id_polo_fk'],
                 where: {
@@ -464,37 +459,18 @@ export class MasterclassService {
                 order: { criado_em: 'DESC' },
             });
 
-            // Filtrar apenas turmas encerradas
-            const turmasEncerradas = turmasMasterclass.filter((turma) => {
-                // Verificar se status é ENCERRADA
-                if (turma.status_turma === EStatusTurmas.ENCERRADA) {
-                    return true;
-                }
-
-                // Verificar se data_final é anterior ou igual à data atual
-                if (turma.data_final) {
-                    let dataFinal: Date;
-                    if (typeof turma.data_final === 'string') {
-                        const [year, month, day] = turma.data_final.split('-').map(Number);
-                        dataFinal = new Date(year, month - 1, day);
-                    } else {
-                        dataFinal = turma.data_final;
-                    }
-                    dataFinal.setHours(0, 0, 0, 0);
-                    return dataFinal <= hoje;
-                }
-
-                return false;
-            });
+            // Para a tela de vendas, precisamos considerar também eventos em andamento
+            // e não apenas turmas encerradas.
+            const turmasConsideradas = turmasMasterclass;
 
             console.log('🏫 Turmas de masterclass encontradas:', turmasMasterclass.length);
-            console.log('🏫 Turmas encerradas:', turmasEncerradas.length);
+            console.log('🏫 Turmas consideradas para vendas:', turmasConsideradas.length);
 
             // Agrupar por evento (nome + data)
             const eventosMap = new Map<string, MasterclassEventoResponseDto>();
 
-            // Primeiro, adicionar todas as turmas encerradas como eventos
-            for (const turma of turmasEncerradas) {
+            // Primeiro, adicionar todas as turmas de masterclass como eventos
+            for (const turma of turmasConsideradas) {
                 const eventoNome = turma.id_treinamento_fk?.treinamento || 'Evento sem nome';
 
                 // Usar a data de início da turma como data do evento
@@ -533,8 +509,8 @@ export class MasterclassService {
 
             console.log('📊 Eventos agrupados:', eventosMap.size);
 
-            // Agora buscar pré-cadastros APENAS para as turmas encerradas que já temos
-            const turmasIds = turmasEncerradas.map((t) => t.id);
+            // Agora buscar pré-cadastros APENAS para as turmas consideradas que já temos
+            const turmasIds = turmasConsideradas.map((t) => t.id);
             const [preCadastros, total] = await this.uow.masterclassPreCadastrosRP.findAndCount({
                 where: {
                     id_turma: In(turmasIds), // Só buscar pré-cadastros das turmas existentes
@@ -551,7 +527,7 @@ export class MasterclassService {
                 const dataEventoPC = typeof pc.data_evento === 'string' ? new Date(pc.data_evento) : pc.data_evento;
 
                 // Buscar a turma correspondente ao pré-cadastro
-                const turmaCorrespondente = turmasEncerradas.find((t) => t.id === pc.id_turma);
+                const turmaCorrespondente = turmasConsideradas.find((t) => t.id === pc.id_turma);
                 if (!turmaCorrespondente) continue; // Pular se não encontrar a turma
 
                 // Usar o nome da turma, não do pré-cadastro
@@ -1038,6 +1014,7 @@ export class MasterclassService {
                 id_turma: data.id_turma,
                 presente: data.presente || false,
                 teve_interesse: data.teve_interesse || false,
+                observacoes: data.observacoes,
                 criado_por: data.criado_por,
             });
 
@@ -1070,6 +1047,7 @@ export class MasterclassService {
             if (data.telefone !== undefined) preCadastro.telefone = this.formatarTelefone(data.telefone);
             if (data.presente !== undefined) preCadastro.presente = data.presente;
             if (data.teve_interesse !== undefined) preCadastro.teve_interesse = data.teve_interesse;
+            if (data.observacoes !== undefined) preCadastro.observacoes = data.observacoes;
             if (data.atualizado_por !== undefined) preCadastro.atualizado_por = data.atualizado_por;
 
             return await this.uow.masterclassPreCadastrosRP.save(preCadastro);

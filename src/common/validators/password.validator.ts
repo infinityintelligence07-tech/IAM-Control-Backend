@@ -26,7 +26,7 @@ export class PasswordValidator {
             throw new BadRequestException('Senha deve conter ao menos um número');
         }
 
-        if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+        if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) {
             throw new BadRequestException('Senha deve conter ao menos um caractere especial');
         }
     }

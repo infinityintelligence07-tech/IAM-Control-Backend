@@ -164,10 +164,7 @@ export class TurmasController {
 
     @Get(':id/status-resumo/alunos')
     @UseGuards(JwtAuthGuard)
-    async getTurmaStatusAlunos(
-        @Param('id', ParseIntPipe) id: number,
-        @Query('tipo') tipo: string,
-    ): Promise<TurmaStatusAlunosResponseDto> {
+    async getTurmaStatusAlunos(@Param('id', ParseIntPipe) id: number, @Query('tipo') tipo: string): Promise<TurmaStatusAlunosResponseDto> {
         return this.turmasService.getTurmaStatusAlunos(id, tipo);
     }
 

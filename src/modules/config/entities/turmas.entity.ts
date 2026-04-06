@@ -88,6 +88,9 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'varchar', name: 'url_grupo_whatsapp_2', nullable: true })
     url_grupo_whatsapp_2: string;
 
+    @Column({ type: 'varchar', name: 'url_pagamento_cartao', nullable: true })
+    url_pagamento_cartao: string;
+
     @ManyToOne(() => Polos, (polos) => polos.turmas)
     @JoinColumn([{ name: 'id_polo', referencedColumnName: 'id' }])
     id_polo_fk: Polos;

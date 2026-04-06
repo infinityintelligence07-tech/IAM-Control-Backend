@@ -145,6 +145,11 @@ export class CreateTurmaDto {
     url_grupo_whatsapp_2?: string;
 
     @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_pagamento_cartao?: string;
+
+    @IsOptional()
     @IsNumber()
     criado_por?: number;
 }
@@ -252,6 +257,11 @@ export class UpdateTurmaDto {
     url_grupo_whatsapp_2?: string;
 
     @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    url_pagamento_cartao?: string;
+
+    @IsOptional()
     @IsNumber()
     atualizado_por?: number;
 
@@ -340,6 +350,7 @@ export class TurmaResponseDto {
     url_midia_kit?: string;
     url_grupo_whatsapp?: string;
     url_grupo_whatsapp_2?: string;
+    url_pagamento_cartao?: string;
     created_at: Date;
     updated_at: Date;
     polo?: {

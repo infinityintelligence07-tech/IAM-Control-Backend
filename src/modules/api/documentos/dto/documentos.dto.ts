@@ -156,7 +156,7 @@ export class CriarContratoZapSignDto {
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => FormaPagamentoDto)
-    formas_pagamento?: (FormaPagamentoDto | any)[];
+    formas_pagamento?: FormaPagamentoDto[];
 
     @IsOptional()
     @IsString()

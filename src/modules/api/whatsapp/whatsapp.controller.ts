@@ -221,7 +221,7 @@ export class WhatsAppController {
      * A Gupshup pode fazer uma requisição GET para validar o endpoint
      */
     @Get('webhook-gupshup')
-    async webhookGupshupValidation(@Query() query: any) {
+    webhookGupshupValidation(@Query() query: any) {
         console.log('📥 Validação de webhook Gupshup recebida:', query);
 
         // Se a Gupshup enviar um challenge, retorna ele de volta
@@ -242,7 +242,7 @@ export class WhatsAppController {
      */
     @Get('webhook-gupshup/status/:messageId')
     @UseGuards(JwtAuthGuard)
-    async getWebhookStatusByMessageId(@Param('messageId') messageId: string) {
+    getWebhookStatusByMessageId(@Param('messageId') messageId: string) {
         console.log('🔎 Consultando histórico de webhook para messageId:', messageId);
         return this.chatGuruService.getWebhookEventsByMessageId(messageId);
     }
@@ -256,7 +256,7 @@ export class WhatsAppController {
      */
     @Get('confirmacao-respostas')
     @UseGuards(JwtAuthGuard)
-    async getConfirmacaoRespostas(@Query('alunoTurmaId') alunoTurmaId?: string, @Query('phone') phone?: string, @Query('limit') limit?: string) {
+    getConfirmacaoRespostas(@Query('alunoTurmaId') alunoTurmaId?: string, @Query('phone') phone?: string, @Query('limit') limit?: string) {
         const parsedLimit = limit ? Number(limit) : undefined;
         return this.whatsappService.getConfirmacaoInboundResponses({
             alunoTurmaId,

@@ -429,6 +429,10 @@ export class TurmasService {
                     turma_aberta: turma.turma_aberta,
                     bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                     detalhamento_bonus: turma.detalhamento_bonus,
+                    url_midia_kit: turma.url_midia_kit,
+                    url_grupo_whatsapp: turma.url_grupo_whatsapp,
+                    url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
+                    url_pagamento_cartao: turma.url_pagamento_cartao,
                     created_at: turma.criado_em,
                     updated_at: turma.atualizado_em,
                     polo: turma.id_polo_fk
@@ -552,6 +556,10 @@ export class TurmasService {
                 turma_aberta: turma.turma_aberta,
                 bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                 detalhamento_bonus: turma.detalhamento_bonus,
+                url_midia_kit: turma.url_midia_kit,
+                url_grupo_whatsapp: turma.url_grupo_whatsapp,
+                url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
+                url_pagamento_cartao: turma.url_pagamento_cartao,
                 created_at: turma.criado_em,
                 updated_at: turma.atualizado_em,
                 polo: turma.id_polo_fk
@@ -1250,6 +1258,10 @@ export class TurmasService {
                     turma_aberta: turma.turma_aberta,
                     bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                     detalhamento_bonus: turma.detalhamento_bonus,
+                    url_midia_kit: turma.url_midia_kit,
+                    url_grupo_whatsapp: turma.url_grupo_whatsapp,
+                    url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
+                    url_pagamento_cartao: turma.url_pagamento_cartao,
                     created_at: turma.criado_em,
                     updated_at: turma.atualizado_em,
                     polo: turma.id_polo_fk

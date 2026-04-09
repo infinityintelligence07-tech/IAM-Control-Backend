@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, Req } from '@nestjs/common';
 import { TurmasService } from './turmas.service';
 import {
     GetTurmasDto,
@@ -214,13 +214,16 @@ export class TurmasController {
     }
 
     @Put(':id/alunos/:id_turma_aluno')
+    @UseGuards(JwtAuthGuard)
     async updateAlunoTurma(
         @Param('id', ParseIntPipe) id_turma: number,
         @Param('id_turma_aluno') id_turma_aluno: string,
         @Body() updateAlunoDto: UpdateAlunoTurmaDto,
+        @Req() req: any,
     ): Promise<AlunoTurmaResponseDto> {
         console.log('Atualizando aluno na turma:', id_turma_aluno, 'com dados:', updateAlunoDto);
-        return this.turmasService.updateAlunoTurma(id_turma_aluno, updateAlunoDto);
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.updateAlunoTurma(id_turma_aluno, updateAlunoDto, userId);
     }
 
     @Delete(':id/alunos/:id_turma_aluno')

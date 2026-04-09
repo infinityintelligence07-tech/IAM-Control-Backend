@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral } from '../../config/entities/enum';
 import {
@@ -58,6 +58,40 @@ export class TurmasService {
         if (this.isAlunoTransferidoDaTurma(turmaAluno)) return false;
 
         return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas);
+    }
+
+    private hasValue(value: unknown): boolean {
+        if (value === null || value === undefined) return false;
+        if (typeof value !== 'string') return true;
+        return value.trim().length > 0;
+    }
+
+    /**
+     * Ficha considerada preenchida quando os campos-chave do check-in estão presentes.
+     */
+    private isFichaPreenchida(aluno: any): boolean {
+        if (!aluno) return false;
+        return this.hasValue(aluno.cpf) && this.hasValue(aluno.telefone_um) && this.hasValue(aluno.genero) && this.hasValue(aluno.data_nascimento);
+    }
+
+    private async validarPermissaoDesmarcarPresenca(turmaAluno: any, userId?: number): Promise<void> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado a desmarcar presença');
+        }
+
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'funcao'] as any,
+        });
+
+        const funcoesUsuario = Array.isArray(usuario?.funcao) ? usuario?.funcao : [];
+        const isAdmin = funcoesUsuario.includes(EFuncoes.ADMINISTRADOR);
+        const liderEventoId = turmaAluno?.id_turma_fk?.lider_evento;
+        const isLiderDaTurma = Number(liderEventoId) === Number(userId);
+
+        if (!isAdmin && !isLiderDaTurma) {
+            throw new ForbiddenException('Somente o líder do evento pode desmarcar presença');
+        }
     }
 
     private async getTransferidosCountByTurmas(turmaIds: number[]): Promise<Record<number, number>> {
@@ -856,6 +890,7 @@ export class TurmasService {
                 transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
                 transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
                 telefone: turmaAluno.id_aluno_fk?.telefone_um || '',
+                ficha_preenchida: this.isFichaPreenchida(turmaAluno.id_aluno_fk),
                 created_at: turmaAluno.criado_em,
                 aluno: turmaAluno.id_aluno_fk
                     ? {
@@ -864,6 +899,21 @@ export class TurmasService {
                           email: turmaAluno.id_aluno_fk.email,
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha || turmaAluno.id_aluno_fk.nome,
                           status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
+                          cpf: turmaAluno.id_aluno_fk.cpf,
+                          telefone_um: turmaAluno.id_aluno_fk.telefone_um,
+                          telefone_dois: turmaAluno.id_aluno_fk.telefone_dois,
+                          cep: turmaAluno.id_aluno_fk.cep,
+                          logradouro: turmaAluno.id_aluno_fk.logradouro,
+                          complemento: turmaAluno.id_aluno_fk.complemento,
+                          numero: turmaAluno.id_aluno_fk.numero,
+                          bairro: turmaAluno.id_aluno_fk.bairro,
+                          cidade: turmaAluno.id_aluno_fk.cidade,
+                          estado: turmaAluno.id_aluno_fk.estado,
+                          profissao: turmaAluno.id_aluno_fk.profissao,
+                          genero: turmaAluno.id_aluno_fk.genero,
+                          data_nascimento: turmaAluno.id_aluno_fk.data_nascimento,
+                          possui_deficiencia: turmaAluno.id_aluno_fk.possui_deficiencia,
+                          desc_deficiencia: turmaAluno.id_aluno_fk.desc_deficiencia,
                       }
                     : undefined,
                 turma: turmaAluno.id_turma_fk
@@ -1607,13 +1657,26 @@ export class TurmasService {
                           nome: turmaAluno.id_aluno_fk.nome,
                           email: turmaAluno.id_aluno_fk.email,
                           telefone: turmaAluno.id_aluno_fk.telefone_um,
+                          telefone_um: turmaAluno.id_aluno_fk.telefone_um,
+                          telefone_dois: turmaAluno.id_aluno_fk.telefone_dois,
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
                           cpf: turmaAluno.id_aluno_fk.cpf,
+                          cep: turmaAluno.id_aluno_fk.cep,
+                          logradouro: turmaAluno.id_aluno_fk.logradouro,
+                          complemento: turmaAluno.id_aluno_fk.complemento,
+                          numero: turmaAluno.id_aluno_fk.numero,
+                          bairro: turmaAluno.id_aluno_fk.bairro,
+                          cidade: turmaAluno.id_aluno_fk.cidade,
+                          estado: turmaAluno.id_aluno_fk.estado,
+                          profissao: turmaAluno.id_aluno_fk.profissao,
+                          genero: turmaAluno.id_aluno_fk.genero,
+                          data_nascimento: turmaAluno.id_aluno_fk.data_nascimento,
                           status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
                           possui_deficiencia: turmaAluno.id_aluno_fk.possui_deficiencia,
                           desc_deficiencia: turmaAluno.id_aluno_fk.desc_deficiencia,
                       }
                     : undefined,
+                ficha_preenchida: this.isFichaPreenchida(turmaAluno.id_aluno_fk),
             }));
 
             const totalPages = Math.ceil(total / limit);
@@ -2437,7 +2500,7 @@ export class TurmasService {
         };
     }
 
-    async updateAlunoTurma(id_turma_aluno: string, updateAlunoDto: UpdateAlunoTurmaDto): Promise<AlunoTurmaResponseDto> {
+    async updateAlunoTurma(id_turma_aluno: string, updateAlunoDto: UpdateAlunoTurmaDto, userId?: number): Promise<AlunoTurmaResponseDto> {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id_turma_aluno },
@@ -2462,6 +2525,10 @@ export class TurmasService {
                 turmaAluno.status_aluno_turma = updateAlunoDto.status_aluno_turma as EStatusAlunosTurmas;
             }
             if (updateAlunoDto.presenca_turma !== undefined) {
+                const desmarcandoPresenca = turmaAluno.presenca_turma === EPresencaTurmas.PRESENTE && updateAlunoDto.presenca_turma === 'NO_SHOW';
+                if (desmarcandoPresenca) {
+                    await this.validarPermissaoDesmarcarPresenca(turmaAluno, userId);
+                }
                 turmaAluno.presenca_turma = updateAlunoDto.presenca_turma as EPresencaTurmas;
             }
             if (updateAlunoDto.atualizado_por !== undefined) {

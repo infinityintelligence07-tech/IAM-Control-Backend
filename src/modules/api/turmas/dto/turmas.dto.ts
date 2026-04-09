@@ -402,6 +402,7 @@ export class AlunoTurmaResponseDto {
     origem_aluno?: string;
     status_aluno_turma?: string;
     presenca_turma?: string;
+    ficha_preenchida?: boolean;
     url_comprovante_pgto?: string;
     created_at: Date;
     /** Tag "Transferência Para": turma para a qual o aluno foi transferido (permanece na turma atual com esta referência). */
@@ -429,8 +430,20 @@ export class AlunoTurmaResponseDto {
         nome: string;
         email: string;
         telefone?: string;
+        telefone_um?: string;
+        telefone_dois?: string;
         nome_cracha: string;
         cpf?: string;
+        cep?: string;
+        logradouro?: string;
+        complemento?: string;
+        numero?: string;
+        bairro?: string;
+        cidade?: string;
+        estado?: string;
+        profissao?: string;
+        genero?: string;
+        data_nascimento?: string;
         status_aluno_geral?: string;
         possui_deficiencia?: boolean;
         desc_deficiencia?: string;

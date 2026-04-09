@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
-import * as fs from 'fs';
-import * as path from 'path';
 
 @Injectable()
 export class ContractTemplateService {
@@ -79,21 +77,510 @@ export class ContractTemplateService {
             return convertGoogleDriveUrl(url);
         };
 
-        // Tenta usar o template HTML físico da pasta templates como fonte principal.
-        const templatePathCandidates = [
-            path.resolve(process.cwd(), 'src/modules/api/documentos/templates/contrato-template.html'),
-            path.resolve(__dirname, 'templates/contrato-template.html'),
-            path.resolve(__dirname, '../templates/contrato-template.html'),
-        ];
-        const templatePath = templatePathCandidates.find((candidate) => fs.existsSync(candidate));
-        const useFileTemplate = process.env.CONTRACT_TEMPLATE_MODE !== 'embedded';
+        const useTsContractTemplate = process.env.CONTRACT_TEMPLATE_MODE !== 'legacy-embedded';
 
-        if (useFileTemplate && !templatePath) {
-            throw new Error('Template HTML do contrato não encontrado em src/modules/api/documentos/templates/contrato-template.html');
+        if (useTsContractTemplate) {
+            const templateHtml = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contrato de Treinamento</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Figtree', Arial, sans-serif;
+            padding: 3cm 2cm 2cm 3cm;
+            font-size: 11px;
+            line-height: 1.55;
+            color: #000;
+            background-color: white;
         }
 
-        if (useFileTemplate && templatePath) {
-            const templateHtml = fs.readFileSync(templatePath, 'utf-8');
+        .first-page {
+            position: relative;
+            min-height: auto;
+            padding-bottom: 0;
+        }
+        
+        .header {
+            margin-bottom: 18px;
+            text-align: center;
+            page-break-inside: avoid;
+        }
+
+        .iam-brand {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            margin: 0 auto 12px auto;
+        }
+
+        .iam-logo-image {
+            max-height: 50px;
+            max-width: 170px;
+            object-fit: contain;
+        }
+
+        .logo-divider {
+            width: 1.5px;
+            height: 42px;
+            background-color: #666;
+        }
+
+        .company-name {
+            font-weight: bold;
+            font-size: 19px;
+            color: #1e3a8a;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            text-align: left;
+        }
+
+        .training-logo-bottom {
+            position: static;
+            text-align: center;
+            page-break-inside: avoid;
+            margin-top: 4px;
+        }
+
+        .training-logo-bottom img {
+            max-height: 54px;
+            max-width: 260px;
+            object-fit: contain;
+        }
+        
+        .intro-text {
+            margin-bottom: 10px;
+            font-size: 11px;
+            line-height: 1.5;
+            text-align: justify;
+            text-indent: 22px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-bottom: 10px;
+            border: 1px solid #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        td {
+            padding: 8px 10px;
+            border-right: 1px solid #000;
+            border-bottom: 1px solid #000;
+            font-size: 11px;
+            vertical-align: top;
+        }
+        
+        td:last-child {
+            border-right: none;
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        td strong {
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .full-width {
+            width: 100%;
+        }
+        
+        .half-width {
+            width: 50%;
+        }
+        
+        .checkbox-item {
+            display: block;
+            margin: 3px 0;
+            font-size: 11px;
+        }
+        
+        .checkbox {
+            margin-right: 5px;
+            transform: scale(1);
+            accent-color: #000;
+        }
+         
+        .checkbox:disabled {
+            opacity: 0.8;
+            cursor: not-allowed;
+        }
+        
+        .signature-line {
+            border-top: 1px solid #000;
+            margin-bottom: 10px;
+            height: 1px;
+        }
+        
+        .declaration {
+            margin: 18px 0;
+            text-align: justify;
+            font-size: 10px;
+            line-height: 1.6;
+            text-indent: 22px;
+        }
+        
+        .signature-location {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 10px;
+            gap: 16px;
+        }
+        
+        .signature-label {
+            text-align: center;
+            font-size: 10px;
+            min-height: 28px;
+        }
+        
+        .witnesses-section {
+            display: flex;
+            gap: 40px;
+            margin-top: 14px;
+            page-break-inside: avoid;
+        }
+        
+        .witness {
+            flex: 1;
+        }
+        
+        .witness-line {
+            border-top: 1.5px solid #000;
+            margin-bottom: 8px;
+            margin-top: 16px;
+        }
+        
+        .witness-info {
+            font-size: 10px;
+            line-height: 1.8;
+        }
+
+        .signature-block {
+            margin-top: 16px;
+            page-break-inside: avoid;
+        }
+
+        .signature-main {
+            margin: 12px auto 14px auto;
+            width: 70%;
+            text-align: center;
+            min-height: 58px;
+        }
+
+        .signature-block-page1 {
+            margin-top: 8px;
+            page-break-inside: avoid;
+        }
+        
+        .footer-brand {
+            text-align: center;
+            margin-top: 40px;
+        }
+        
+        .page-break {
+            page-break-before: always;
+        }
+        
+        .clause {
+            margin-bottom: 10px;
+            text-align: justify;
+            page-break-inside: avoid;
+        }
+        
+        .clause-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+            page-break-after: avoid;
+            text-transform: none;
+            line-height: 1.35;
+        }
+        
+        .clause-text {
+            line-height: 1.38;
+            font-weight: 500;
+            text-indent: 0;
+        }
+
+        .clauses-page-content {
+            margin-top: 18px;
+            margin-bottom: 20px;
+        }
+
+        .clauses-wrapper {
+            margin-top: 10px;
+            margin-bottom: 16px;
+            padding-top: 10px;
+            padding-bottom: 12px;
+        }
+
+        .clauses-wrapper p,
+        .clauses-wrapper div {
+            line-height: 1.38;
+            font-weight: 500;
+        }
+
+        .clauses-wrapper p {
+            margin: 0 0 5px 0;
+            text-align: justify;
+            text-indent: 0;
+        }
+
+        .paragraph {
+            margin-left: 0;
+            margin-top: 6px;
+            margin-bottom: 6px;
+            text-indent: 0;
+        }
+        
+        .center-text {
+            text-align: center;
+            font-style: italic;
+            margin: 24px 0;
+        }
+        
+        .bold {
+            font-weight: bold;
+        }
+        
+        .payment-header {
+            text-align: center;
+            background: #f0f0f0;
+        }
+        
+        .payment-header strong {
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .clause-page-break {
+            page-break-before: always;
+        }
+
+        @media print {
+            body {
+                padding: 3cm 2cm 2cm 3cm;
+            }
+
+            .clause,
+            .clause-title,
+            .clause-text,
+            .signature-block,
+            .signature-block-page1,
+            .witnesses-section {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
+            .clause-page-break {
+                break-before: page;
+                page-break-before: always;
+            }
+
+            .first-page {
+                min-height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="first-page">
+    <div class="header">
+        <div class="iam-brand">
+            <img src="{{IAM_LOGO_URL}}" alt="Logo IAM" class="iam-logo-image" onerror="this.style.display='none';">
+            <div class="logo-divider"></div>
+            <div class="company-name">INSTITUTO ACADEMY MIND</div>
+        </div>
+    </div>
+    
+    <div class="intro-text">
+        O presente instrumento tem como objetivo realizar a inscrição da pessoa abaixo nominada no seguinte treinamento:
+    </div>
+    
+    <table>
+        <tr>
+            <td class="full-width" colspan="2">
+                <strong>Nome Completo:</strong> {{ALUNO_NOME}}
+            </td>
+        </tr>
+        <tr>
+            <td class="half-width">
+                <strong>CPF/CNPJ:</strong> {{ALUNO_CPF}}
+            </td>
+            <td class="half-width">
+                <strong>Data de Nascimento:</strong> {{ALUNO_DATA_NASCIMENTO}}
+            </td>
+        </tr>
+        <tr>
+            <td class="half-width">
+                <strong>WhatsApp:</strong> {{ALUNO_WHATSAPP}}
+            </td>
+            <td class="half-width">
+                <strong>E-mail:</strong> {{ALUNO_EMAIL}}
+            </td>
+        </tr>
+        <tr>
+            <td class="full-width" colspan="2">
+                <strong>Endereço:</strong> {{ALUNO_ENDERECO_LOGRADOURO}}, {{ALUNO_ENDERECO_NUMERO}}, {{ALUNO_ENDERECO_COMPLEMENTO}}, {{ALUNO_ENDERECO_BAIRRO}}
+            </td>
+        </tr>
+        <tr>
+            <td class="half-width">
+                <strong>Cidade/Estado:</strong> {{ALUNO_CIDADE_ESTADO}}
+            </td>
+            <td class="half-width">
+                <strong>CEP:</strong> {{ALUNO_CEP}}
+            </td>
+        </tr>
+    </table>
+    
+    <table>
+        <tr>
+            <td class="half-width" style="vertical-align: top;">
+                <strong>Treinamento:</strong> {{TREINAMENTO_NOME}}<br><br>
+                <strong>Cidade:</strong> {{TREINAMENTO_CIDADE}}<br><br>
+                <strong>Data Prevista:</strong> {{TREINAMENTO_DATA_INICIO}} à {{TREINAMENTO_DATA_FIM}}<br><br>
+                <strong>Preço do Contrato:</strong> {{TREINAMENTO_PRECO}}
+            </td>
+            <td class="half-width" style="vertical-align: top;">
+                <strong>Bônus:</strong><br>
+                {{BONUS_DETALHES_HTML}}
+            </td>
+        </tr>
+    </table>
+    
+    <table>
+        <tr>
+            <td class="payment-header" colspan="2">
+                <strong>FORMA DE PAGAMENTO</strong>
+            </td>
+        </tr>
+        <tr>
+            <td class="half-width" style="vertical-align: top;">
+                <strong>À VISTA:</strong><br>
+                {{PAGAMENTO_AVISTA_DETALHES_HTML}}
+            </td>
+            <td class="half-width" style="vertical-align: top;">
+                <strong>PARCELADO:</strong><br>
+                {{PAGAMENTO_PARCELADO_DETALHES_HTML}}
+            </td>
+        </tr>
+    </table>
+    
+    <table>
+        <tr>
+            <td>
+                <strong>OBSERVAÇÕES:</strong><br><br>
+                {{OBSERVACOES}}
+            </td>
+        </tr>
+    </table>
+
+    <div class="signature-block-page1">
+        <div class="signature-location">
+            <div><strong>Local:</strong> {{CONTRATO_LOCAL}}</div>
+            <div><strong>Data:</strong> {{CONTRATO_DATA}}</div>
+        </div>
+
+        <div class="declaration" style="margin-top: 0;">
+            Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+        </div>
+
+        <div class="signature-main">
+            <div class="signature-line"></div>
+            <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
+        </div>
+
+        <div class="witnesses-section" style="margin-top: 20px;">
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div class="witness-info">
+                    <div><span class="bold">Testemunha 1</span></div>
+                    <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                    <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+                </div>
+            </div>
+            
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div class="witness-info">
+                    <div><span class="bold">Testemunha 2</span></div>
+                    <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                    <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="training-logo-bottom">
+        <img src="{{TREINAMENTO_LOGO_URL}}" alt="Logo do Treinamento" onerror="this.style.display='none';">
+    </div>
+    </div>
+    
+    <div class="page-break"></div>
+    
+    <div class="clauses-page-content">
+        <div class="clauses-wrapper">
+            {{CLAUSULAS_HTML}}
+        </div>
+        
+        <div class="declaration">
+            Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+        </div>
+        
+        <div class="center-text">
+            E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.
+        </div>
+
+        <div class="signature-block">
+            <div class="signature-location">
+                <div><strong>Local:</strong> {{CONTRATO_LOCAL}}</div>
+                <div><strong>Data:</strong> {{CONTRATO_DATA}}</div>
+            </div>
+            
+            <div class="signature-main">
+                <div class="signature-line"></div>
+                <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
+            </div>
+            
+            <div class="witnesses-section">
+                <div class="witness">
+                    <div class="witness-line"></div>
+                    <div class="witness-info">
+                        <div><span class="bold">Testemunha 1</span></div>
+                        <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                        <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+                    </div>
+                </div>
+                
+                <div class="witness">
+                    <div class="witness-line"></div>
+                    <div class="witness-info">
+                        <div><span class="bold">Testemunha 2</span></div>
+                        <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                        <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>`;
             const formasPagamento = Array.isArray(pagamento?.formas_pagamento) ? pagamento.formas_pagamento : [];
             const bonusTipos = Array.isArray(bonus?.tipos_bonus) ? bonus.tipos_bonus : [];
             const clausulasOriginais = typeof template?.clausulas === 'string' ? template.clausulas : '';
@@ -193,6 +680,31 @@ export class ContractTemplateService {
                 return Number(normalized) || 0;
             };
 
+            const formatCurrencyBRL = (value: number): string =>
+                new Intl.NumberFormat('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL',
+                }).format(Number(value) || 0);
+
+            const formatDatePtBr = (value: unknown, fallback: string = '___/___/___'): string => {
+                if (!value) return fallback;
+                if (typeof value !== 'string' && typeof value !== 'number') return fallback;
+                const raw = String(value).trim();
+                if (!raw) return fallback;
+
+                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                    const [ano, mes, dia] = raw.split('-');
+                    return `${dia}/${mes}/${ano}`;
+                }
+                if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
+
+                const parsed = new Date(raw);
+                if (!Number.isNaN(parsed.getTime())) {
+                    return parsed.toLocaleDateString('pt-BR');
+                }
+                return fallback;
+            };
+
             const getNormalizedPaymentType = (fp: any): string => {
                 const explicitType = normalizeString(fp?.tipo);
                 if (explicitType.includes('PARCELADO')) return 'PARCELADO';
@@ -230,6 +742,42 @@ export class ContractTemplateService {
                     const hasValue = parsePaymentValue(fp?.valor) > 0;
                     return method === forma && paymentType === tipo && hasValue;
                 });
+
+            const normalizedPaymentEntries = formasPagamento
+                .map((fp: any) => {
+                    const tipo = getNormalizedPaymentType(fp);
+                    const forma = getNormalizedPaymentMethod(fp);
+                    const valor = parsePaymentValue(fp?.valor);
+                    const parcelas = Number(fp?.parcelas || 0);
+                    const descricao = typeof fp?.descricao === 'string' ? fp.descricao.trim() : '';
+                    const tituloOriginal = typeof fp?.forma === 'string' ? fp.forma.trim() : '';
+                    return {
+                        ...fp,
+                        tipo,
+                        forma,
+                        valor,
+                        parcelas,
+                        descricao,
+                        tituloOriginal,
+                    };
+                })
+                .filter((fp: any) => fp.valor > 0);
+
+            const getGroupedPayment = (forma: string, tipo: string) => {
+                const itens = normalizedPaymentEntries.filter((fp: any) => fp.forma === forma && fp.tipo === tipo);
+                return {
+                    checked: itens.length > 0,
+                    valorTotal: itens.reduce((sum: number, fp: any) => sum + fp.valor, 0),
+                    parcelas: itens.reduce((max: number, fp: any) => Math.max(max, Number(fp.parcelas || 0)), 0),
+                    descricoes: itens.map((fp: any) => fp.descricao).filter(Boolean),
+                };
+            };
+
+            const escapeAndFallback = (value: unknown, fallback: string = '_________________'): string => {
+                if (typeof value !== 'string' && typeof value !== 'number') return fallback;
+                const normalized = String(value).trim();
+                return normalized ? escapeHtml(normalized) : fallback;
+            };
 
             const totalContrato = formasPagamento.reduce((total: number, fp: any) => total + Number(fp?.valor || 0), 0);
             const enderecoFormatado = [aluno?.endereco?.logradouro, aluno?.endereco?.numero, aluno?.endereco?.complemento, aluno?.endereco?.bairro]
@@ -269,6 +817,138 @@ export class ContractTemplateService {
             const dataImersao = campos_variaveis?.['Data do Imersão Prosperar'] || '___/___/___';
             const bonusOutrosDescricao = campos_variaveis?.['Descrição do Outro Bônus'] || '_________________';
             const nomeTreinamento = treinamento?.nome || treinamento?.treinamento || campos_variaveis?.['Nome do Treinamento Contratado'] || '_________________';
+            const quantidadeInscricoesBonus = campos_variaveis?.['Quantidade de Inscrições'] || '1';
+
+            const bonusDetalhesHtml = (() => {
+                const tipoBonus = new Set((bonusTipos || []).map((tipo: string) => normalizeString(tipo).toLowerCase()));
+                const temOutrosPorValores = Object.keys(bonus?.valores_bonus || {}).some((key) => normalizeString(key).includes('BONUS-OUTROS'));
+
+                const tem100Dias = tipoBonus.has('100_dias') || tipoBonus.has('100dias');
+                const temIPR = tipoBonus.has('ipr');
+                const temOutros = tipoBonus.has('outros') || temOutrosPorValores;
+                const naoSeAplica = !tem100Dias && !temIPR && !temOutros;
+
+                const descricaoOutros = (() => {
+                    if (campos_variaveis?.['Descrição do Outro Bônus']) return campos_variaveis['Descrição do Outro Bônus'];
+                    const chaveOutros = Object.keys(bonus?.valores_bonus || {}).find((key) => normalizeString(key).includes('BONUS-OUTROS'));
+                    if (chaveOutros) return chaveOutros.replace(/B[oô]nus-Outros:\s*/i, '');
+                    return bonusOutrosDescricao;
+                })();
+
+                const dataIPR = temIPR ? formatDatePtBr(campos_variaveis?.['Data do Imersão Prosperar'] || bonus?.turma_bonus_info?.data_inicio) : '___/___/___';
+
+                const linhas = [
+                    {
+                        checked: naoSeAplica,
+                        text: 'NÃO SE APLICA',
+                    },
+                    {
+                        checked: tem100Dias,
+                        text: '100 DIAS',
+                    },
+                    {
+                        checked: temIPR,
+                        text: `${escapeAndFallback(quantidadeInscricoesBonus, '1')} inscrição(ões) do Imersão Prosperar<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${escapeAndFallback(dataIPR, '___/___/___')}`,
+                    },
+                    {
+                        checked: temOutros,
+                        text: `OUTROS: ${escapeAndFallback(descricaoOutros)}`,
+                    },
+                ];
+
+                return linhas
+                    .map(
+                        (linha) => `
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${linha.checked ? 'checked' : ''} disabled>
+                    ${linha.text}
+                </label>`,
+                    )
+                    .join('');
+            })();
+
+            const pagamentoDetalhesHtml = (() => {
+                const cartaoCreditoAVista = getGroupedPayment('CARTAO_CREDITO', 'A_VISTA');
+                const cartaoDebitoAVista = getGroupedPayment('CARTAO_DEBITO', 'A_VISTA');
+                const pixAVista = getGroupedPayment('PIX', 'A_VISTA');
+                const dinheiroAVista = getGroupedPayment('DINHEIRO', 'A_VISTA');
+
+                const cartaoCreditoParcelado = getGroupedPayment('CARTAO_CREDITO', 'PARCELADO');
+                const boletoParcelado = getGroupedPayment('BOLETO', 'PARCELADO');
+
+                const dataPrimeiroBoleto = formatDatePtBr(campos_variaveis?.['Data do Primeiro Boleto']);
+                const melhorDiaBoletoCampo = String(campos_variaveis?.['Melhor Dia para Boleto'] || '').trim();
+                const melhorDiaBoleto = melhorDiaBoletoCampo || (dataPrimeiroBoleto !== '___/___/___' ? dataPrimeiroBoleto.split('/')[0] : '___');
+
+                const outrosPagamentos = normalizedPaymentEntries.filter(
+                    (fp: any) => !['CARTAO_CREDITO', 'CARTAO_DEBITO', 'PIX', 'DINHEIRO', 'BOLETO'].includes(fp.forma),
+                );
+
+                const outrosPorTipo = {
+                    A_VISTA: outrosPagamentos.filter((fp: any) => fp.tipo === 'A_VISTA'),
+                    PARCELADO: outrosPagamentos.filter((fp: any) => fp.tipo === 'PARCELADO'),
+                };
+
+                const montarLinhaAVista = (label: string, data: { checked: boolean; valorTotal: number }) => `
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${data.checked ? 'checked' : ''} disabled>
+                    ${label} - ${formatCurrencyBRL(data.valorTotal)}
+                </label>`;
+
+                const valorParcelaCartao = cartaoCreditoParcelado.parcelas > 0 ? cartaoCreditoParcelado.valorTotal / cartaoCreditoParcelado.parcelas : 0;
+                const valorParcelaBoleto = boletoParcelado.parcelas > 0 ? boletoParcelado.valorTotal / boletoParcelado.parcelas : 0;
+
+                const avistaHtml = [
+                    montarLinhaAVista('CARTÃO DE CRÉDITO', cartaoCreditoAVista),
+                    montarLinhaAVista('CARTÃO DE DÉBITO', cartaoDebitoAVista),
+                    montarLinhaAVista('PIX / TRANSFERÊNCIA', pixAVista),
+                    montarLinhaAVista('ESPÉCIE (DINHEIRO)', dinheiroAVista),
+                    `
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${outrosPorTipo.A_VISTA.length > 0 ? 'checked' : ''} disabled>
+                    OUTROS: ${
+                        outrosPorTipo.A_VISTA.length > 0
+                            ? outrosPorTipo.A_VISTA.map(
+                                  (item: any) => `${escapeAndFallback(item.tituloOriginal || item.descricao, 'Não informado')} - ${formatCurrencyBRL(item.valor)}`,
+                              ).join(' | ')
+                            : 'Não informado'
+                    }
+                </label>`,
+                ].join('');
+
+                const parceladoHtml = `
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${cartaoCreditoParcelado.checked ? 'checked' : ''} disabled>
+                    CARTÃO DE CRÉDITO - ${formatCurrencyBRL(cartaoCreditoParcelado.valorTotal)}<br>
+                    ${cartaoCreditoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaCartao)}
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${boletoParcelado.checked ? 'checked' : ''} disabled>
+                    BOLETO - ${formatCurrencyBRL(boletoParcelado.valorTotal)}<br>
+                    ${boletoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaBoleto)}<br>
+                    Melhor dia de vencimento: ${escapeAndFallback(melhorDiaBoleto, '___')}<br>
+                    1º boleto para: ${escapeAndFallback(dataPrimeiroBoleto, '___/___/___')}
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${outrosPorTipo.PARCELADO.length > 0 ? 'checked' : ''} disabled>
+                    OUTROS: ${
+                        outrosPorTipo.PARCELADO.length > 0
+                            ? outrosPorTipo.PARCELADO.map((item: any) => {
+                                  const parcelas = Number(item.parcelas || 0);
+                                  const valorParcela = parcelas > 0 ? item.valor / parcelas : 0;
+                                  return `${escapeAndFallback(item.tituloOriginal || item.descricao, 'Não informado')} - ${formatCurrencyBRL(item.valor)}${
+                                      parcelas > 0 ? ` (${parcelas}x de ${formatCurrencyBRL(valorParcela)})` : ''
+                                  }`;
+                              }).join(' | ')
+                            : 'Não informado'
+                    }
+                </label>`;
+
+                return {
+                    avistaHtml,
+                    parceladoHtml,
+                };
+            })();
 
             const naoSeAplicaBonus =
                 !bonusTipos.includes('100_dias') &&
@@ -299,6 +979,7 @@ export class ContractTemplateService {
                 BONUS_IPR_DATA: dataImersao,
                 BONUS_OUTROS: bonusTipos.includes('outros') ? 'checked' : '',
                 BONUS_OUTROS_DESCRICAO: bonusOutrosDescricao,
+                BONUS_DETALHES_HTML: bonusDetalhesHtml,
                 PAGAMENTO_CARTAO_CREDITO_AVISTA: hasPayment('CARTAO_CREDITO', 'A_VISTA') ? 'checked' : '',
                 PAGAMENTO_CARTAO_DEBITO_AVISTA: hasPayment('CARTAO_DEBITO', 'A_VISTA') ? 'checked' : '',
                 PAGAMENTO_PIX_AVISTA: hasPayment('PIX', 'A_VISTA') ? 'checked' : '',
@@ -306,6 +987,8 @@ export class ContractTemplateService {
                 PAGAMENTO_CARTAO_CREDITO_PARCELADO: hasPayment('CARTAO_CREDITO', 'PARCELADO') ? 'checked' : '',
                 PAGAMENTO_BOLETO_PARCELADO: hasPayment('BOLETO', 'PARCELADO') ? 'checked' : '',
                 PAGAMENTO_OUTROS_DESCRICAO: '',
+                PAGAMENTO_AVISTA_DETALHES_HTML: pagamentoDetalhesHtml.avistaHtml,
+                PAGAMENTO_PARCELADO_DETALHES_HTML: pagamentoDetalhesHtml.parceladoHtml,
                 OBSERVACOES: observacoesContratoHtml || '_________________',
                 CONTRATO_LOCAL: localAssinatura,
                 CONTRATO_DATA: new Date().toLocaleDateString('pt-BR'),
@@ -485,7 +1168,7 @@ export class ContractTemplateService {
 
             if (!clausulas || clausulas.trim() === '') {
                 return `
-                  <div class="page">
+                  <div class="page clauses-page">
                     <div class="clauses-section">
                       <div style="text-align: center; padding: 40px; color: #ff0000;">
                         <strong>⚠️ ATENÇÃO: Cláusulas não encontradas no documento!</strong><br><br>
@@ -569,7 +1252,7 @@ export class ContractTemplateService {
                             if (shouldFooterBeOnSamePage) {
                                 // Footer na mesma página - incluir assinaturas e footer na última página de cláusulas
                                 return `
-                      <div class="page">
+                      <div class="page clauses-page">
                         <div class="clauses-section">
                           ${pageContent}
                           <p style="text-align: center; margin-top: 20px; margin-bottom: 20px; font-size: 12px;"><strong>E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.</strong></p>
@@ -645,7 +1328,7 @@ export class ContractTemplateService {
                             } else {
                                 // Footer em página separada - apenas cláusulas na última página
                                 return `
-                      <div class="page">
+                      <div class="page clauses-page">
                         <div class="clauses-section">
                           ${pageContent}
                         </div>
@@ -656,7 +1339,7 @@ export class ContractTemplateService {
                         } else {
                             // Páginas intermediárias de cláusulas
                             return `
-                      <div class="page">
+                      <div class="page clauses-page">
                         <div class="clauses-section">
                           ${pageContent}
                         </div>
@@ -862,31 +1545,36 @@ export class ContractTemplateService {
               }
               
               .clauses-section {
-                margin-top: 20px;
+                margin-top: 26px;
+                margin-bottom: 22px;
                 padding: 0;
                 background: white;
                 font-size: 11px;
-                line-height: 1.0; /* Espaçamento simples */
+                line-height: 1.38;
+                font-weight: 500;
               }
                
               .clause {
-                margin-bottom: 8px; /* Reduzido de 12px para 8px */
+                margin-bottom: 8px; /* Espaço controlado entre cláusulas */
                 padding: 0;
                 background: white;
               }
                 
               .clause-title {
-                font-weight: bold;
+                font-weight: 700;
                 color: #000;
                 font-size: 11px;
-                text-decoration: underline;
+                text-decoration: none;
+                margin-bottom: 4px;
+                line-height: 1.35;
               }
                 
               .clause-content {
                 color: #000;
-                line-height: 1.0; /* Espaçamento simples */
+                line-height: 1.38;
                 text-align: justify;
                 font-size: 11px;
+                font-weight: 500;
               }
                 
               .clause-paragraph {
@@ -904,10 +1592,11 @@ export class ContractTemplateService {
               }
                 
                 .clause-paragraph-text {
-                  line-height: 1.0; /* Espaçamento simples */
+                  line-height: 1.38;
                   text-align: justify;
                   font-size: 11px;
                   display: inline;
+                  font-weight: 500;
                 }
                 
                 /* Garantir que tags strong dentro das cláusulas mantenham o negrito na impressão */
@@ -940,12 +1629,12 @@ export class ContractTemplateService {
                 /* Garantir que todos os elementos dentro das cláusulas usem fonte 11px */
                 .clauses-section * {
                   font-size: 11px !important;
-                  line-height: 1.0 !important;
+                  line-height: 1.38 !important;
                 }
 
                 .clauses-section p {
                   margin-bottom: 6pt !important;
-                  line-height: 1.0 !important;
+                  line-height: 1.38 !important;
                   font-size: 11px !important;
                 }
               
@@ -1056,6 +1745,10 @@ export class ContractTemplateService {
                   box-sizing: border-box;
                   position: relative;
                   overflow: visible; /* Não recorta conteúdo em páginas longas */
+                }
+                .page.clauses-page {
+                  padding-top: 1.8cm;
+                  padding-bottom: 2.3cm;
                 }
                 .page-break {
                   page-break-before: always;
@@ -1671,6 +2364,7 @@ export class ContractTemplateService {
                     'Quantidade de Inscrições': data.campos_variaveis?.['Quantidade de Inscrições'] || '0',
                     'Descrição do Outro Bônus': data.campos_variaveis?.['Descrição do Outro Bônus'] || '',
                     'Data do Primeiro Boleto': data.campos_variaveis?.['Data do Primeiro Boleto'] || '',
+                    'Melhor Dia para Boleto': data.campos_variaveis?.['Melhor Dia para Boleto'] || '',
                     'Número de Parcelas do Boleto': data.campos_variaveis?.['Número de Parcelas do Boleto'] || '',
                     Observações: observacoes,
                 },

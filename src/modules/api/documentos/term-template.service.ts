@@ -382,27 +382,32 @@ export class TermTemplateService {
             // Gerar HTML baseado nos dados do termo
             const html = this.generateTermHTML(termoData);
 
-            // Configurar o Puppeteer com argumentos adicionais para ambientes Linux/Docker
+            const isWindows = process.platform === 'win32';
+            const chromiumArgs = isWindows
+                ? ['--disable-gpu', '--disable-software-rasterizer']
+                : [
+                      '--no-sandbox',
+                      '--disable-setuid-sandbox',
+                      '--disable-dev-shm-usage',
+                      '--disable-accelerated-2d-canvas',
+                      '--no-first-run',
+                      '--disable-gpu',
+                      '--disable-software-rasterizer',
+                  ];
+
+            // Configurar o Puppeteer com transporte pipe (mais estável que websocket)
             const browser = await puppeteer.launch({
                 headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process',
-                    '--disable-gpu',
-                    '--disable-software-rasterizer',
-                ],
+                pipe: true,
+                args: chromiumArgs,
                 ignoreDefaultArgs: ['--disable-extensions'],
+                protocolTimeout: 120000,
             });
 
             const page = await browser.newPage();
 
             // Definir o conteúdo HTML
-            await page.setContent(html, { waitUntil: 'networkidle0' });
+            await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
             // Gerar o PDF
             const pdfBuffer = await page.pdf({

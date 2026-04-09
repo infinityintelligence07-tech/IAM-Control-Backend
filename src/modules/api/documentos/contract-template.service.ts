@@ -1517,50 +1517,111 @@ export class ContractTemplateService {
      * Gera um PDF a partir do ModernContractPDF.tsx com os dados fornecidos
      */
     async generateContractPDF(data: any): Promise<Buffer> {
+        const isErroTransientePuppeteer = (error: any) => {
+            const message = String(error?.message || '').toLowerCase();
+            return (
+                message.includes('econnreset') ||
+                message.includes('target closed') ||
+                message.includes('session closed') ||
+                message.includes('protocol error') ||
+                message.includes('browser has disconnected') ||
+                message.includes('navigation failed because browser has disconnected')
+            );
+        };
+
+        const gerarPdfTentativa = async (html: string): Promise<Buffer> => {
+            let browser: puppeteer.Browser | null = null;
+            let page: puppeteer.Page | null = null;
+
+            try {
+                const isWindows = process.platform === 'win32';
+                const chromiumArgs = isWindows
+                    ? ['--disable-gpu', '--disable-software-rasterizer']
+                    : [
+                          '--no-sandbox',
+                          '--disable-setuid-sandbox',
+                          '--disable-dev-shm-usage',
+                          '--disable-accelerated-2d-canvas',
+                          '--no-first-run',
+                          '--disable-gpu',
+                          '--disable-software-rasterizer',
+                      ];
+
+                // Configurar o Puppeteer com transporte pipe (mais estável que websocket)
+                browser = await puppeteer.launch({
+                    headless: true,
+                    pipe: true,
+                    args: chromiumArgs,
+                    ignoreDefaultArgs: ['--disable-extensions'],
+                    protocolTimeout: 120000,
+                });
+
+                page = await browser.newPage();
+                page.setDefaultNavigationTimeout(45000);
+
+                // Definir o conteúdo HTML
+                await page.setContent(html, { waitUntil: 'domcontentloaded' });
+
+                // Gerar o PDF
+                const pdfBuffer = await page.pdf({
+                    format: 'A4',
+                    printBackground: true,
+                    margin: {
+                        top: '20mm',
+                        right: '20mm',
+                        bottom: '20mm',
+                        left: '20mm',
+                    },
+                });
+
+                return Buffer.from(pdfBuffer);
+            } finally {
+                try {
+                    if (page && !page.isClosed()) {
+                        await page.close();
+                    }
+                } catch (closePageError) {
+                    console.warn('Aviso ao fechar página do Puppeteer:', closePageError);
+                }
+
+                try {
+                    if (browser) {
+                        await browser.close();
+                    }
+                } catch (closeBrowserError) {
+                    console.warn('Aviso ao fechar browser do Puppeteer:', closeBrowserError);
+                }
+            }
+        };
+
         try {
             // Se os dados vieram do prepareTemplateDataFromSavedContract, precisamos reestruturar
             const contrato = this.restructureDataForModernContract(data);
 
             // Gerar HTML baseado no ModernContractPDF.tsx
             const html = this.generateModernContractHTML(contrato);
+            const maxTentativas = 3;
+            let ultimaFalha: any;
 
-            // Configurar o Puppeteer com argumentos adicionais para ambientes Linux/Docker
-            const browser = await puppeteer.launch({
-                headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process',
-                    '--disable-gpu',
-                    '--disable-software-rasterizer',
-                ],
-                ignoreDefaultArgs: ['--disable-extensions'],
-            });
+            for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
+                try {
+                    return await gerarPdfTentativa(html);
+                } catch (error: any) {
+                    ultimaFalha = error;
+                    const transiente = isErroTransientePuppeteer(error);
 
-            const page = await browser.newPage();
+                    console.error(`[PDF] Falha na tentativa ${tentativa}/${maxTentativas}:`, error?.message || error);
 
-            // Definir o conteúdo HTML
-            await page.setContent(html, { waitUntil: 'networkidle0' });
+                    if (!transiente || tentativa === maxTentativas) {
+                        throw error;
+                    }
 
-            // Gerar o PDF
-            const pdfBuffer = await page.pdf({
-                format: 'A4',
-                printBackground: true,
-                margin: {
-                    top: '20mm',
-                    right: '20mm',
-                    bottom: '20mm',
-                    left: '20mm',
-                },
-            });
+                    // Pequeno backoff para dar tempo do Chromium estabilizar.
+                    await new Promise((resolve) => setTimeout(resolve, 300 * tentativa));
+                }
+            }
 
-            await browser.close();
-
-            return Buffer.from(pdfBuffer);
+            throw ultimaFalha;
         } catch (error: any) {
             console.error('Erro ao gerar PDF do contrato:', error);
 

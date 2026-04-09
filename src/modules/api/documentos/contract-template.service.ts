@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class ContractTemplateService {
@@ -39,6 +41,10 @@ export class ContractTemplateService {
             !isIPRContract &&
             ((Array.isArray(bonus?.tipos_bonus) && bonus.tipos_bonus.some((tipo: string) => tipo && tipo !== 'nao_aplica' && tipo !== 'nenhum')) ||
                 Object.keys(bonus?.valores_bonus || {}).length > 0);
+        const observacoesContrato = (campos_variaveis?.['Observações'] || campos_variaveis?.['Observacoes'] || campos_variaveis?.['OBSERVACOES'] || '')
+            .toString()
+            .trim();
+        const observacoesContratoHtml = observacoesContrato ? observacoesContrato.replace(/\n/g, '<br>') : '';
 
         // Obter a URL absoluta da logo
         const logoUrl = `${process.env.FRONTEND_URL || 'http://iamcontrol.com.br'}/images/logo/logo-escuro.png`;
@@ -72,6 +78,260 @@ export class ContractTemplateService {
         const getAbsoluteImageUrl = (url: string): string => {
             return convertGoogleDriveUrl(url);
         };
+
+        // Tenta usar o template HTML físico da pasta templates como fonte principal.
+        const templatePathCandidates = [
+            path.resolve(process.cwd(), 'src/modules/api/documentos/templates/contrato-template.html'),
+            path.resolve(__dirname, 'templates/contrato-template.html'),
+            path.resolve(__dirname, '../templates/contrato-template.html'),
+        ];
+        const templatePath = templatePathCandidates.find((candidate) => fs.existsSync(candidate));
+        const useFileTemplate = process.env.CONTRACT_TEMPLATE_MODE !== 'embedded';
+
+        if (useFileTemplate && !templatePath) {
+            throw new Error('Template HTML do contrato não encontrado em src/modules/api/documentos/templates/contrato-template.html');
+        }
+
+        if (useFileTemplate && templatePath) {
+            const templateHtml = fs.readFileSync(templatePath, 'utf-8');
+            const formasPagamento = Array.isArray(pagamento?.formas_pagamento) ? pagamento.formas_pagamento : [];
+            const bonusTipos = Array.isArray(bonus?.tipos_bonus) ? bonus.tipos_bonus : [];
+            const clausulasOriginais = typeof template?.clausulas === 'string' ? template.clausulas : '';
+
+            const escapeHtml = (text: string): string =>
+                text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+            const formatarClausulasHtml = (clausulas: string): string => {
+                const texto = clausulas?.trim();
+                if (!texto) {
+                    return `
+                      <div class="clause">
+                        <div class="clause-text"><strong>ATENÇÃO:</strong> Cláusulas não encontradas para o documento vinculado ao treinamento.</div>
+                      </div>
+                    `;
+                }
+
+                const inserirQuebrasPaginaPorClausula = (html: string): string => {
+                    let clauseIndex = 0;
+                    const cabecalhoRegex = /(<(?:p|div|h[1-6])[^>]*>\s*(?:<[^>]+>\s*)*(?:cl[aá]usula)\b[\s\S]*?<\/(?:p|div|h[1-6])>)/gi;
+
+                    const comQuebras = html.replace(cabecalhoRegex, (match: string) => {
+                        const precisaQuebra = clauseIndex > 0 && clauseIndex % 3 === 0;
+                        clauseIndex += 1;
+                        return `${precisaQuebra ? '<div class="clause-page-break"></div>' : ''}${match}`;
+                    });
+
+                    if (clauseIndex > 0) return comQuebras;
+
+                    let fallbackClauseIndex = 0;
+                    return html.replace(/(<strong[^>]*>\s*cl[aá]usula\b[\s\S]*?<\/strong>)/gi, (match: string) => {
+                        const precisaQuebra = fallbackClauseIndex > 0 && fallbackClauseIndex % 3 === 0;
+                        fallbackClauseIndex += 1;
+                        return `${precisaQuebra ? '<div class="clause-page-break"></div>' : ''}${match}`;
+                    });
+                };
+
+                const possuiTagsHtml = /<\/?[a-z][\s\S]*>/i.test(texto);
+                if (possuiTagsHtml) {
+                    // Mantém a formatação original e inclui quebras de página entre blocos de cláusulas.
+                    return inserirQuebrasPaginaPorClausula(texto);
+                }
+
+                // Fallback para texto puro: preserva parágrafos e quebras de linha.
+                const blocos = texto
+                    .split(/\n{2,}/)
+                    .map((bloco) => bloco.trim())
+                    .filter(Boolean);
+
+                let indiceClausula = 0;
+                return blocos
+                    .map((bloco) => {
+                        const blocoEscapado = escapeHtml(bloco).replace(/\n/g, '<br>');
+                        const ehTituloClausula = /^cl[aá]usula\s+/i.test(bloco);
+
+                        if (ehTituloClausula) {
+                            const quebraPagina = indiceClausula > 0 && indiceClausula % 3 === 0 ? '<div class="clause-page-break"></div>' : '';
+                            indiceClausula += 1;
+                            return `
+                              ${quebraPagina}
+                              <div class="clause">
+                                <div class="clause-title">${blocoEscapado}</div>
+                              </div>
+                            `;
+                        }
+
+                        return `
+                          <div class="clause">
+                            <div class="clause-text">${blocoEscapado}</div>
+                          </div>
+                        `;
+                    })
+                    .join('');
+            };
+
+            const normalizeString = (value: unknown): string => {
+                if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+                    return '';
+                }
+
+                return String(value)
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .toUpperCase()
+                    .trim();
+            };
+
+            const parsePaymentValue = (value: unknown): number => {
+                if (typeof value === 'number') return value;
+                if (typeof value !== 'string') return 0;
+
+                const normalized = value
+                    .replace(/[R$\s]/g, '')
+                    .replace(/\./g, '')
+                    .replace(',', '.');
+
+                return Number(normalized) || 0;
+            };
+
+            const getNormalizedPaymentType = (fp: any): string => {
+                const explicitType = normalizeString(fp?.tipo);
+                if (explicitType.includes('PARCELADO')) return 'PARCELADO';
+                if (explicitType.includes('A_VISTA') || explicitType.includes('AVISTA') || explicitType.includes('A VISTA')) return 'A_VISTA';
+
+                const textType = normalizeString(fp?.forma_pagamento || fp?.forma || fp?.descricao);
+                if (textType.includes('PARCELADO')) return 'PARCELADO';
+                if (textType.includes('A VISTA') || textType.includes('AVISTA')) return 'A_VISTA';
+
+                return '';
+            };
+
+            const getNormalizedPaymentMethod = (fp: any): string => {
+                const explicitMethod = normalizeString(fp?.forma);
+                if (explicitMethod.includes('CARTAO_CREDITO') || explicitMethod.includes('CARTAO DE CREDITO')) return 'CARTAO_CREDITO';
+                if (explicitMethod.includes('CARTAO_DEBITO') || explicitMethod.includes('CARTAO DE DEBITO')) return 'CARTAO_DEBITO';
+                if (explicitMethod.includes('PIX')) return 'PIX';
+                if (explicitMethod.includes('DINHEIRO') || explicitMethod.includes('ESPECIE')) return 'DINHEIRO';
+                if (explicitMethod.includes('BOLETO')) return 'BOLETO';
+
+                const textMethod = normalizeString(fp?.forma_pagamento || fp?.descricao);
+                if (textMethod.includes('CARTAO DE CREDITO')) return 'CARTAO_CREDITO';
+                if (textMethod.includes('CARTAO DE DEBITO')) return 'CARTAO_DEBITO';
+                if (textMethod.includes('PIX') || textMethod.includes('TRANSFERENCIA')) return 'PIX';
+                if (textMethod.includes('DINHEIRO') || textMethod.includes('ESPECIE')) return 'DINHEIRO';
+                if (textMethod.includes('BOLETO')) return 'BOLETO';
+
+                return '';
+            };
+
+            const hasPayment = (forma: string, tipo: string): boolean =>
+                formasPagamento.some((fp: any) => {
+                    const method = getNormalizedPaymentMethod(fp);
+                    const paymentType = getNormalizedPaymentType(fp);
+                    const hasValue = parsePaymentValue(fp?.valor) > 0;
+                    return method === forma && paymentType === tipo && hasValue;
+                });
+
+            const totalContrato = formasPagamento.reduce((total: number, fp: any) => total + Number(fp?.valor || 0), 0);
+            const enderecoFormatado = [aluno?.endereco?.logradouro, aluno?.endereco?.numero, aluno?.endereco?.complemento, aluno?.endereco?.bairro]
+                .filter(Boolean)
+                .join(', ');
+
+            const dataNascimentoFormatada = (() => {
+                if (!aluno?.data_nascimento) return '___/___/___';
+                const dataISO = String(aluno.data_nascimento);
+                if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    const [ano, mes, dia] = dataISO.split('-');
+                    return `${dia}/${mes}/${ano}`;
+                }
+                return new Date(dataISO).toLocaleDateString('pt-BR');
+            })();
+
+            const dataPrevistaRaw = campos_variaveis?.['Data Prevista do Treinamento'] || '';
+            const dataFinalRaw = campos_variaveis?.['Data Final do Treinamento'] || '';
+            let dataInicio = dataPrevistaRaw || '___/___/___';
+            let dataFim = dataFinalRaw || '';
+
+            // A tela de vendas envia frequentemente o intervalo completo em "Data Prevista do Treinamento".
+            if (!dataFim && typeof dataPrevistaRaw === 'string' && dataPrevistaRaw.includes('à')) {
+                const [inicioIntervalo, fimIntervalo] = dataPrevistaRaw
+                    .split(/\s+à\s+/i)
+                    .map((part: string) => part.trim())
+                    .filter(Boolean);
+                if (inicioIntervalo && fimIntervalo) {
+                    dataInicio = inicioIntervalo;
+                    dataFim = fimIntervalo;
+                }
+            }
+
+            dataFim = dataFim || '___/___/___';
+            const localAssinatura = campos_variaveis?.['Local de Assinatura do Contrato'] || '________________________________';
+
+            const dataImersao = campos_variaveis?.['Data do Imersão Prosperar'] || '___/___/___';
+            const bonusOutrosDescricao = campos_variaveis?.['Descrição do Outro Bônus'] || '_________________';
+            const nomeTreinamento = treinamento?.nome || treinamento?.treinamento || campos_variaveis?.['Nome do Treinamento Contratado'] || '_________________';
+
+            const naoSeAplicaBonus =
+                !bonusTipos.includes('100_dias') &&
+                !bonusTipos.includes('ipr') &&
+                !bonusTipos.includes('outros') &&
+                !Object.keys(bonus?.valores_bonus || {}).some((key) => key.includes('Bônus-Outros'));
+
+            const values: Record<string, string> = {
+                ALUNO_NOME: aluno?.nome || '_________________',
+                ALUNO_CPF: aluno?.cpf || '_________________',
+                ALUNO_DATA_NASCIMENTO: dataNascimentoFormatada,
+                ALUNO_WHATSAPP: aluno?.telefone_um || '_________________',
+                ALUNO_EMAIL: aluno?.email || '_________________',
+                ALUNO_ENDERECO_LOGRADOURO: aluno?.endereco?.logradouro || '',
+                ALUNO_ENDERECO_NUMERO: aluno?.endereco?.numero || '',
+                ALUNO_ENDERECO_COMPLEMENTO: aluno?.endereco?.complemento || '',
+                ALUNO_ENDERECO_BAIRRO: aluno?.endereco?.bairro || '',
+                ALUNO_CIDADE_ESTADO: `${aluno?.endereco?.cidade || '_______________'} / ${aluno?.endereco?.estado || '________'}`,
+                ALUNO_CEP: aluno?.endereco?.cep || '____________',
+                TREINAMENTO_NOME: nomeTreinamento,
+                TREINAMENTO_CIDADE: campos_variaveis?.['Cidade do Treinamento'] || 'Local a definir',
+                TREINAMENTO_DATA_INICIO: dataInicio,
+                TREINAMENTO_DATA_FIM: dataFim,
+                TREINAMENTO_PRECO: totalContrato > 0 ? this.formatCurrency(totalContrato) : 'R$ _________________',
+                BONUS_NAO_APLICA: naoSeAplicaBonus ? 'checked' : '',
+                BONUS_100_DIAS: bonusTipos.includes('100_dias') ? 'checked' : '',
+                BONUS_IPR: bonusTipos.includes('ipr') ? 'checked' : '',
+                BONUS_IPR_DATA: dataImersao,
+                BONUS_OUTROS: bonusTipos.includes('outros') ? 'checked' : '',
+                BONUS_OUTROS_DESCRICAO: bonusOutrosDescricao,
+                PAGAMENTO_CARTAO_CREDITO_AVISTA: hasPayment('CARTAO_CREDITO', 'A_VISTA') ? 'checked' : '',
+                PAGAMENTO_CARTAO_DEBITO_AVISTA: hasPayment('CARTAO_DEBITO', 'A_VISTA') ? 'checked' : '',
+                PAGAMENTO_PIX_AVISTA: hasPayment('PIX', 'A_VISTA') ? 'checked' : '',
+                PAGAMENTO_ESPECIE_AVISTA: hasPayment('DINHEIRO', 'A_VISTA') ? 'checked' : '',
+                PAGAMENTO_CARTAO_CREDITO_PARCELADO: hasPayment('CARTAO_CREDITO', 'PARCELADO') ? 'checked' : '',
+                PAGAMENTO_BOLETO_PARCELADO: hasPayment('BOLETO', 'PARCELADO') ? 'checked' : '',
+                PAGAMENTO_OUTROS_DESCRICAO: '',
+                OBSERVACOES: observacoesContratoHtml || '_________________',
+                CONTRATO_LOCAL: localAssinatura,
+                CONTRATO_DATA: new Date().toLocaleDateString('pt-BR'),
+                TESTEMUNHA_1_NOME: testemunhas?.testemunha_um?.nome || '_________________',
+                TESTEMUNHA_1_CPF: testemunhas?.testemunha_um?.cpf || '_________________',
+                TESTEMUNHA_2_NOME: testemunhas?.testemunha_dois?.nome || '_________________',
+                TESTEMUNHA_2_CPF: testemunhas?.testemunha_dois?.cpf || '_________________',
+                IAM_LOGO_URL: logoUrl,
+                TREINAMENTO_LOGO_URL: treinamento?.url_logo_treinamento ? getAbsoluteImageUrl(treinamento.url_logo_treinamento) : logoUrl,
+                CLAUSULAS_HTML: formatarClausulasHtml(clausulasOriginais),
+            };
+
+            let renderedTemplate = templateHtml;
+            Object.entries(values).forEach(([key, value]) => {
+                const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+                renderedTemplate = renderedTemplate.replace(regex, value ?? '');
+            });
+
+            // Corrige possíveis vírgulas sobrando quando o template monta endereço com campos vazios
+            renderedTemplate = renderedTemplate.replace(/,\s*,/g, ', ').replace(/,\s*,/g, ', ');
+            if (!enderecoFormatado) {
+                renderedTemplate = renderedTemplate.replace(/<strong>Endereço:<\/strong>[^<]*/g, '<strong>Endereço:</strong> _________________');
+            }
+
+            return renderedTemplate;
+        }
 
         // Função para gerar footer com logo
         const generateFooter = (showLogo: boolean = true) => {
@@ -471,13 +731,13 @@ export class ContractTemplateService {
               
               /* Páginas individuais */
               .page {
-                height: 27.16cm; /* Altura A4 menos margens - altura fixa */
+                height: auto; /* Evita corte de conteúdo no fim da página */
                 min-height: 27.16cm;
                 padding: 1.27cm;
                 padding-bottom: 80px; /* Reduzido de 100px para 80px para dar mais espaço */
                 box-sizing: border-box;
                 position: relative;
-                overflow: hidden; /* Evita que conteúdo transborde */
+                overflow: visible; /* Não recorta conteúdo em páginas longas */
                 page-break-after: always; /* Força quebra de página após cada página */
                 break-after: page; /* Suporte moderno para quebra de página */
               }
@@ -789,13 +1049,13 @@ export class ContractTemplateService {
                 }
                 
                 .page {
-                  height: 27.16cm; /* Altura A4 menos margens - altura fixa */
+                  height: auto; /* Evita corte de conteúdo no fim da página */
                   min-height: 27.16cm;
                   padding: 1.27cm;
                   padding-bottom: 80px; /* Reduzido para dar mais espaço ao conteúdo */
                   box-sizing: border-box;
                   position: relative;
-                  overflow: hidden; /* Evita que conteúdo transborde */
+                  overflow: visible; /* Não recorta conteúdo em páginas longas */
                 }
                 .page-break {
                   page-break-before: always;
@@ -1237,6 +1497,7 @@ export class ContractTemplateService {
                 <tr class="table-row">
                   <td class="table-cell">
                     <strong>OBSERVAÇÕES:</strong><br><br>
+                    ${observacoesContratoHtml || '_________________'}
                   </td>
                 </tr>
               </table>
@@ -1339,6 +1600,15 @@ export class ContractTemplateService {
         console.log('Data recebida:', JSON.stringify(data, null, 2));
         console.log('Formas pagamento:', JSON.stringify(data.pagamento?.formas_pagamento || data.formas_pagamento, null, 2));
         console.log('Testemunhas:', JSON.stringify(data.testemunhas, null, 2));
+        const tiposBonus = Array.isArray(data.bonus?.tipos_bonus)
+            ? data.bonus.tipos_bonus
+            : Array.isArray(data.tipos_bonus)
+              ? data.tipos_bonus
+              : Array.isArray(data.bonus_selecionados)
+                ? data.bonus_selecionados
+                : [];
+        const formasPagamentoNormalizadas = this.normalizeFormasPagamento(data.pagamento?.formas_pagamento || data.formas_pagamento || []);
+        const observacoes = data.campos_variaveis?.['Observações'] || data.campos_variaveis?.['Observacoes'] || data.campos_variaveis?.['OBSERVACOES'] || '';
 
         return {
             aluno_nome: data.aluno?.nome || '',
@@ -1365,12 +1635,12 @@ export class ContractTemplateService {
                 },
                 pagamento: {
                     forma_pagamento: data.pagamento?.forma_pagamento || '',
-                    formas_pagamento: data.pagamento?.formas_pagamento || data.formas_pagamento || [],
+                    formas_pagamento: formasPagamentoNormalizadas,
                     valores_formas_pagamento: data.pagamento?.valores_formas_pagamento || data.valores_formas_pagamento || {},
                 },
                 bonus: {
-                    tipos_bonus: data.bonus_selecionados || [],
-                    valores_bonus: data.valores_bonus || {},
+                    tipos_bonus: tiposBonus,
+                    valores_bonus: data.bonus?.valores_bonus || data.valores_bonus || {},
                     turma_bonus_info: {
                         data_inicio: data.campos_variaveis?.['Data do Imersão Prosperar'] || '',
                         edicao_turma: '',
@@ -1402,6 +1672,7 @@ export class ContractTemplateService {
                     'Descrição do Outro Bônus': data.campos_variaveis?.['Descrição do Outro Bônus'] || '',
                     'Data do Primeiro Boleto': data.campos_variaveis?.['Data do Primeiro Boleto'] || '',
                     'Número de Parcelas do Boleto': data.campos_variaveis?.['Número de Parcelas do Boleto'] || '',
+                    Observações: observacoes,
                 },
                 template: {
                     clausulas: data.clausulas || '',
@@ -1411,6 +1682,70 @@ export class ContractTemplateService {
             assinatura_testemunha_um_base64: data.assinatura_testemunha_um_base64 || '',
             assinatura_testemunha_dois_base64: data.assinatura_testemunha_dois_base64 || '',
         };
+    }
+
+    private normalizeFormasPagamento(formasPagamento: any[]): any[] {
+        if (!Array.isArray(formasPagamento)) return [];
+
+        const normalizeText = (value: unknown): string => {
+            if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return '';
+            return String(value)
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toUpperCase()
+                .trim();
+        };
+
+        const parseValue = (value: unknown): number => {
+            if (typeof value === 'number') return value;
+            if (typeof value !== 'string') return 0;
+            return (
+                Number(
+                    value
+                        .replace(/[R$\s]/g, '')
+                        .replace(/\./g, '')
+                        .replace(',', '.'),
+                ) || 0
+            );
+        };
+
+        const inferTipo = (fp: any): string => {
+            const tipoRaw = normalizeText(fp?.tipo);
+            if (tipoRaw.includes('PARCELADO')) return 'PARCELADO';
+            if (tipoRaw.includes('A_VISTA') || tipoRaw.includes('A VISTA') || tipoRaw.includes('AVISTA')) return 'A_VISTA';
+
+            const texto = normalizeText(`${fp?.forma || ''} ${fp?.forma_pagamento || ''} ${fp?.descricao || ''}`);
+            if (texto.includes('PARCELADO')) return 'PARCELADO';
+            if (texto.includes('A VISTA') || texto.includes('AVISTA')) return 'A_VISTA';
+            return '';
+        };
+
+        const inferForma = (fp: any): string => {
+            const formaRaw = normalizeText(fp?.forma);
+            const texto = normalizeText(`${fp?.forma || ''} ${fp?.forma_pagamento || ''} ${fp?.descricao || ''}`);
+            const base = `${formaRaw} ${texto}`;
+
+            if (base.includes('CARTAO_CREDITO') || base.includes('CARTAO DE CREDITO')) return 'CARTAO_CREDITO';
+            if (base.includes('CARTAO_DEBITO') || base.includes('CARTAO DE DEBITO')) return 'CARTAO_DEBITO';
+            if (base.includes('PIX') || base.includes('TRANSFERENCIA')) return 'PIX';
+            if (base.includes('DINHEIRO') || base.includes('ESPECIE')) return 'DINHEIRO';
+            if (base.includes('BOLETO')) return 'BOLETO';
+            return '';
+        };
+
+        return formasPagamento
+            .map((fp: any) => {
+                const tipo = inferTipo(fp);
+                const forma = inferForma(fp);
+                return {
+                    ...fp,
+                    tipo: tipo || fp?.tipo || '',
+                    forma: forma || fp?.forma || '',
+                    valor: parseValue(fp?.valor),
+                    parcelas: Number(fp?.parcelas || 0),
+                };
+            })
+            .filter((fp: any) => fp?.tipo && fp?.forma && Number(fp?.valor || 0) > 0);
     }
 
     /**
@@ -1560,17 +1895,23 @@ export class ContractTemplateService {
                 page.setDefaultNavigationTimeout(45000);
 
                 // Definir o conteúdo HTML
-                await page.setContent(html, { waitUntil: 'domcontentloaded' });
+                await page.setContent(html, { waitUntil: 'networkidle0' });
+
+                // Aguarda o carregamento de fontes para manter o layout fiel ao HTML/CSS
+                await page.evaluate(async () => {
+                    await document.fonts.ready;
+                });
 
                 // Gerar o PDF
                 const pdfBuffer = await page.pdf({
                     format: 'A4',
+                    preferCSSPageSize: true,
                     printBackground: true,
                     margin: {
-                        top: '20mm',
-                        right: '20mm',
-                        bottom: '20mm',
-                        left: '20mm',
+                        top: '0',
+                        right: '0',
+                        bottom: '0',
+                        left: '0',
                     },
                 });
 

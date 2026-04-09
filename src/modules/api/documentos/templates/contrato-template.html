@@ -13,44 +13,75 @@
         
         body {
             font-family: 'Figtree', Arial, sans-serif;
-            padding: 30px;
+            padding: 3cm 2cm 2cm 3cm;
             font-size: 11px;
-            line-height: 1.4;
+            line-height: 1.55;
             color: #000;
             background-color: white;
         }
+
+        .first-page {
+            position: relative;
+            min-height: calc(297mm - 5cm);
+            padding-bottom: 82px;
+        }
         
         .header {
-            display: flex;
+            margin-bottom: 18px;
+            text-align: center;
+            page-break-inside: avoid;
+        }
+
+        .iam-brand {
+            display: inline-flex;
             align-items: center;
-            margin-bottom: 20px;
+            justify-content: center;
+            gap: 14px;
+            margin: 0 auto 12px auto;
         }
-        
-        .logo {
-            font-weight: bold;
-            font-size: 32px;
-            color: #1e3a8a;
-            letter-spacing: 2px;
+
+        .iam-logo-image {
+            max-height: 50px;
+            max-width: 170px;
+            object-fit: contain;
         }
-        
+
         .logo-divider {
-            width: 2px;
-            height: 40px;
+            width: 1.5px;
+            height: 42px;
             background-color: #666;
-            margin: 0 15px;
         }
-        
+
         .company-name {
             font-weight: bold;
-            font-size: 18px;
+            font-size: 19px;
             color: #1e3a8a;
             letter-spacing: 1px;
+            text-transform: uppercase;
+            text-align: left;
+        }
+
+        .training-logo-bottom {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 8px;
+            text-align: center;
+            page-break-inside: avoid;
+        }
+
+        .training-logo-bottom img {
+            max-height: 54px;
+            max-width: 260px;
+            object-fit: contain;
         }
         
         .intro-text {
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             font-size: 11px;
             line-height: 1.5;
+            text-align: justify;
+            text-indent: 22px;
         }
         
         /* Tabelas baseadas no ModernContractPDF */
@@ -58,7 +89,7 @@
             width: 100%;
             border-collapse: separate;
             border-spacing: 0;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             border: 1px solid #000;
             border-radius: 8px;
             overflow: hidden;
@@ -111,33 +142,38 @@
         }
         
         .signature-line {
-            border-bottom: 1px solid #000;
+            border-top: 1px solid #000;
             margin-bottom: 10px;
+            height: 1px;
         }
         
         .declaration {
-            margin: 15px 0;
+            margin: 18px 0;
             text-align: justify;
             font-size: 10px;
-            line-height: 1.4;
+            line-height: 1.6;
+            text-indent: 22px;
         }
         
         .signature-location {
             display: flex;
-            gap: 50px;
-            margin-bottom: 8px;
+            justify-content: space-between;
+            margin-bottom: 10px;
             font-size: 10px;
+            gap: 16px;
         }
         
         .signature-label {
             text-align: center;
             font-size: 10px;
+            min-height: 28px;
         }
         
         .witnesses-section {
             display: flex;
             gap: 40px;
-            margin-top: 30px;
+            margin-top: 14px;
+            page-break-inside: avoid;
         }
         
         .witness {
@@ -147,11 +183,29 @@
         .witness-line {
             border-top: 1.5px solid #000;
             margin-bottom: 8px;
+            margin-top: 16px;
         }
         
         .witness-info {
             font-size: 10px;
-            line-height: 1.6;
+            line-height: 1.8;
+        }
+
+        .signature-block {
+            margin-top: 16px;
+            page-break-inside: avoid;
+        }
+
+        .signature-main {
+            margin: 12px auto 14px auto;
+            width: 70%;
+            text-align: center;
+            min-height: 58px;
+        }
+
+        .signature-block-page1 {
+            margin-top: 8px;
+            page-break-inside: avoid;
         }
         
         .footer-brand {
@@ -164,28 +218,49 @@
         }
         
         .clause {
-            margin-bottom: 15px;
+            margin-bottom: 14px;
             text-align: justify;
+            page-break-inside: avoid;
         }
         
         .clause-title {
             font-weight: bold;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            page-break-after: avoid;
+            text-transform: uppercase;
         }
         
         .clause-text {
-            line-height: 1.5;
+            line-height: 1.7;
+            text-indent: 24px;
         }
-        
+
+        .clauses-wrapper {
+            margin-top: 6px;
+        }
+
+        .clauses-wrapper p,
+        .clauses-wrapper div {
+            line-height: 1.7;
+        }
+
+        .clauses-wrapper p {
+            margin: 0 0 10px 0;
+            text-align: justify;
+            text-indent: 24px;
+        }
+
         .paragraph {
-            margin-left: 20px;
-            margin-top: 5px;
+            margin-left: 28px;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            text-indent: 24px;
         }
         
         .center-text {
             text-align: center;
             font-style: italic;
-            margin: 20px 0;
+            margin: 24px 0;
         }
         
         .bold {
@@ -202,16 +277,48 @@
             font-weight: bold;
             text-transform: uppercase;
         }
+
+        .clause-page-break {
+            page-break-before: always;
+        }
+
+        @media print {
+            body {
+                padding: 3cm 2cm 2cm 3cm;
+            }
+
+            .clause,
+            .clause-title,
+            .clause-text,
+            .signature-block,
+            .signature-block-page1,
+            .witnesses-section {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
+            .clause-page-break {
+                break-before: page;
+                page-break-before: always;
+            }
+
+            .first-page {
+                min-height: calc(297mm - 5cm);
+            }
+        }
     </style>
 </head>
 <body>
     <!-- PRIMEIRA PÁGINA -->
+    <div class="first-page">
     
     <!-- Header -->
     <div class="header">
-        <div class="logo">IAM</div>
-        <div class="logo-divider"></div>
-        <div class="company-name">INSTITUTO ACADEMY MIND</div>
+        <div class="iam-brand">
+            <img src="{{IAM_LOGO_URL}}" alt="Logo IAM" class="iam-logo-image" onerror="this.style.display='none';">
+            <div class="logo-divider"></div>
+            <div class="company-name">INSTITUTO ACADEMY MIND</div>
+        </div>
     </div>
     
     <!-- Texto introdutório -->
@@ -343,239 +450,100 @@
             </td>
         </tr>
     </table>
-    
-    <!-- Declaração -->
-    <div class="declaration">
-        Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
-    </div>
-    
-    <!-- Local e Data -->
-    <div class="signature-location">
-        <div>Local: {{CONTRATO_LOCAL}}</div>
-        <div>Data: {{CONTRATO_DATA}}</div>
-    </div>
-    
-    <!-- Linha de assinatura -->
-    <div class="signature-line"></div>
-    <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
-    
-    <!-- Testemunhas -->
-    <div class="witnesses-section">
-        <div class="witness">
-            <div class="witness-line"></div>
-            <div class="witness-info">
-                <div><span class="bold">Testemunha 1</span></div>
-                <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
-                <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+
+    <!-- Assinaturas conforme layout base (página 1) -->
+    <div class="signature-block-page1">
+        <div class="signature-location">
+            <div><strong>Local:</strong> {{CONTRATO_LOCAL}}</div>
+            <div><strong>Data:</strong> {{CONTRATO_DATA}}</div>
+        </div>
+
+        <div class="declaration" style="margin-top: 0;">
+            Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+        </div>
+
+        <div class="signature-main">
+            <div class="signature-line"></div>
+            <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
+        </div>
+
+        <div class="witnesses-section" style="margin-top: 20px;">
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div class="witness-info">
+                    <div><span class="bold">Testemunha 1</span></div>
+                    <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                    <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+                </div>
+            </div>
+            
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div class="witness-info">
+                    <div><span class="bold">Testemunha 2</span></div>
+                    <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                    <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+                </div>
             </div>
         </div>
-        
-        <div class="witness">
-            <div class="witness-line"></div>
-            <div class="witness-info">
-                <div><span class="bold">Testemunha 2</span></div>
-                <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
-                <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
-            </div>
-        </div>
     </div>
-    
-    <!-- Footer com logo do treinamento -->
-    <div class="footer-brand">
-        <img src="{{TREINAMENTO_LOGO_URL}}" alt="Logo Treinamento" style="height:36px; object-fit:contain;" />
+
+    <div class="training-logo-bottom">
+        <img src="{{TREINAMENTO_LOGO_URL}}" alt="Logo do Treinamento" onerror="this.style.display='none';">
+    </div>
     </div>
     
     <!-- SEGUNDA PÁGINA -->
     <div class="page-break"></div>
     
-    <!-- Cláusulas -->
-    <div class="clause">
-        <div class="clause-title">Cláusula Primeira.</div>
-        <div class="clause-text">
-            O presente contrato é realizado presencialmente entre o ALUNO (devidamente qualificado na folha 01 deste documento) e a Academy Mind Treinamentos LTDA, pessoa jurídica inscrita no CNPJ nº 03.727.632/0001-13, com sede na Rua Major Rehder, nº 248, Vila Rehder, Americana/SP, CEP 13465-390, doravante denominada ACADEMY.
-        </div>
+    <!-- Cláusulas dinâmicas do documento vinculado -->
+    <div class="clauses-wrapper">
+        {{CLAUSULAS_HTML}}
     </div>
     
-    <div class="clause">
-        <div class="clause-title">Cláusula Segunda.</div>
-        <div class="clause-text">
-            O curso ou treinamento contratado ocorrerá, preferencialmente, no(a) dia(a) e local(is) informado(s) no ato da inscrição. Caso não haja a informação específica sobre data e local do treinamento, a ACADEMY comunicará posteriormente ao ALUNO por e-mail ou WhatsApp, conforme os dados fornecidos no ato da contratação.
-        </div>
-        <div class="paragraph">
-            §2°. Os dados fornecidos pelo ALUNO são de sua inteira responsabilidade, inclusive quanto à atualização durante a vigência do contrato.
-        </div>
-        <div class="paragraph">
-            §3°. A partir de momento em que o acesso foi fornecido ao ALUNO, o treinamento ou curso on-line ou mentoria será considerado utilizado, sem implicar em liberação de danos ao ALUNO.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Terceira.</div>
-        <div class="clause-text">
-            Não haverá devolução de valores, transferência ou reagendamento em caso de ausência do ALUNO, mesmo por caso fortuito ou força maior.
-        </div>
-        <div class="paragraph">
-            §1º. Considera-se ausência em comportamento parcial ou total do ALUNO durante o curso, implicando em rescisão contratual sem direito ao ALUNO à indenização e à devolução de valores e sem autorização de transferir para outro ALUNO e sem direito ao fornecimento de certificado válido pela ACADEMY.
-        </div>
-        <div class="paragraph">
-            §2°. O ALUNO está ciente da data e local onde o seu curso/treinamento será realizado, de modo que, a alteração de data e/ou local mediante solicitação, avaliação pelo Time de Cuidado da Atende da ACADEMY, implicará em pagamento de taxa correspondente a 10% (dez por cento) do preço total do contrato, caso haja disponibilidade.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Quarta.</div>
-        <div class="clause-text">
-            O presente treinamento é classificado como curso livre, sendo que o custo de obrigatoriedade de emissão de certificado, de modo que, nos casos em que a emissão do certificado não é obrigatória, quando solicitado, deverá ser arcado pelo ALUNO.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Quinta.</div>
-        <div class="clause-text">
-            Constatada a inadimplência, as obrigações poderão ser levadas a protesto e registradas nos órgãos de proteção ao crédito.
-        </div>
-        <div class="paragraph">
-            §1°. Em caso de atraso superior a 30 dias poderá exigir vencimento antecipado das parcelas e cobrança do preço total do ALUNO inadimplente e o montante inadimplido.
-        </div>
-        <div class="paragraph">
-            §2°. A multa não afasta a obrigação de pagar o preço principal, que será comido pelo INPC, com juros de 1% ao mês e multa de 10%.
-        </div>
-        <div class="paragraph">
-            §3°. Em caso de inadimplência, a ACADEMY poderá impedir o ALUNO de contratar novos cursos ou treinamentos.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Quinta.</div>
-        <div class="clause-text">
-            Caso ocorra o CANCELAMENTO, por culpa ou solicitação do ALUNO, com MAIS DE 30 (TRINTA) DIAS DE ANTECEDÊNCIA da data prevista para a realização do curso/treinamento, a multa rescisória correspondente a 30% (trinta por cento) do preço total do treinamento contratado, a título de reembolso de gastos operacionais despendidos pela ACADEMY para a oferta e a disponibilidade do curso/treinamento.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Sexta.</div>
-        <div class="clause-text">
-            Caso ocorra tratando de solicitação de CANCELAMENTO com MENOS DE 30 (TRINTA) DIAS DE ANTECEDÊNCIA da data prevista para a realização do curso/treinamento, a multa rescisória será de 40% (quarenta por cento) do preço do contrato. O aumento e devido aos custos a reserva de vagas, de material e todos os aspectos operacionais.
-        </div>
-        <div class="paragraph">
-            Parágrafo único. VÁLIDO SEMPRE, caso o cancelamento ocorra em período inferior a 30 dias antes do treinamento ou curso, sem aviso de cancelamento, por sua culpa ou solicitação, sendo aplicada as regras do disposto acima sem prejuízo das multas e de 4%).
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Sétima.</div>
-        <div class="clause-text">
-            Após os descontos de multas e encargos, eventuais saldos a favor do ALUNO poderão ser devolvidos em até 3 (três) parcelas (30, 60 e 90 dias), via transferência bancária.
-        </div>
-        <div class="paragraph">
-            §1°. Caso o ALUNO não responda aos contatos realizados pela ACADEMY pelo prazo de 3 (três) meses, a mesma considerará que o ALUNO renunciou de montante que lhe era devido, reservando-se do direito de não ressarcimento no momento posterior.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Oitava.</div>
-        <div class="clause-text">
-            Se o montante pago não for suficiente para cobrir os encargos, a ACADEMY poderá cobrar o saldo, servindo este instrumento como título executivo extrajudicial, sem necessidade de notificação.
-        </div>
-        <div class="paragraph">
-            Parágrafo único. Em caso de cancelamento, na possibilidade de o curso/treinamento contratado já sido utilizado total ou parcialmente pelo ALUNO, não haverá devolução, de modo que esse será utilizado para satisfação das obrigações contratuais.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Nona.</div>
-        <div class="clause-text">
-            Caso o aluno tenha saldo pendente a ser quitado, este deverá ser pago por transferência bancária à vista ou em até 3 (três) vezes no cartão de crédito.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Décima.</div>
-        <div class="clause-text">
-            A utilização de créditos na contratação será considerada consumada e sem possibilidade de conversão ou estorno, mesmo em caso de alterações ou cancelamentos.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Décima Primeira.</div>
-        <div class="clause-text">
-            Os bônus são acessórios ao contrato e por isso não podem ser utilizados separadamente. Em caso de cancelamento do treinamento, os bônus também serão cancelados.
-        </div>
-        <div class="paragraph">
-            §1°. Caso algum bônus seja utilizado, deverá ser cobrado pela ACADEMY: curso online coletiva ao vivo online com duração de 1 hora, R$ 2.907,00 (dois mil, novecentos e sete reais), e para cada IPR (Imersão Prosperar), R$ 945,50 (novecentos e quarenta e cinco reais e cinquenta centavos).
-        </div>
-        <div class="paragraph">
-            §2°. Tais valores serão abarcados a multa contratual conforme cláusulas quinta e sexta.
-        </div>
-        <div class="paragraph">
-            §3°. A partir do momento em que for acesso for disponibilizado ao ALUNO, considera-se que o curso on-line ou mentoria foi utilizado.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Décima Segunda.</div>
-        <div class="clause-text">
-            Tolerâncias ou deliberações não constituem novação ou alteração contratual.
-        </div>
-    </div>
-    
-    <div class="clause">
-        <div class="clause-title">Cláusula Décima Terceira.</div>
-        <div class="clause-text">
-            As partes elegem o foro da Comarca de Americana-SP, renunciando a qualquer outro, por mais privilegiado que seja.
-        </div>
-    </div>
-    
-    <div class="center-text">
-        E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.
-    </div>
-    
-    <!-- TERCEIRA PÁGINA -->
-    <div class="page-break"></div>
-    
-    <!-- Declaração -->
+    <!-- Bloco final conforme layout base (após cláusulas) -->
     <div class="declaration">
-        Declaração. Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+        Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
     </div>
     
     <div class="center-text">
         E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.
     </div>
-    
-    <!-- Local e Data -->
-    <div class="signature-location">
-        <div>Local: {{CONTRATO_LOCAL}}</div>
-        <div>Data: {{CONTRATO_DATA}}</div>
-    </div>
-    
-    <!-- Linha de assinatura -->
-    <div class="signature-line"></div>
-    <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
-    
-    <!-- Testemunhas -->
-    <div class="witnesses-section">
-        <div class="witness">
-            <div class="witness-line"></div>
-            <div class="witness-info">
-                <div><span class="bold">Testemunha 1</span></div>
-                <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
-                <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
-            </div>
+
+    <div class="signature-block">
+        <!-- Local e Data -->
+        <div class="signature-location">
+            <div><strong>Local:</strong> {{CONTRATO_LOCAL}}</div>
+            <div><strong>Data:</strong> {{CONTRATO_DATA}}</div>
         </div>
         
-        <div class="witness">
-            <div class="witness-line"></div>
-            <div class="witness-info">
-                <div><span class="bold">Testemunha 2</span></div>
-                <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
-                <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+        <!-- Assinatura principal -->
+        <div class="signature-main">
+            <div class="signature-line"></div>
+            <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
+        </div>
+        
+        <!-- Testemunhas -->
+        <div class="witnesses-section">
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div class="witness-info">
+                    <div><span class="bold">Testemunha 1</span></div>
+                    <div>Nome: {{TESTEMUNHA_1_NOME}}</div>
+                    <div>CPF: {{TESTEMUNHA_1_CPF}}</div>
+                </div>
+            </div>
+            
+            <div class="witness">
+                <div class="witness-line"></div>
+                <div class="witness-info">
+                    <div><span class="bold">Testemunha 2</span></div>
+                    <div>Nome: {{TESTEMUNHA_2_NOME}}</div>
+                    <div>CPF: {{TESTEMUNHA_2_CPF}}</div>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Logo do Treinamento (última página) -->
-    <div class="footer-brand" style="margin-top:40px;">
-        <img src="{{TREINAMENTO_LOGO_URL}}" alt="Logo Treinamento" style="height:36px; object-fit:contain;" />
-    </div>
 </body>
 </html>

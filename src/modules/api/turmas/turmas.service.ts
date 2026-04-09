@@ -1644,7 +1644,20 @@ export class TurmasService {
 
             // Verificar se a turma permite inserção de alunos
             if (turma.status_turma === EStatusTurmas.ENCERRADA) {
-                throw new BadRequestException('Não é possível adicionar alunos em turmas encerradas');
+                const hoje = new Date();
+                hoje.setHours(0, 0, 0, 0);
+
+                const dataInicio = turma.data_inicio ? new Date(turma.data_inicio) : null;
+                const dataFinal = turma.data_final ? new Date(turma.data_final) : null;
+
+                if (dataInicio) dataInicio.setHours(0, 0, 0, 0);
+                if (dataFinal) dataFinal.setHours(23, 59, 59, 999);
+
+                const dentroPeriodoEvento = !!dataInicio && !!dataFinal && hoje >= dataInicio && hoje <= dataFinal;
+
+                if (!dentroPeriodoEvento) {
+                    throw new BadRequestException('Turma encerrada: só é possível adicionar alunos durante o período do evento');
+                }
             }
 
             if (turma.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {

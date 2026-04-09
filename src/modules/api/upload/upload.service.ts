@@ -518,6 +518,33 @@ export class UploadService {
             for (const aluno of alunosRecarregados) {
                 alunoByEmail.set(aluno.email, aluno);
             }
+
+            const nomePreferencialPorEmail = this.buildPreferredNameByEmail(candidates);
+            const alunosParaAtualizar = Array.from(alunoByEmail.values()).filter((aluno) => {
+                const nomeDesejado = nomePreferencialPorEmail.get(aluno.email);
+                if (!nomeDesejado) return false;
+
+                const nomeAtual = String(aluno.nome || '').trim();
+                const nomeCrachaAtual = String(aluno.nome_cracha || '').trim();
+                const nomeDesejadoNormalizado = this.normalizeText(nomeDesejado);
+
+                const nomeAtualInvalido = !nomeAtual || this.isDateLikeText(nomeAtual);
+                const nomeCrachaInvalido = !nomeCrachaAtual || this.isDateLikeText(nomeCrachaAtual);
+                const nomeAtualDiferente = this.normalizeText(nomeAtual) !== nomeDesejadoNormalizado;
+                const nomeCrachaDiferente = this.normalizeText(nomeCrachaAtual) !== nomeDesejadoNormalizado;
+
+                return nomeAtualInvalido || nomeCrachaInvalido || nomeAtualDiferente || nomeCrachaDiferente;
+            });
+
+            if (alunosParaAtualizar.length > 0) {
+                for (const aluno of alunosParaAtualizar) {
+                    const nomeDesejado = nomePreferencialPorEmail.get(aluno.email);
+                    if (!nomeDesejado) continue;
+                    aluno.nome = nomeDesejado;
+                    aluno.nome_cracha = nomeDesejado;
+                }
+                await this.uow.alunosRP.save(alunosParaAtualizar, { chunk: alunosChunkSize });
+            }
         }
 
         const idsAlunosExistentes = Array.from(new Set(Array.from(alunoByEmail.values()).map((aluno) => String(aluno.id))));
@@ -980,6 +1007,33 @@ export class UploadService {
             for (const aluno of alunosRecarregados) {
                 alunoByEmail.set(aluno.email, aluno);
             }
+
+            const nomePreferencialPorEmail = this.buildPreferredNameByEmail(candidates);
+            const alunosParaAtualizar = Array.from(alunoByEmail.values()).filter((aluno) => {
+                const nomeDesejado = nomePreferencialPorEmail.get(aluno.email);
+                if (!nomeDesejado) return false;
+
+                const nomeAtual = String(aluno.nome || '').trim();
+                const nomeCrachaAtual = String(aluno.nome_cracha || '').trim();
+                const nomeDesejadoNormalizado = this.normalizeText(nomeDesejado);
+
+                const nomeAtualInvalido = !nomeAtual || this.isDateLikeText(nomeAtual);
+                const nomeCrachaInvalido = !nomeCrachaAtual || this.isDateLikeText(nomeCrachaAtual);
+                const nomeAtualDiferente = this.normalizeText(nomeAtual) !== nomeDesejadoNormalizado;
+                const nomeCrachaDiferente = this.normalizeText(nomeCrachaAtual) !== nomeDesejadoNormalizado;
+
+                return nomeAtualInvalido || nomeCrachaInvalido || nomeAtualDiferente || nomeCrachaDiferente;
+            });
+
+            if (alunosParaAtualizar.length > 0) {
+                for (const aluno of alunosParaAtualizar) {
+                    const nomeDesejado = nomePreferencialPorEmail.get(aluno.email);
+                    if (!nomeDesejado) continue;
+                    aluno.nome = nomeDesejado;
+                    aluno.nome_cracha = nomeDesejado;
+                }
+                await this.uow.alunosRP.save(alunosParaAtualizar, { chunk: alunosChunkSize });
+            }
         }
 
         const idsAlunosExistentes = Array.from(new Set(Array.from(alunoByEmail.values()).map((aluno) => String(aluno.id))));
@@ -1422,11 +1476,20 @@ export class UploadService {
         const headerRow = rows[headerIndex] || [];
         const normalizedHeaders = headerRow.map((v) => this.normalizeText(String(v ?? '')));
         const idxNomeParticipante = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'NOME' || h.includes('NOME CONV'));
+        const idxParceiroNome = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('PARCEIRO'));
         const idxStatusPrincipal = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'STATUS');
         const idxStatusFin = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('STATUS FIN'));
         const isLayoutTreinamentosGerais = idxNomeParticipante >= 0 && idxStatusPrincipal >= 0 && idxStatusPrincipal !== idxStatusFin;
-        const hasStatusH = this.isStatusHeader(headerRow[7]);
-        const hasStatusI = this.isStatusHeader(headerRow[8]);
+        const idxNomePadrao = this.findHeaderColumnIndex(
+            normalizedHeaders,
+            (h) => h.includes('PARCEIRO') || h === 'NOME' || h.includes('NOME ') || h.includes(' CLIENTE') || h === 'CLIENTE',
+        );
+        const idxEmailPadrao = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'E-MAIL' || h === 'EMAIL');
+        const idxTelefonePadrao = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('TELEFONE') || h.includes('TEL') || h.includes('FONE'));
+        const idxObsPadrao = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('OBSERV') || h.includes('OBS'));
+        const idxStatusSecundario = this.findHeaderColumnIndex(normalizedHeaders, (h, idx) => h.includes('STATUS') && idx !== idxStatusPrincipal);
+        const hasStatusH = idxStatusPrincipal >= 0 ? true : this.isStatusHeader(headerRow[7]);
+        const hasStatusI = idxStatusSecundario >= 0 ? true : this.isStatusHeader(headerRow[8]);
         const parsed: Array<{
             linha: number;
             nome: string;
@@ -1475,10 +1538,28 @@ export class UploadService {
                 const status = String(row[idxStatusPrincipal] ?? '').trim();
                 const turmaTransferenciaDestino = idxTransferencia >= 0 ? String(row[idxTransferencia] ?? '').trim() : '';
 
-                const nome = participanteNome || parceiroNome;
+                let nome = this.getPreferredNameByHeader(row, normalizedHeaders) || participanteNome || parceiroNome;
                 const email = participanteEmail || compradorEmail;
                 const telefone = participanteTelefone || compradorTelefone;
                 const isBonus = Boolean(participanteNome || participanteEmail || participanteTelefone);
+                if (!nome || this.isDateLikeText(nome)) {
+                    const nomeFromObs = this.extractNameFromObs(obs);
+                    const nomeFromRow = this.extractBestNameFromAnyColumn(row, [
+                        idxNomeParticipante,
+                        idxParceiro,
+                        idxEmailComprador,
+                        idxEmailParticipante,
+                        idxTelefoneComprador,
+                        idxTelefoneParticipante,
+                        idxObs,
+                        idxStatusPrincipal,
+                        idxTransferencia,
+                    ]);
+                    nome = nomeFromObs || nomeFromRow || '';
+                }
+                if (this.isDateLikeText(nome)) {
+                    nome = '';
+                }
 
                 if (!nome && !email && !telefone && !obs && !status && !turmaTransferenciaDestino) {
                     continue;
@@ -1505,12 +1586,35 @@ export class UploadService {
 
         for (let i = dataStart; i < rows.length; i++) {
             const row = rows[i] || [];
-            const nome = String(row[1] ?? '').trim();
-            const email = String(row[4] ?? '').trim();
-            const telefone = String(row[5] ?? '').trim();
-            const obs = String(row[6] ?? '').trim();
-            const statusH = String(row[7] ?? '').trim();
-            const statusI = String(row[8] ?? '').trim();
+            let nome =
+                this.getPreferredNameByHeader(row, normalizedHeaders) ||
+                this.extractBestNameFromRow(row, [
+                    idxNomePadrao,
+                    idxParceiroNome,
+                    1, // Layout legado: PARCEIRO/NOME
+                    2, // Fallback para variações de template
+                ]);
+            const email = this.getFirstNonEmptyCellValue(row, [idxEmailPadrao, 4]);
+            const telefone = this.getFirstNonEmptyCellValue(row, [idxTelefonePadrao, 5]);
+            const obs = this.getFirstNonEmptyCellValue(row, [idxObsPadrao, 6]);
+            const statusH = this.getFirstNonEmptyCellValue(row, [idxStatusPrincipal, 7], true);
+            const statusI = this.getFirstNonEmptyCellValue(row, [idxStatusSecundario, 8], true);
+            if (!nome || this.isDateLikeText(nome)) {
+                const nomeFromObs = this.extractNameFromObs(obs);
+                const nomeFromRow = this.extractBestNameFromAnyColumn(row, [
+                    idxNomePadrao,
+                    idxParceiroNome,
+                    idxEmailPadrao,
+                    idxTelefonePadrao,
+                    idxObsPadrao,
+                    idxStatusPrincipal,
+                    idxStatusSecundario,
+                ]);
+                nome = nomeFromObs || nomeFromRow || '';
+            }
+            if (this.isDateLikeText(nome)) {
+                nome = '';
+            }
 
             if (!nome && !email && !telefone && !obs && !statusH && !statusI) {
                 continue;
@@ -1534,6 +1638,153 @@ export class UploadService {
         }
 
         return parsed;
+    }
+
+    private getCellValue(row: any[], index: number): string {
+        if (index < 0) return '';
+        const value = row[index];
+        if (value === null || typeof value === 'undefined') return '';
+        return String(value).trim();
+    }
+
+    private getPreferredNameByHeader(row: any[], normalizedHeaders: string[]): string {
+        const idxParceiro = this.findHeaderColumnIndex(normalizedHeaders, (h) => h.includes('PARCEIRO'));
+        const idxNome = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'NOME' || h.includes('NOME ') || h.includes(' NOME'));
+        const idxCliente = this.findHeaderColumnIndex(normalizedHeaders, (h) => h === 'CLIENTE' || h.includes(' CLIENTE') || h.includes('CLIENTE '));
+
+        const nomeParceiro = this.getCellValue(row, idxParceiro);
+        if (nomeParceiro && !this.isDateLikeText(nomeParceiro)) {
+            return nomeParceiro;
+        }
+
+        const nomeDireto = this.getCellValue(row, idxNome);
+        if (nomeDireto && !this.isDateLikeText(nomeDireto)) {
+            return nomeDireto;
+        }
+
+        const nomeCliente = this.getCellValue(row, idxCliente);
+        if (nomeCliente && !this.isDateLikeText(nomeCliente)) {
+            return nomeCliente;
+        }
+
+        return '';
+    }
+
+    private getFirstNonEmptyCellValue(row: any[], indexes: number[], allowDateLike = false): string {
+        const uniques = Array.from(new Set(indexes.filter((idx) => idx >= 0)));
+        for (const index of uniques) {
+            const value = this.getCellValue(row, index);
+            if (!value) continue;
+            if (!allowDateLike && this.isDateLikeText(value)) continue;
+            return value;
+        }
+        return '';
+    }
+
+    private extractBestNameFromRow(row: any[], indexes: number[]): string {
+        const uniques = Array.from(new Set(indexes.filter((idx) => idx >= 0)));
+        let firstNonDateValue = '';
+
+        for (const index of uniques) {
+            const value = this.getCellValue(row, index);
+            if (!value) continue;
+            if (this.isDateLikeText(value)) continue;
+
+            if (!firstNonDateValue) {
+                firstNonDateValue = value;
+            }
+
+            const normalized = this.normalizeText(value);
+            if (normalized.includes('@')) continue;
+            const lettersOnly = normalized.replace(/[^A-Z]/g, '');
+            if (lettersOnly.length >= 3) {
+                return value;
+            }
+        }
+
+        return firstNonDateValue;
+    }
+
+    private extractBestNameFromAnyColumn(row: any[], excludedIndexes: number[]): string {
+        const excluded = new Set(excludedIndexes.filter((idx) => idx >= 0));
+        let bestCandidate = '';
+
+        for (let i = 0; i < row.length; i++) {
+            if (excluded.has(i)) continue;
+            const value = this.getCellValue(row, i);
+            if (!value) continue;
+            if (this.isDateLikeText(value)) continue;
+
+            const normalized = this.normalizeText(value);
+            if (!normalized || normalized.includes('@')) continue;
+            if (value.includes('|')) continue;
+            if (/^\d+([.,]\d+)?$/.test(value)) continue;
+
+            const blocked = ['CONFIRMADO', 'PENDENTE', 'CANCELADO', 'EXCLUIR', 'CHECKIN REALIZADO', 'NAO REGISTRADO'];
+            if (blocked.some((b) => normalized.includes(b))) continue;
+
+            const lettersOnly = normalized.replace(/[^A-Z]/g, '');
+            if (lettersOnly.length < 3) continue;
+
+            const words = normalized.split(' ').filter(Boolean).length;
+            if (words >= 2 || lettersOnly.length >= 6) {
+                if (!bestCandidate || normalized.length > this.normalizeText(bestCandidate).length) {
+                    bestCandidate = value;
+                }
+            }
+        }
+
+        return bestCandidate;
+    }
+
+    private extractNameFromObs(obs: string): string {
+        const raw = (obs || '').trim();
+        if (!raw) return '';
+
+        const bonusMatch = raw.match(/B[ÔO]NUS\s*-\s*([^|]+)/i);
+        if (bonusMatch?.[1]) {
+            const candidate = bonusMatch[1].trim();
+            if (candidate && !this.isDateLikeText(candidate)) {
+                return candidate;
+            }
+        }
+
+        return '';
+    }
+
+    private buildPreferredNameByEmail(candidates: Array<{ email: string; nomeOriginal: string }>): Map<string, string> {
+        const preferred = new Map<string, string>();
+        for (const candidate of candidates) {
+            const email = (candidate.email || '').trim().toLowerCase();
+            const nome = (candidate.nomeOriginal || '').trim();
+            if (!email || !nome || this.isDateLikeText(nome)) continue;
+
+            const current = preferred.get(email);
+            if (!current) {
+                preferred.set(email, nome);
+                continue;
+            }
+
+            // Prefere o nome mais "rico" para evitar manter versões truncadas.
+            if (this.normalizeText(nome).length > this.normalizeText(current).length) {
+                preferred.set(email, nome);
+            }
+        }
+        return preferred;
+    }
+
+    private isDateLikeText(value: string): boolean {
+        const raw = (value || '').trim();
+        if (!raw) return false;
+
+        const normalized = this.normalizeText(raw);
+        if (normalized.includes('UTC') || normalized.includes('GMT')) return true;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return true;
+        if (/^\d{4}-\d{2}-\d{2}[T\s].+$/.test(raw)) return true;
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) return true;
+        if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(raw)) return true;
+
+        return false;
     }
 
     private findHeaderIndex(rows: any[][]): number {

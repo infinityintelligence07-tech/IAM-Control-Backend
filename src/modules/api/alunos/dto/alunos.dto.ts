@@ -46,6 +46,7 @@ export class AlunoResponseDto {
     email: string;
     genero?: string;
     cpf?: string;
+    instagram?: string;
     data_nascimento?: string;
     telefone_um: string;
     telefone_dois?: string;
@@ -124,6 +125,11 @@ export class CreateAlunoDto {
     @IsString()
     @Transform(({ value }) => value?.trim())
     cpf?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    instagram?: string;
 
     @IsOptional()
     @IsString()
@@ -264,6 +270,11 @@ export class UpdateAlunoDto {
     @IsString()
     @Transform(({ value }) => value?.trim())
     cpf?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    instagram?: string;
 
     @IsOptional()
     @IsString()

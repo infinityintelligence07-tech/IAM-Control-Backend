@@ -71,7 +71,13 @@ export class TurmasService {
      */
     private isFichaPreenchida(aluno: any): boolean {
         if (!aluno) return false;
-        return this.hasValue(aluno.cpf) && this.hasValue(aluno.telefone_um) && this.hasValue(aluno.genero) && this.hasValue(aluno.data_nascimento);
+        return (
+            this.hasValue(aluno.cpf) &&
+            this.hasValue(aluno.instagram) &&
+            this.hasValue(aluno.telefone_um) &&
+            this.hasValue(aluno.genero) &&
+            this.hasValue(aluno.data_nascimento)
+        );
     }
 
     private async validarPermissaoDesmarcarPresenca(turmaAluno: any, userId?: number): Promise<void> {
@@ -900,6 +906,7 @@ export class TurmasService {
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha || turmaAluno.id_aluno_fk.nome,
                           status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
                           cpf: turmaAluno.id_aluno_fk.cpf,
+                          instagram: turmaAluno.id_aluno_fk.instagram,
                           telefone_um: turmaAluno.id_aluno_fk.telefone_um,
                           telefone_dois: turmaAluno.id_aluno_fk.telefone_dois,
                           cep: turmaAluno.id_aluno_fk.cep,
@@ -1661,6 +1668,7 @@ export class TurmasService {
                           telefone_dois: turmaAluno.id_aluno_fk.telefone_dois,
                           nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
                           cpf: turmaAluno.id_aluno_fk.cpf,
+                          instagram: turmaAluno.id_aluno_fk.instagram,
                           cep: turmaAluno.id_aluno_fk.cep,
                           logradouro: turmaAluno.id_aluno_fk.logradouro,
                           complemento: turmaAluno.id_aluno_fk.complemento,

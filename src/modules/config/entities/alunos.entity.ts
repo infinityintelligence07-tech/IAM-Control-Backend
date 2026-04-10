@@ -34,6 +34,9 @@ export class Alunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'cpf', nullable: true })
     cpf: string;
 
+    @Column({ type: 'varchar', name: 'instagram', nullable: true })
+    instagram: string;
+
     @Column({ type: 'varchar', name: 'data_nascimento', nullable: true })
     data_nascimento: string;
 

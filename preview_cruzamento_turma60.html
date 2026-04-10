@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Preview - Cruzamento Planilha x Turma 60</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #333; }
+h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+h2 { color: #2c3e50; margin-top: 30px; }
+h3 { color: #555; }
+.summary { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 15px 0; }
+.stat-card { background: #f8f9fa; border-radius: 8px; padding: 15px; text-align: center; border-left: 4px solid #3498db; }
+.stat-card.green { border-left-color: #27ae60; }
+.stat-card.orange { border-left-color: #f39c12; }
+.stat-card.red { border-left-color: #e74c3c; }
+.stat-card .num { font-size: 32px; font-weight: bold; color: #2c3e50; }
+.stat-card .label { font-size: 12px; color: #777; margin-top: 5px; }
+table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; font-size: 13px; }
+th { background: #2c3e50; color: #fff; padding: 10px 8px; text-align: left; }
+td { padding: 8px; border-bottom: 1px solid #eee; }
+tr:hover { background: #f0f7ff; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+.badge-email { background: #d4edda; color: #155724; }
+.badge-phone { background: #fff3cd; color: #856404; }
+.badge-turma60 { background: #cce5ff; color: #004085; }
+.badge-other { background: #f8d7da; color: #721c24; }
+.badge-new { background: #e2e3e5; color: #383d41; }
+.update-list { margin: 0; padding: 0; list-style: none; }
+.update-list li { padding: 2px 0; font-size: 12px; }
+.update-list li span.field { font-weight: bold; color: #3498db; }
+.field-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 15px 0; }
+.field-stat { background: #fff; padding: 10px; border-radius: 6px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.field-stat .fnum { font-size: 24px; font-weight: bold; color: #3498db; }
+.field-stat .fname { font-size: 11px; color: #777; }
+.warning { background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 6px; margin: 10px 0; }
+.info { background: #d1ecf1; border: 1px solid #bee5eb; padding: 12px; border-radius: 6px; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>Preview - Cruzamento Planilha Cadastro Sorteio IAM x Turma 60</h1>
+<p style="color:#777;">Gerado em: 10/04/2026 | <strong>MODO PREVIEW - NENHUMA ALTERAÇÃO FOI REALIZADA</strong></p>
+
+<div class="warning">⚠️ Este é apenas um PREVIEW. Nenhum dado foi inserido ou atualizado no banco de dados.</div>
+
+<div class="summary">
+<h2>Resumo Geral</h2>
+<div class="summary-grid">
+    <div class="stat-card"><div class="num">148</div><div class="label">Total na Planilha</div></div>
+    <div class="stat-card green"><div class="num">116</div><div class="label">Match Turma 60</div></div>
+    <div class="stat-card orange"><div class="num">7</div><div class="label">Match Outras Turmas</div></div>
+    <div class="stat-card red"><div class="num">25</div><div class="label">Sem Match (Novos)</div></div>
+</div>
+<div class="summary-grid">
+    <div class="stat-card green"><div class="num">899</div><div class="label">Campos Atualizáveis (Turma 60)</div></div>
+    <div class="stat-card orange"><div class="num">47</div><div class="label">Campos Atualizáveis (Outras)</div></div>
+</div>
+</div>
+
+<div class="summary">
+<h2>Campos Atualizáveis por Tipo (Turma 60)</h2>
+<div class="field-stats">
+<div class="field-stat"><div class="fnum">116</div><div class="fname">instagram</div></div>
+<div class="field-stat"><div class="fnum">94</div><div class="fname">logradouro</div></div>
+<div class="field-stat"><div class="fnum">93</div><div class="fname">cep</div></div>
+<div class="field-stat"><div class="fnum">93</div><div class="fname">bairro</div></div>
+<div class="field-stat"><div class="fnum">92</div><div class="fname">cidade</div></div>
+<div class="field-stat"><div class="fnum">92</div><div class="fname">estado</div></div>
+<div class="field-stat"><div class="fnum">91</div><div class="fname">data_nascimento</div></div>
+<div class="field-stat"><div class="fnum">87</div><div class="fname">genero</div></div>
+<div class="field-stat"><div class="fnum">86</div><div class="fname">cpf</div></div>
+<div class="field-stat"><div class="fnum">55</div><div class="fname">profissao</div></div>
+</div>
+</div>
+
+<h2>1. Alunos da Turma 60 - Campos a Atualizar (116 registros)</h2>
+<div class="info">Estes alunos já estão na turma 60 e possuem campos NULL que podem ser preenchidos com os dados da planilha.</div>
+<table>
+<tr><th>#</th><th>Row</th><th>Nome (Planilha)</th><th>Nome (DB)</th><th>ID Aluno</th><th>Match</th><th>Campos a Atualizar</th></tr>
+<tr>
+<td>1</td><td>2</td>
+<td>Luiz Fernando Patron Vicentin</td><td>Luiz Fernando Patron Vicentin</td><td>95</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 00605493197</li><li><span class="field">data_nascimento</span>: NULL → 29/06/1985</li><li><span class="field">cep</span>: NULL → 13144-725</li><li><span class="field">logradouro</span>: NULL → Rua Nelson Rubini, 410
+AP 32, BL F</li><li><span class="field">bairro</span>: NULL → Balneário Tropical</li><li><span class="field">cidade</span>: NULL → Paulínia</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">instagram</span>: NULL → @luizpatron</li></ul></td></tr>
+<tr>
+<td>2</td><td>3</td>
+<td>Kelle hernandez Gonçalves</td><td>Kelle Hernandez Gonçalves</td><td>2946</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Kelle.hernandez</li></ul></td></tr>
+<tr>
+<td>3</td><td>4</td>
+<td>Thais Pereira</td><td>THAIS CAMPOS PEREIRA</td><td>5225</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 39557040840</li><li><span class="field">data_nascimento</span>: NULL → 08/08/1999</li><li><span class="field">cep</span>: NULL → 14800360</li><li><span class="field">logradouro</span>: NULL → Rua Padre Duarte 2485</li><li><span class="field">bairro</span>: NULL → Centro</li><li><span class="field">cidade</span>: NULL → Araraquara</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → dra.thaiscampospereira</li></ul></td></tr>
+<tr>
+<td>4</td><td>5</td>
+<td>Talita Monique Cardoso</td><td>Talita Monique Cardoso</td><td>2947</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → _talitacardoso</li></ul></td></tr>
+<tr>
+<td>5</td><td>6</td>
+<td>Mônica Pamplona</td><td>MONICA BUBNIAK PAMPLONA VICENTIN</td><td>1776</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → @mopamplona</li></ul></td></tr>
+<tr>
+<td>6</td><td>8</td>
+<td>Thiago Rocha</td><td>THIAGO ROCHA</td><td>1668</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 32714492878</li><li><span class="field">data_nascimento</span>: NULL → 05/07/1985</li><li><span class="field">cep</span>: NULL → 13471104</li><li><span class="field">logradouro</span>: NULL → Rua Amadeu Bertie, 174</li><li><span class="field">bairro</span>: NULL → Vale do Rio branco</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → Só</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @roc_thiago</li></ul></td></tr>
+<tr>
+<td>7</td><td>9</td>
+<td>Paloma Moraes do Carmo Pierotti</td><td>Paloma Moraes do Carmo Pierotti</td><td>5201</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 41887200851</li><li><span class="field">data_nascimento</span>: NULL → 05/09/1992</li><li><span class="field">cep</span>: NULL → 09020000</li><li><span class="field">logradouro</span>: NULL → Rua Gertrudes de Lima, 146</li><li><span class="field">bairro</span>: NULL → Centro</li><li><span class="field">cidade</span>: NULL → Santo André</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Pamoraescarmo</li></ul></td></tr>
+<tr>
+<td>8</td><td>10</td>
+<td>Caroline boni ibanhes</td><td>Caroline boni ibanhes</td><td>3286</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Carolineboni_</li></ul></td></tr>
+<tr>
+<td>9</td><td>12</td>
+<td>Kemeli Aparecida Cordeiro da Silva</td><td>WESLLEY SANTOS ABREU</td><td>5237</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 12581125900</li><li><span class="field">data_nascimento</span>: NULL → 16/04/2001</li><li><span class="field">cep</span>: NULL → 89206700</li><li><span class="field">logradouro</span>: NULL → Rua Arno Schwartz 490</li><li><span class="field">bairro</span>: NULL → Boa Vista</li><li><span class="field">cidade</span>: NULL → Joinville</li><li><span class="field">estado</span>: NULL → Sc</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">instagram</span>: NULL → @kemiisc</li></ul></td></tr>
+<tr>
+<td>10</td><td>13</td>
+<td>Bianca Valentim Prado</td><td>BIANCA VALENTIM PRADO</td><td>78</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → @drabiancaprado</li></ul></td></tr>
+<tr>
+<td>11</td><td>14</td>
+<td>Joyce Dantas Oliveira</td><td>Joyce Dantas Oliveira</td><td>5309</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">logradouro</span>: NULL → Rua sete</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">instagram</span>: NULL → Joycedantas_unhas</li></ul></td></tr>
+<tr>
+<td>12</td><td>15</td>
+<td>Felipe Vieira de Miranda</td><td>Felipe Vieira de Miranda</td><td>1698</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → fe.vieira92</li></ul></td></tr>
+<tr>
+<td>13</td><td>17</td>
+<td>Gheysa Weinberger Toniato Caruso</td><td>Gheysa Weinberger Toniato Caruso</td><td>5169</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → @ghewtc09</li></ul></td></tr>
+<tr>
+<td>14</td><td>18</td>
+<td>Joisleine Beatriz de Oliveira</td><td>Joisleine Beatriz Oliveira</td><td>69</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cep</span>: NULL → 83190000</li><li><span class="field">logradouro</span>: NULL → R Zacarias da Rocha</li><li><span class="field">bairro</span>: NULL → Jardim Bosque da Saúde</li><li><span class="field">cidade</span>: NULL → Tijucas do Sul</li><li><span class="field">estado</span>: NULL → Paraná</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">instagram</span>: NULL → jois.oliveira</li></ul></td></tr>
+<tr>
+<td>15</td><td>21</td>
+<td>Ana Cecilia Mascarenhas Silva Pinheiro</td><td>ANA CELIA MASCARENHAS S PINHEIRO</td><td>2807</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 35609256810</li><li><span class="field">data_nascimento</span>: NULL → 13/05/1987</li><li><span class="field">cep</span>: NULL → 12946703</li><li><span class="field">logradouro</span>: NULL → Rua das Camelias, 550</li><li><span class="field">bairro</span>: NULL → Retiro das fontes</li><li><span class="field">cidade</span>: NULL → Atibaia</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @aceciliamascarenhas</li></ul></td></tr>
+<tr>
+<td>16</td><td>22</td>
+<td>Rebeca Baião</td><td>Rebeca Baião</td><td>3294</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37874085841</li><li><span class="field">data_nascimento</span>: NULL → 20/12/1989</li><li><span class="field">cep</span>: NULL → 15156062</li><li><span class="field">logradouro</span>: NULL → Rua Nelson Dos Santos
+189</li><li><span class="field">bairro</span>: NULL → Gabriela</li><li><span class="field">cidade</span>: NULL → Jaci</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @Amavi Cosméticos</li></ul></td></tr>
+<tr>
+<td>17</td><td>23</td>
+<td>Víviam Nunes</td><td>Viviam Caroline Nunes de Oliveira</td><td>201</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37238289814</li><li><span class="field">data_nascimento</span>: NULL → 24/08/1987</li><li><span class="field">cep</span>: NULL → 06727220</li><li><span class="field">logradouro</span>: NULL → Rua Benedito Ferreira das Dores, 52</li><li><span class="field">bairro</span>: NULL → Caucaia do Alto</li><li><span class="field">cidade</span>: NULL → Cotia</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @vicanuoli</li></ul></td></tr>
+<tr>
+<td>18</td><td>25</td>
+<td>Weudes Batista de Oliveira</td><td>WEUDES BATISTA DE OLIVEIRA</td><td>5213</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 32496572808</li><li><span class="field">data_nascimento</span>: NULL → 02/01/1984</li><li><span class="field">cep</span>: NULL → 12070-190</li><li><span class="field">logradouro</span>: NULL → Rua Irmã Henriqueta,  136</li><li><span class="field">bairro</span>: NULL → Vila São Carlos</li><li><span class="field">cidade</span>: NULL → Taubaté</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → FUNCIONARIO_PUBLICO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @sargento.weudes</li></ul></td></tr>
+<tr>
+<td>19</td><td>26</td>
+<td>Daybner Andre Nogueira da Silva</td><td>Daybner André</td><td>5179</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 45183348847</li><li><span class="field">data_nascimento</span>: NULL → 08/11/1997</li><li><span class="field">cep</span>: NULL → 13382-412</li><li><span class="field">logradouro</span>: NULL → Casa</li><li><span class="field">bairro</span>: NULL → Jardim das palmeiras</li><li><span class="field">cidade</span>: NULL → Nova odess</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @liderformado</li></ul></td></tr>
+<tr>
+<td>20</td><td>27</td>
+<td>Elisangela Oliveira de Santana Duarte</td><td>Elisangela Oliveira de Santana Duarte</td><td>2944</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → elisoliveirasan</li></ul></td></tr>
+<tr>
+<td>21</td><td>28</td>
+<td>Roberto de Jesus Moreira Filho</td><td>Roberto de Jesus Moreira Filho</td><td>100</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → @rjfilho88</li></ul></td></tr>
+<tr>
+<td>22</td><td>29</td>
+<td>Bruno Moreira da Silva</td><td>WILLIAM SANTOS</td><td>5097</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 10/08/2026</li><li><span class="field">cep</span>: NULL → 18532-116</li><li><span class="field">logradouro</span>: NULL → Rua João Alves,  64</li><li><span class="field">bairro</span>: NULL → JD Sta Cruz</li><li><span class="field">cidade</span>: NULL → Tietê</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Decor.finalle</li></ul></td></tr>
+<tr>
+<td>23</td><td>30</td>
+<td>Isac Miguel Rosinha De Melo</td><td>Isac Miguel Rosinha De Melo</td><td>2940</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 51110217870</li><li><span class="field">data_nascimento</span>: NULL → 14/09/2000</li><li><span class="field">cep</span>: NULL → 08725225</li><li><span class="field">logradouro</span>: NULL → Estrada Jinichi Shigeno 101</li><li><span class="field">bairro</span>: NULL → Caputera</li><li><span class="field">cidade</span>: NULL → Mogi das Cruzes</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Isacrosinha_</li></ul></td></tr>
+<tr>
+<td>24</td><td>31</td>
+<td>Alice Jamille Laurindo Januário</td><td>Alice Jamille Laurindo Januário</td><td>2939</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 55309908862</li><li><span class="field">data_nascimento</span>: NULL → 06/07/2003</li><li><span class="field">cep</span>: NULL → 08762350</li><li><span class="field">logradouro</span>: NULL → Av. Dr. Pantaleão Trandafilov Filho 55</li><li><span class="field">bairro</span>: NULL → Jardim Santos Dumont 3</li><li><span class="field">cidade</span>: NULL → Mogi Das Cruzes</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → alicejamille_</li></ul></td></tr>
+<tr>
+<td>25</td><td>33</td>
+<td>Lucas Tiago de Souza Lima</td><td>LUCAS TIAGO DE SOUZA LIMA</td><td>5224</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 38055843856</li><li><span class="field">data_nascimento</span>: NULL → 22/08/1988</li><li><span class="field">cep</span>: NULL → 13454480</li><li><span class="field">logradouro</span>: NULL → Rua Francisco Alves 49</li><li><span class="field">bairro</span>: NULL → Zabani</li><li><span class="field">cidade</span>: NULL → Santa Bárbara d Oeste SP</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → lucastiagodigital@</li></ul></td></tr>
+<tr>
+<td>26</td><td>34</td>
+<td>Janaina aparecida dos santos neves</td><td>JANAINA APARECIDA DOS SANTOS NEVES</td><td>2811</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 31836624859</li><li><span class="field">data_nascimento</span>: NULL → 30/04/1985</li><li><span class="field">cep</span>: NULL → 13179384</li><li><span class="field">logradouro</span>: NULL → Rua Nelson Natal 56</li><li><span class="field">bairro</span>: NULL → Parque pavan</li><li><span class="field">cidade</span>: NULL → Sumare</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Janaina_santos</li></ul></td></tr>
+<tr>
+<td>27</td><td>35</td>
+<td>Isis Kauani de Oliveira Pires Minchao</td><td>Isis Kauani de Oliveira Pires Minchão</td><td>5271</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 45006987871</li><li><span class="field">data_nascimento</span>: NULL → 02/11/2003</li><li><span class="field">cep</span>: NULL → 13468-500</li><li><span class="field">logradouro</span>: NULL → Rua Indaiá, 1010</li><li><span class="field">bairro</span>: NULL → Jd Ipiranga</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → Sap</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @isisminchao</li></ul></td></tr>
+<tr>
+<td>28</td><td>36</td>
+<td>Rafael Luiz de Andrade</td><td>RAFAEL LUIZ DE ANDRADE</td><td>1670</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Rafael andrade</li></ul></td></tr>
+<tr>
+<td>29</td><td>37</td>
+<td>Agnaldo lima da Silva</td><td>AGNALDO LIMA DA SILVA</td><td>5231</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37317451860</li><li><span class="field">data_nascimento</span>: NULL → 18/04/1988</li><li><span class="field">cep</span>: NULL → 08541-215</li><li><span class="field">logradouro</span>: NULL → Rua Leandro Antônio Moura</li><li><span class="field">bairro</span>: NULL → Jardim Mercedes</li><li><span class="field">cidade</span>: NULL → Ferraz de Vasconcelos</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @agnaldoli</li></ul></td></tr>
+<tr>
+<td>30</td><td>38</td>
+<td>Valdinei Neves</td><td>Valdinei Livramento Neves</td><td>5196</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 33007307830</li><li><span class="field">data_nascimento</span>: NULL → 05/02/1986</li><li><span class="field">cep</span>: NULL → 13179384</li><li><span class="field">logradouro</span>: NULL → 56</li><li><span class="field">bairro</span>: NULL → Res. Parque Pavan</li><li><span class="field">cidade</span>: NULL → Suamare</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Valdinei.neves</li></ul></td></tr>
+<tr>
+<td>31</td><td>39</td>
+<td>Renata Cristina da</td><td>RENATA CRISTINA GONÇALVES</td><td>1722</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 35313825860</li><li><span class="field">data_nascimento</span>: NULL → 12/02/1988</li><li><span class="field">cep</span>: NULL → 14031046</li><li><span class="field">logradouro</span>: NULL → Av dos Andradas, 550 bl 5 ap12</li><li><span class="field">bairro</span>: NULL → Pq Ribeirão</li><li><span class="field">cidade</span>: NULL → Ribeirão Preto</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Eu.renatagoncalves</li></ul></td></tr>
+<tr>
+<td>32</td><td>40</td>
+<td>CAROLINA DE JESUS Moreira</td><td>Rosalva Gomes da Silva</td><td>220</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 35177588840</li><li><span class="field">data_nascimento</span>: NULL → 26/02/1987</li><li><span class="field">cep</span>: NULL → 05360020</li><li><span class="field">logradouro</span>: NULL → Rua Valson Lopes, 101</li><li><span class="field">bairro</span>: NULL → Vila butanta</li><li><span class="field">cidade</span>: NULL → São paulo</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Caroljmoreira</li></ul></td></tr>
+<tr>
+<td>33</td><td>41</td>
+<td>Rosemeire Aparecida de Queiroz Baiao</td><td>Rosemeire Aparecida de Queiroz Baiao</td><td>5270</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 21303249839</li><li><span class="field">data_nascimento</span>: NULL → 28/03/1968</li><li><span class="field">cep</span>: NULL → 15155000</li><li><span class="field">logradouro</span>: NULL → Rua Nelson dos Santos, 180</li><li><span class="field">bairro</span>: NULL → Residencial Gabriel</li><li><span class="field">cidade</span>: NULL → Jaci</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Rosemeyre. 22</li></ul></td></tr>
+<tr>
+<td>34</td><td>42</td>
+<td>Lucas martins wunderlich</td><td>LUCAS MARTINS WUNDERLICH</td><td>2935</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 44075747808</li><li><span class="field">data_nascimento</span>: NULL → 15/04/2008</li><li><span class="field">cep</span>: NULL → 13478660</li><li><span class="field">logradouro</span>: NULL → Rua natal 50 vila nossa senhora de fatim</li><li><span class="field">bairro</span>: NULL → Vila nossa senhora de fátima</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @lu.mtns05</li></ul></td></tr>
+<tr>
+<td>35</td><td>43</td>
+<td>Marcus Vinícius Gomes Faria</td><td>Marcus Vinicius Gomes Faria</td><td>67</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">instagram</span>: NULL → @marcusstark</li></ul></td></tr>
+<tr>
+<td>36</td><td>44</td>
+<td>MIKELLI Bernardes Vieira de Melo</td><td>Mikelli Bernardes</td><td>5180</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 50400713888</li><li><span class="field">data_nascimento</span>: NULL → 08/02/2005</li><li><span class="field">cep</span>: NULL → 13412424</li><li><span class="field">logradouro</span>: NULL → Rua Santina Olivia Nalessio Geraldin núm</li><li><span class="field">bairro</span>: NULL → São Vicente 1</li><li><span class="field">cidade</span>: NULL → Piracicaba</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Miika_meloo</li></ul></td></tr>
+<tr>
+<td>37</td><td>45</td>
+<td>Cintia S T De Jesus</td><td>CINTIA SANTANA TUQUI</td><td>3363</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 15/07/1986</li><li><span class="field">cep</span>: NULL → 03688000</li><li><span class="field">logradouro</span>: NULL → Rua Piraquara 549</li><li><span class="field">bairro</span>: NULL → Jd Nordeste</li><li><span class="field">cidade</span>: NULL → São Paulo</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @dracintiatuqui@icloud</li></ul></td></tr>
+<tr>
+<td>38</td><td>46</td>
+<td>Gabriel Ruffolo Pierotti</td><td>GABRIEL RUFFOLO PIEROTTI</td><td>2837</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37887247810</li><li><span class="field">data_nascimento</span>: NULL → 13/09/1989</li><li><span class="field">cep</span>: NULL → 09020000</li><li><span class="field">logradouro</span>: NULL → Gertrudes de lima, 146</li><li><span class="field">bairro</span>: NULL → Centro</li><li><span class="field">cidade</span>: NULL → Santo André</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Gabrielrpierotti</li></ul></td></tr>
+<tr>
+<td>39</td><td>47</td>
+<td>Suellen Valéria Darc da Silva</td><td>Suellen Valéria Darc da Silva</td><td>5182</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37447643890</li><li><span class="field">data_nascimento</span>: NULL → 20/05/1991</li><li><span class="field">cep</span>: NULL → 13179-081</li><li><span class="field">logradouro</span>: NULL → Rua Cristina Pereira dos Anjos número 17</li><li><span class="field">bairro</span>: NULL → Jardim Minesota</li><li><span class="field">cidade</span>: NULL → Sumaré</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @sethsemijoias</li></ul></td></tr>
+<tr>
+<td>40</td><td>48</td>
+<td>Daniela Vasconcelos Gonçalves e Silva</td><td>Daniela Vasconcelos Gonçalves e Silva</td><td>5185</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 34057204865</li><li><span class="field">data_nascimento</span>: NULL → 03/01/1986</li><li><span class="field">cep</span>: NULL → 13068431</li><li><span class="field">logradouro</span>: NULL → Rua Santo Antão 83</li><li><span class="field">bairro</span>: NULL → Padre Anchieta</li><li><span class="field">cidade</span>: NULL → Campinas</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Dani.vasconcelo</li></ul></td></tr>
+<tr>
+<td>41</td><td>50</td>
+<td>Claudair Garçoni Ferreira</td><td>CLAUDAIR GARÇONI FERREIRA</td><td>2828</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 15506427824</li><li><span class="field">data_nascimento</span>: NULL → 10/08/1971</li><li><span class="field">cep</span>: NULL → 13175330</li><li><span class="field">logradouro</span>: NULL → Custódia Dolores do Nascimento,297</li><li><span class="field">bairro</span>: NULL → Jd Luiz cia</li><li><span class="field">cidade</span>: NULL → Sumaré</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @garconiferreira</li></ul></td></tr>
+<tr>
+<td>42</td><td>51</td>
+<td>Juliana Bento de Oliveira Zaparoli</td><td>JULIANA BENTO DE OLIVEIRA ZAPAROLI</td><td>1664</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 06283342655</li><li><span class="field">data_nascimento</span>: NULL → 21/02/1983</li><li><span class="field">cep</span>: NULL → 17026560</li><li><span class="field">logradouro</span>: NULL → Rua Valdomiro Alves de Oliveira 105</li><li><span class="field">bairro</span>: NULL → Mary Dota</li><li><span class="field">cidade</span>: NULL → Bauru</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @julianazaparoli.fisioeestetica</li></ul></td></tr>
+<tr>
+<td>43</td><td>52</td>
+<td>Vagner Barbosa Pires Martins</td><td>VAGNER BARBOSA PIRES MARTINS</td><td>1704</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 19034961877</li><li><span class="field">data_nascimento</span>: NULL → 21/07/2025</li><li><span class="field">cep</span>: NULL → 13456-430</li><li><span class="field">logradouro</span>: NULL → Ro cobre</li><li><span class="field">bairro</span>: NULL → Mollon</li><li><span class="field">cidade</span>: NULL → Sta barbara d'oeste</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @vagbrown</li></ul></td></tr>
+<tr>
+<td>44</td><td>53</td>
+<td>Paulo Roberto Moreira Junior</td><td>PAULO ROBERTO MOREIRA JUNIOR</td><td>5226</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37484808814</li><li><span class="field">data_nascimento</span>: NULL → 20/11/1991</li><li><span class="field">cep</span>: NULL → 13480-151</li><li><span class="field">logradouro</span>: NULL → Sete de setembro 894</li><li><span class="field">bairro</span>: NULL → Centro</li><li><span class="field">cidade</span>: NULL → Limeira</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @omoreirajunior</li></ul></td></tr>
+<tr>
+<td>45</td><td>54</td>
+<td>Gabriela Silviano Magrini</td><td>Gabriela Silviano Magrini</td><td>5191</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 41292585838</li><li><span class="field">data_nascimento</span>: NULL → 28/01/1992</li><li><span class="field">cep</span>: NULL → 13348723</li><li><span class="field">logradouro</span>: NULL → Rua Vicente Pedrazolli</li><li><span class="field">bairro</span>: NULL → Jardim dos Impérios</li><li><span class="field">cidade</span>: NULL → Indaiatuba</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Não tem</li></ul></td></tr>
+<tr>
+<td>46</td><td>55</td>
+<td>José Eraldo Santos Oliveira</td><td>José Eraldo Santos Oliveira</td><td>5308</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">instagram</span>: NULL → Eraldo9</li></ul></td></tr>
+<tr>
+<td>47</td><td>56</td>
+<td>Ana Paula Brandão</td><td>ANA PAULA BRANDÃO</td><td>5233</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 41380928893</li><li><span class="field">data_nascimento</span>: NULL → 14/11/1992</li><li><span class="field">cep</span>: NULL → 13335510</li><li><span class="field">logradouro</span>: NULL → Rua Tapuia, 735</li><li><span class="field">bairro</span>: NULL → Vila Maria Elena</li><li><span class="field">cidade</span>: NULL → Indaiatuba</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Ana Paula Brandão</li></ul></td></tr>
+<tr>
+<td>48</td><td>57</td>
+<td>Elias Macedo da Silva</td><td>ELIAS MACEDO DA SILVA</td><td>2827</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 46595995824</li><li><span class="field">data_nascimento</span>: NULL → 16/04/2007</li><li><span class="field">cep</span>: NULL → 18279651</li><li><span class="field">logradouro</span>: NULL → Casa Tatuí</li><li><span class="field">bairro</span>: NULL → Res</li><li><span class="field">cidade</span>: NULL → Tat</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Elias._macedo_</li></ul></td></tr>
+<tr>
+<td>49</td><td>58</td>
+<td>Vitória de Sousa do Nascimento</td><td>Vitória de Sousa do Nascimento</td><td>212</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 58258766856</li><li><span class="field">data_nascimento</span>: NULL → 29/03/2006</li><li><span class="field">cep</span>: NULL → 13073-225</li><li><span class="field">logradouro</span>: NULL → Rua Carolina Florence 301</li><li><span class="field">bairro</span>: NULL → Guanabara</li><li><span class="field">cidade</span>: NULL → Campinas</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">instagram</span>: NULL → vitoria.sousa019</li></ul></td></tr>
+<tr>
+<td>50</td><td>59</td>
+<td>Valéria de Souza Pires Silva</td><td>VALÉRIA DE SOUZA PIRES SILVA</td><td>1772</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 25630681850</li><li><span class="field">data_nascimento</span>: NULL → 21/03/1974</li><li><span class="field">cep</span>: NULL → 13175-500</li><li><span class="field">logradouro</span>: NULL → Rua Francisco Manoel de Souza 410</li><li><span class="field">bairro</span>: NULL → Chacara Bela Vista</li><li><span class="field">cidade</span>: NULL → Sumaré</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Valériasouza</li></ul></td></tr>
+<tr>
+<td>51</td><td>63</td>
+<td>Sergio Augusto da Silva</td><td>SERGIO AUGUSTO DA SILVA</td><td>2813</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 26186807827</li><li><span class="field">data_nascimento</span>: NULL → 15/08/1976</li><li><span class="field">cep</span>: NULL → 13181-672</li><li><span class="field">logradouro</span>: NULL → Rua José da Costa Braz 35</li><li><span class="field">bairro</span>: NULL → Jardim Bom Retiro</li><li><span class="field">cidade</span>: NULL → Sumaré</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → sasfets@bol.com.br</li></ul></td></tr>
+<tr>
+<td>52</td><td>64</td>
+<td>Ismar justino de sena</td><td>JULIANA FERREIRA DOS SANTOS</td><td>5100</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 10/04/2026</li><li><span class="field">cep</span>: NULL → 06705050</li><li><span class="field">logradouro</span>: NULL → Estrada manoel lages do chao, 750 bloco </li><li><span class="field">bairro</span>: NULL → Caiapia</li><li><span class="field">cidade</span>: NULL → Cotia</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @ismarjustino</li></ul></td></tr>
+<tr>
+<td>53</td><td>65</td>
+<td>Nidiacris de Campos</td><td>NIDIACRIS DE CAMPOS</td><td>3360</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 23/12/1985</li><li><span class="field">cep</span>: NULL → 13482337</li><li><span class="field">logradouro</span>: NULL → Rua Amelio pelizari 1641</li><li><span class="field">bairro</span>: NULL → Jequitibá</li><li><span class="field">cidade</span>: NULL → Limeira</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → ncriscampos</li></ul></td></tr>
+<tr>
+<td>54</td><td>66</td>
+<td>Roni Alberto</td><td>RONI ALBERTO SANGE PEREIRA</td><td>1784</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Dr. Roni</li></ul></td></tr>
+<tr>
+<td>55</td><td>68</td>
+<td>Victor Henrique Biazetto</td><td>Victor Henrique Biazetto</td><td>5210</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 41382216890</li><li><span class="field">data_nascimento</span>: NULL → 15/10/2006</li><li><span class="field">cep</span>: NULL → 12950000</li><li><span class="field">logradouro</span>: NULL → Avenida imperial 868</li><li><span class="field">bairro</span>: NULL → Jardim imperial</li><li><span class="field">cidade</span>: NULL → Atibaia</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Biazetto_</li></ul></td></tr>
+<tr>
+<td>56</td><td>69</td>
+<td>Antonia melissa Gomes da silva</td><td>Antonia melissa gomes da silva</td><td>5178</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 46535665852</li><li><span class="field">data_nascimento</span>: NULL → 07/12/0098</li><li><span class="field">cep</span>: NULL → 13058-286</li><li><span class="field">logradouro</span>: NULL → Professor casemiro dos Reis Filho</li><li><span class="field">bairro</span>: NULL → Novo mundo</li><li><span class="field">cidade</span>: NULL → Campinas</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Pekena_mell</li></ul></td></tr>
+<tr>
+<td>57</td><td>70</td>
+<td>Edilaine Lorencini</td><td>Edilaine Cristina Lorencini</td><td>197</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 29056685805</li><li><span class="field">data_nascimento</span>: NULL → 23/04/1980</li><li><span class="field">cep</span>: NULL → 12950000</li><li><span class="field">logradouro</span>: NULL → Av Imperial, 868</li><li><span class="field">bairro</span>: NULL → Jardim Imperial</li><li><span class="field">cidade</span>: NULL → Atibaia</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Lider Tech Toldos</li></ul></td></tr>
+<tr>
+<td>58</td><td>71</td>
+<td>Valdirene Tamos das Mercês</td><td>VALDIRENE TAMOS DE MERCÊS</td><td>5198</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 24563212865</li><li><span class="field">data_nascimento</span>: NULL → 26/04/1975</li><li><span class="field">cep</span>: NULL → 13380530</li><li><span class="field">logradouro</span>: NULL → Avenida Rodolfo Kivitz, 1250</li><li><span class="field">bairro</span>: NULL → ZPRII</li><li><span class="field">cidade</span>: NULL → Nova Odessa</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → FUNCIONARIO_PUBLICO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Mercês tamos</li></ul></td></tr>
+<tr>
+<td>59</td><td>72</td>
+<td>Viviane Rovêda Marin de Andrade</td><td>VIVIANE ROVÊDA MARIN DE ANDRADE</td><td>3356</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 30297363859</li><li><span class="field">data_nascimento</span>: NULL → 31/01/1982</li><li><span class="field">cep</span>: NULL → 13465780</li><li><span class="field">logradouro</span>: NULL → Rua México, 860</li><li><span class="field">bairro</span>: NULL → Frezzarin</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @vivianemarin.adv</li></ul></td></tr>
+<tr>
+<td>60</td><td>73</td>
+<td>Juliana Gomez</td><td>JULIANA GOMES</td><td>2812</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 61372641149</li><li><span class="field">data_nascimento</span>: NULL → 01/04/1971</li><li><span class="field">cep</span>: NULL → 13050142</li><li><span class="field">logradouro</span>: NULL → Wladimir varanda 112</li><li><span class="field">bairro</span>: NULL → Aero continental</li><li><span class="field">cidade</span>: NULL → Campinas</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @juliana.gomez2007@gmail.com</li></ul></td></tr>
+<tr>
+<td>61</td><td>75</td>
+<td>Tiego Castelo Branco Rezende</td><td>TIEGO CASTELO BRANCO REZENDE</td><td>1669</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 03501160321</li><li><span class="field">data_nascimento</span>: NULL → 22/09/1990</li><li><span class="field">cep</span>: NULL → 13470-310</li><li><span class="field">logradouro</span>: NULL → Avenida São Jerônimo, 2750</li><li><span class="field">bairro</span>: NULL → Morada do sol</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @tiegocbr</li></ul></td></tr>
+<tr>
+<td>62</td><td>76</td>
+<td>Danilo magno lemos</td><td>Danilo Magno Lemos</td><td>226</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 45749793800</li><li><span class="field">data_nascimento</span>: NULL → 03/05/1999</li><li><span class="field">cep</span>: NULL → 13301270</li><li><span class="field">logradouro</span>: NULL → Alameda portella 217</li><li><span class="field">bairro</span>: NULL → Condomínio portella</li><li><span class="field">cidade</span>: NULL → Itu</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @daniloml</li></ul></td></tr>
+<tr>
+<td>63</td><td>77</td>
+<td>Maria Laura Teles Bernardes</td><td>Maria Laura Teles Bernardes</td><td>5199</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 51295275856</li><li><span class="field">data_nascimento</span>: NULL → 18/05/1998</li><li><span class="field">cep</span>: NULL → 12519240</li><li><span class="field">logradouro</span>: NULL → Avenida George Washington Galvão Nogueir</li><li><span class="field">bairro</span>: NULL → Jardim do Vale II</li><li><span class="field">cidade</span>: NULL → Guaratinguetá</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → _dra.marialaura</li></ul></td></tr>
+<tr>
+<td>64</td><td>78</td>
+<td>Simone Cardoso</td><td>Simone Cardoso</td><td>205</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 14385387826</li><li><span class="field">data_nascimento</span>: NULL → 22/05/1973</li><li><span class="field">cep</span>: NULL → 06711255</li><li><span class="field">logradouro</span>: NULL → Rua Angelo Ferrareto, 40</li><li><span class="field">bairro</span>: NULL → Jd Glória</li><li><span class="field">cidade</span>: NULL → Cotia</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Simoneccardoso</li></ul></td></tr>
+<tr>
+<td>65</td><td>79</td>
+<td>Sandra Gomes Santos</td><td>SANDRA GOMES SANTOS</td><td>5230</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 25193559808</li><li><span class="field">data_nascimento</span>: NULL → 22/02/1977</li><li><span class="field">cep</span>: NULL → 09760280</li><li><span class="field">logradouro</span>: NULL → 659</li><li><span class="field">bairro</span>: NULL → Baeta Neves</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Sandra Santos veterinária</li></ul></td></tr>
+<tr>
+<td>66</td><td>80</td>
+<td>Paola Aparecida da Silva e Souza</td><td>PAOLA APARECIDA DE SOUZA</td><td>1666</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 30554486857</li><li><span class="field">data_nascimento</span>: NULL → 18/09/1983</li><li><span class="field">cep</span>: NULL → 18054000</li><li><span class="field">logradouro</span>: NULL → R. Dr. Américo Figueiredo, 6105</li><li><span class="field">bairro</span>: NULL → Jd tropical</li><li><span class="field">cidade</span>: NULL → Sorocaba</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Paolla_assouza</li></ul></td></tr>
+<tr>
+<td>67</td><td>81</td>
+<td>Rubens Andrade</td><td>RUBENS DA SILVA ANDRADE</td><td>2830</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 42373881829</li><li><span class="field">data_nascimento</span>: NULL → 17/11/1994</li><li><span class="field">cep</span>: NULL → 12519240</li><li><span class="field">logradouro</span>: NULL → Av george w galvao nogueira</li><li><span class="field">bairro</span>: NULL → Jardim do vale</li><li><span class="field">cidade</span>: NULL → Guaratinguetá</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @rsandrade94</li></ul></td></tr>
+<tr>
+<td>68</td><td>82</td>
+<td>Sara rayssa Cassimiro dos Santos Silva</td><td>SARA RAYSSA DOS SANTOS</td><td>2835</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 44742989856</li><li><span class="field">data_nascimento</span>: NULL → 11/02/1995</li><li><span class="field">cep</span>: NULL → 09230650</li><li><span class="field">logradouro</span>: NULL → Avenida João pessoa,873</li><li><span class="field">bairro</span>: NULL → Camilópolis</li><li><span class="field">cidade</span>: NULL → Santo André</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @rayssa2424</li></ul></td></tr>
+<tr>
+<td>69</td><td>84</td>
+<td>Bruno Fernando Aneli</td><td>Bruno fernando</td><td>5264</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37411968862</li><li><span class="field">data_nascimento</span>: NULL → 18/11/1988</li><li><span class="field">cep</span>: NULL → 13469400</li><li><span class="field">logradouro</span>: NULL → R Wady Bufarah, 81</li><li><span class="field">bairro</span>: NULL → Chatarina Zanaga</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Bruno Fernando Aneli</li></ul></td></tr>
+<tr>
+<td>70</td><td>85</td>
+<td>Suzane Barbosa de Freitas Fonseca</td><td>Suzane Barbosa de Freitas Fonseca</td><td>5206</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 39042475811</li><li><span class="field">data_nascimento</span>: NULL → 08/06/1989</li><li><span class="field">cep</span>: NULL → 13469790</li><li><span class="field">logradouro</span>: NULL → Av Rogério Zanaga de Camargo Neves 92</li><li><span class="field">bairro</span>: NULL → Jd das orquideas</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Suzanewstetica</li></ul></td></tr>
+<tr>
+<td>71</td><td>87</td>
+<td>Ademir Lourenço da Silva</td><td>ADEMIR LOURENÇO DA SILVA</td><td>1771</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 70681740868</li><li><span class="field">data_nascimento</span>: NULL → 27/03/2026</li><li><span class="field">cep</span>: NULL → 13181-332</li><li><span class="field">logradouro</span>: NULL → R. Ana Nunes da Silva, 55</li><li><span class="field">bairro</span>: NULL → Jardim Denadai</li><li><span class="field">cidade</span>: NULL → Sumaré</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Ademir 1022</li></ul></td></tr>
+<tr>
+<td>72</td><td>89</td>
+<td>Maria Claudia dos Santos</td><td>MARIA CLAUDIA DOS SANTOS</td><td>1610</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 19748923878</li><li><span class="field">data_nascimento</span>: NULL → 18/07/1973</li><li><span class="field">cep</span>: NULL → 11441310</li><li><span class="field">logradouro</span>: NULL → Rua Celestino Gil Vasquez n. 477</li><li><span class="field">bairro</span>: NULL → Cidade Atlântica</li><li><span class="field">cidade</span>: NULL → Guarujá</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @klaudiamcsant</li></ul></td></tr>
+<tr>
+<td>73</td><td>90</td>
+<td>Paulo Sérgio Monteiro Antoniassi</td><td>Paulo Sérgio Monteiro Antoniassi</td><td>5265</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 10248195824</li><li><span class="field">data_nascimento</span>: NULL → 12/04/1966</li><li><span class="field">cep</span>: NULL → 13214-784</li><li><span class="field">logradouro</span>: NULL → Rua Donato Guaratini 357</li><li><span class="field">bairro</span>: NULL → Parque Centenário</li><li><span class="field">cidade</span>: NULL → Jundiai</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → pauloantoniassi</li></ul></td></tr>
+<tr>
+<td>74</td><td>91</td>
+<td>Jean Carlos Gomes</td><td>BRUNO MOREIRA DA SILVA</td><td>5098</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 17/01/1996</li><li><span class="field">cep</span>: NULL → 13846769</li><li><span class="field">logradouro</span>: NULL → Av. José Maurício Cardoso</li><li><span class="field">bairro</span>: NULL → Parque Resid. Ypê amarelo</li><li><span class="field">cidade</span>: NULL → Mogi Guaçu</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @JeanGomes</li></ul></td></tr>
+<tr>
+<td>75</td><td>93</td>
+<td>Maria Camila Leal Castelo Branco</td><td>Maria Camila Leal Castelo Branco</td><td>5192</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 60521535395</li><li><span class="field">data_nascimento</span>: NULL → 06/09/1993</li><li><span class="field">cep</span>: NULL → 13470-310</li><li><span class="field">logradouro</span>: NULL → Avenida São Gerônimo 2750</li><li><span class="field">bairro</span>: NULL → Morada do Sol</li><li><span class="field">cidade</span>: NULL → Americana São Paulo</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @camila_caaastelo</li></ul></td></tr>
+<tr>
+<td>76</td><td>94</td>
+<td>Syllas</td><td>SYLLAS ANTÔNIO CINTRA</td><td>1667</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 35615941820</li><li><span class="field">data_nascimento</span>: NULL → 26/12/1988</li><li><span class="field">cep</span>: NULL → 14409660</li><li><span class="field">logradouro</span>: NULL → Casa
+Nao</li><li><span class="field">bairro</span>: NULL → Cambui</li><li><span class="field">cidade</span>: NULL → Franca</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Syllascintra</li></ul></td></tr>
+<tr>
+<td>77</td><td>95</td>
+<td>Rogerio Pereira</td><td>ROGERIO PEREIRA</td><td>5217</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">instagram</span>: NULL → @pb.rogerio_pereiras7</li></ul></td></tr>
+<tr>
+<td>78</td><td>96</td>
+<td>Natasha Alves do Nascimento</td><td>NATASHA ALVES DO NASCIMENTO</td><td>5234</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 56511792838</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">instagram</span>: NULL → Nathi_alv</li></ul></td></tr>
+<tr>
+<td>79</td><td>97</td>
+<td>Joyce de Oliveira Barros</td><td>Joyce de Oliveira Barros</td><td>210</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 14223377663</li><li><span class="field">data_nascimento</span>: NULL → 01/09/1999</li><li><span class="field">cep</span>: NULL → 13073225</li><li><span class="field">logradouro</span>: NULL → Rua Carolina Florence 301</li><li><span class="field">bairro</span>: NULL → Guanabara</li><li><span class="field">cidade</span>: NULL → Campinas</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → joy.barros_</li></ul></td></tr>
+<tr>
+<td>80</td><td>98</td>
+<td>Jefferson Alan Ribeiro Nobre</td><td>JEFFERSON ALAN RIBEIRO NOBRE</td><td>1663</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 33906446875</li><li><span class="field">data_nascimento</span>: NULL → 01/11/1984</li><li><span class="field">cep</span>: NULL → 13348723</li><li><span class="field">logradouro</span>: NULL → Rua Vicente Pedrazolli 134</li><li><span class="field">bairro</span>: NULL → Jardim dos Impérios</li><li><span class="field">cidade</span>: NULL → Indaiatuba</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → jeffersonnobre84</li></ul></td></tr>
+<tr>
+<td>81</td><td>99</td>
+<td>Michelle Maniezzo</td><td>Michelle Maniezo</td><td>5205</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 22193511810</li><li><span class="field">data_nascimento</span>: NULL → 16/09/2026</li><li><span class="field">cep</span>: NULL → : 13472-360</li><li><span class="field">logradouro</span>: NULL → Rua São Simão</li><li><span class="field">bairro</span>: NULL → Cariobinha</li><li><span class="field">cidade</span>: NULL → Santa Bárbara D oeste</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Michelle maniezzo</li></ul></td></tr>
+<tr>
+<td>82</td><td>102</td>
+<td>Maria julia pires</td><td>Maria Julia Pires</td><td>5273</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 55902366810</li><li><span class="field">data_nascimento</span>: NULL → 09/10/2010</li><li><span class="field">cep</span>: NULL → 55902366810</li><li><span class="field">logradouro</span>: NULL → Rua Indaia,1010</li><li><span class="field">bairro</span>: NULL → Jd Ipiranga</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">instagram</span>: NULL → @maju_pires09</li></ul></td></tr>
+<tr>
+<td>83</td><td>103</td>
+<td>Daiane Lopes Manzoli</td><td>JEAN CARLOS GOMES</td><td>5099</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → daialopesm</li></ul></td></tr>
+<tr>
+<td>84</td><td>104</td>
+<td>Sonia Aparecida da Silva de lara pires</td><td>SÔNIA APARECIDA DA SILVA DE LARA PIRES</td><td>1652</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 70379130653</li><li><span class="field">data_nascimento</span>: NULL → 30/05/1968</li><li><span class="field">cep</span>: NULL → 13251-450</li><li><span class="field">logradouro</span>: NULL → Pedro Soares Penteado, 515</li><li><span class="field">bairro</span>: NULL → Alto do Santa Cruz</li><li><span class="field">cidade</span>: NULL → Itatiba</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @pastorasoniapires</li></ul></td></tr>
+<tr>
+<td>85</td><td>108</td>
+<td>Marcos Mangabeira da Silva</td><td>SARA RAYSSA DOS SANTOS</td><td>2835</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 40135637899</li><li><span class="field">data_nascimento</span>: NULL → 19/10/1993</li><li><span class="field">cep</span>: NULL → 09230650</li><li><span class="field">logradouro</span>: NULL → Apartamento</li><li><span class="field">bairro</span>: NULL → Utinga</li><li><span class="field">cidade</span>: NULL → Santo André</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → marcosmngsilva</li></ul></td></tr>
+<tr>
+<td>86</td><td>109</td>
+<td>Renato Carvalho</td><td>Renato Carvalho</td><td>70</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 15/05/1975</li><li><span class="field">instagram</span>: NULL → @renatocarvalho2020</li></ul></td></tr>
+<tr>
+<td>87</td><td>111</td>
+<td>Ryan pires</td><td>Ryan Pires</td><td>5272</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 44304160877</li><li><span class="field">data_nascimento</span>: NULL → 24/09/2008</li><li><span class="field">cep</span>: NULL → 13468500</li><li><span class="field">logradouro</span>: NULL → Rua indaiá 1010</li><li><span class="field">bairro</span>: NULL → Jardim ipiranga</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → São paulo</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Ryan_fxp_44</li></ul></td></tr>
+<tr>
+<td>88</td><td>112</td>
+<td>Quirino Gomes da Silva</td><td>QUIRINO GOMES DA SILVA</td><td>5229</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 19439088850</li><li><span class="field">data_nascimento</span>: NULL → 10/04/2026</li><li><span class="field">cep</span>: NULL → 09760280</li><li><span class="field">logradouro</span>: NULL → Av Armando Ítalo Setti
+659</li><li><span class="field">bairro</span>: NULL → Baeta Neves</li><li><span class="field">cidade</span>: NULL → São Bernardo do Campo</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → #quirinoveterinário</li></ul></td></tr>
+<tr>
+<td>89</td><td>113</td>
+<td>Felipe de Oliveira Costa</td><td>Felipe de Oliveira Costa</td><td>5269</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 21770157824</li><li><span class="field">data_nascimento</span>: NULL → 10/01/1983</li><li><span class="field">cep</span>: NULL → 15156062</li><li><span class="field">logradouro</span>: NULL → Nelson dos Santos 180</li><li><span class="field">bairro</span>: NULL → Gabriela</li><li><span class="field">cidade</span>: NULL → Jaci</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Felipeeletricacosta</li></ul></td></tr>
+<tr>
+<td>90</td><td>114</td>
+<td>Maria Cleonice Félix</td><td>CAROLINA DE JESUS MOREIRA</td><td>1742</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cep</span>: NULL → 06730000</li><li><span class="field">logradouro</span>: NULL → Rua Olávo Bilac, 208
+Casa 2</li><li><span class="field">bairro</span>: NULL → Chácara do carmo</li><li><span class="field">cidade</span>: NULL → Vargem Grande Paulista</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Cleofelix</li></ul></td></tr>
+<tr>
+<td>91</td><td>115</td>
+<td>Jhonatas Rafael Monteiro de Moraes</td><td>Jhonatas Rafael Monteiro de Moraes</td><td>2945</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37727407828</li><li><span class="field">cep</span>: NULL → 13606360</li><li><span class="field">logradouro</span>: NULL → Avenida Presidente Vargas 230</li><li><span class="field">bairro</span>: NULL → José ometto</li><li><span class="field">cidade</span>: NULL → Araras</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">instagram</span>: NULL → Jhonatas__Moraes</li></ul></td></tr>
+<tr>
+<td>92</td><td>116</td>
+<td>Jucilene Rodrigues</td><td>JUCILENE RODRIGUES</td><td>2029</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 20062997866</li><li><span class="field">data_nascimento</span>: NULL → 24/02/1977</li><li><span class="field">cep</span>: NULL → 11746-040</li><li><span class="field">logradouro</span>: NULL → Rua guarani 204</li><li><span class="field">bairro</span>: NULL → Praia do sonho</li><li><span class="field">cidade</span>: NULL → Itanhaém</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Amornaalmat</li></ul></td></tr>
+<tr>
+<td>93</td><td>117</td>
+<td>Jonatas Rodrigues Santana</td><td>JONATAS RODRIGUES SANTANA</td><td>5095</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 29/05/2026</li><li><span class="field">cep</span>: NULL → 13386-022</li><li><span class="field">logradouro</span>: NULL → R. Aristeu Valente, 93</li><li><span class="field">bairro</span>: NULL → Jardim São Manoel</li><li><span class="field">cidade</span>: NULL → Nova Odessa</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @jonatasr.santana</li></ul></td></tr>
+<tr>
+<td>94</td><td>118</td>
+<td>Guilherme da Silva Oliveira</td><td>GUILHERME DA SILVA OLIVEIRA</td><td>5223</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 59621144850</li><li><span class="field">data_nascimento</span>: NULL → 13/05/2004</li><li><span class="field">cep</span>: NULL → 18117132</li><li><span class="field">logradouro</span>: NULL → José laureano de Camargo, 96</li><li><span class="field">bairro</span>: NULL → Jardim serrano 2</li><li><span class="field">cidade</span>: NULL → Votorantim</li><li><span class="field">estado</span>: NULL → Sao paulo</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Guilhermesoliveiras</li></ul></td></tr>
+<tr>
+<td>95</td><td>121</td>
+<td>Simey Andrea Paranhos da Silva</td><td>Simey Andrea Paranhos da Silva</td><td>5207</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 10998728802</li><li><span class="field">data_nascimento</span>: NULL → 26/03/1974</li><li><span class="field">cep</span>: NULL → 13477678</li><li><span class="field">logradouro</span>: NULL → Entusiasmado 236</li><li><span class="field">bairro</span>: NULL → Jardim bôer</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Simey Paranhos</li></ul></td></tr>
+<tr>
+<td>96</td><td>122</td>
+<td>Irma Borras Mamani</td><td>Julio hector mamani mamani choque</td><td>1749</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 23391050802</li><li><span class="field">data_nascimento</span>: NULL → 21/10/1987</li><li><span class="field">cep</span>: NULL → 0300400</li><li><span class="field">logradouro</span>: NULL → Rua do gasometro n972</li><li><span class="field">bairro</span>: NULL → Bras</li><li><span class="field">cidade</span>: NULL → São-paulo</li><li><span class="field">estado</span>: NULL → Soltera</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → IRMA BORRAS MAMANI</li></ul></td></tr>
+<tr>
+<td>97</td><td>123</td>
+<td>Adriana C S S Lemos</td><td>Adriana Lemos</td><td>5168</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 14459781808</li><li><span class="field">data_nascimento</span>: NULL → 16/09/1972</li><li><span class="field">cep</span>: NULL → 12031000</li><li><span class="field">logradouro</span>: NULL → Av: independência n.115 casa 03</li><li><span class="field">bairro</span>: NULL → Jaboticabeiras</li><li><span class="field">cidade</span>: NULL → Taubaté</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">instagram</span>: NULL → @adrianadelemos._</li></ul></td></tr>
+<tr>
+<td>98</td><td>124</td>
+<td>Neuza Alves Ferreira Guidini</td><td>Luiz Fernando guidini</td><td>5250</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 32042012874</li><li><span class="field">data_nascimento</span>: NULL → 10/11/1983</li><li><span class="field">cep</span>: NULL → 13835030</li><li><span class="field">logradouro</span>: NULL → Rua Arley cavalheiro</li><li><span class="field">bairro</span>: NULL → Jardim Icarai</li><li><span class="field">cidade</span>: NULL → Conchal</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Neuza Guidini</li></ul></td></tr>
+<tr>
+<td>99</td><td>127</td>
+<td>Alex Peres Vasques</td><td>Alex Peres Vasques</td><td>5253</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 22611026823</li><li><span class="field">data_nascimento</span>: NULL → 30/11/1985</li><li><span class="field">cep</span>: NULL → 13188-161</li><li><span class="field">logradouro</span>: NULL → Rua Padre Feijó, 366
+Casa Fundos</li><li><span class="field">bairro</span>: NULL → Jardim Amanda 2</li><li><span class="field">cidade</span>: NULL → Hortolândia</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → alexvasques.instalacaocomercio</li></ul></td></tr>
+<tr>
+<td>100</td><td>130</td>
+<td>Dulcineia Guerra Santos</td><td>Dulcineia Guerra Santos</td><td>5177</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 14999027860</li><li><span class="field">data_nascimento</span>: NULL → 20/01/1973</li><li><span class="field">cep</span>: NULL → 14999027860</li><li><span class="field">logradouro</span>: NULL → Rua Epitácio Pessoa 510</li><li><span class="field">bairro</span>: NULL → Jardim Amanda</li><li><span class="field">cidade</span>: NULL → Hortolândia</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → CLT</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → dulci lemy</li></ul></td></tr>
+<tr>
+<td>101</td><td>131</td>
+<td>Suellen Pardim Valilla</td><td>SUELLEN PARDIM VALILLA</td><td>5101</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Su_valilla</li></ul></td></tr>
+<tr>
+<td>102</td><td>132</td>
+<td>Loana Cristiane de Oliveira</td><td>LOANA CRISTIANE DE OLIVEIRA</td><td>1775</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 40335592805</li><li><span class="field">instagram</span>: NULL → Crisloana</li></ul></td></tr>
+<tr>
+<td>103</td><td>133</td>
+<td>Tatiana silvestre santos de almeida</td><td>TATIANA SILVESTRE SANTOS DE ALMEIDA</td><td>5227</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 22443632873</li><li><span class="field">data_nascimento</span>: NULL → 16/08/1983</li><li><span class="field">cep</span>: NULL → 11740-700</li><li><span class="field">logradouro</span>: NULL → Rua olavo Pezzotti n 19 Casa 4</li><li><span class="field">bairro</span>: NULL → Suarão</li><li><span class="field">cidade</span>: NULL → Itanhaem</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Santos tatianasilvestre</li></ul></td></tr>
+<tr>
+<td>104</td><td>134</td>
+<td>Alexsandro Domingues de Freitas</td><td>ALEXSANDRO DOMINGUES DE FREITAS</td><td>5248</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 42269469879</li><li><span class="field">data_nascimento</span>: NULL → 28/09/1992</li><li><span class="field">cep</span>: NULL → 13837400</li><li><span class="field">logradouro</span>: NULL → Irmã Julieta Francisca</li><li><span class="field">bairro</span>: NULL → Jardim Palmeiras</li><li><span class="field">cidade</span>: NULL → Conchal</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → alexfreitas.chefinhoo</li></ul></td></tr>
+<tr>
+<td>105</td><td>135</td>
+<td>Elisangela Estevam da Silva</td><td>ELISANGELA ESTEVAM DA SILVA</td><td>60</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 16783715809</li><li><span class="field">data_nascimento</span>: NULL → 10/05/1972</li><li><span class="field">cep</span>: NULL → 09931290</li><li><span class="field">logradouro</span>: NULL → Pca Carandá 59</li><li><span class="field">bairro</span>: NULL → Campanário</li><li><span class="field">cidade</span>: NULL → Diadema</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → PROFISSIONAL_LIBERAL</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Mulheres _dealmacurada</li></ul></td></tr>
+<tr>
+<td>106</td><td>136</td>
+<td>Graziele Yone da Silva de Carvalho</td><td>GRAZIELLE YONE DA SILVA CARVALHO</td><td>2810</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 33269168845</li><li><span class="field">data_nascimento</span>: NULL → 22/03/1986</li><li><span class="field">cep</span>: NULL → 13183347</li><li><span class="field">logradouro</span>: NULL → Rua: Do tucano, 89</li><li><span class="field">bairro</span>: NULL → Jardim boa esperança</li><li><span class="field">cidade</span>: NULL → Hortolândia</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Gra Carvalho</li></ul></td></tr>
+<tr>
+<td>107</td><td>137</td>
+<td>Adriana hallai</td><td>ADRIANA HALLAI DINIZ</td><td>5222</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 47783130895</li><li><span class="field">data_nascimento</span>: NULL → 09/09/1995</li><li><span class="field">cep</span>: NULL → 13476-681</li><li><span class="field">logradouro</span>: NULL → RUA ARISTODEMO ARDITO, 355</li><li><span class="field">bairro</span>: NULL → São benedito</li><li><span class="field">cidade</span>: NULL → Ame</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → DESEMPREGADO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → @hallaiadriana</li></ul></td></tr>
+<tr>
+<td>108</td><td>138</td>
+<td>Elaine G G Antoniassi</td><td>Paulo Sérgio Monteiro Antoniassi</td><td>5265</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 16843801897</li><li><span class="field">data_nascimento</span>: NULL → 10/04/2026</li><li><span class="field">cep</span>: NULL → 13214784</li><li><span class="field">logradouro</span>: NULL → Rua Donato Guaratini</li><li><span class="field">bairro</span>: NULL → Pq Centenario</li><li><span class="field">cidade</span>: NULL → Jundiai</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → PauloAntoniassi</li></ul></td></tr>
+<tr>
+<td>109</td><td>140</td>
+<td>Luciana Gomez</td><td>LUCIANA GOMES</td><td>2809</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 77788206172</li><li><span class="field">data_nascimento</span>: NULL → 01/04/2026</li><li><span class="field">cep</span>: NULL → 130.602.36</li><li><span class="field">logradouro</span>: NULL → Trajano Pereira Guimarães</li><li><span class="field">bairro</span>: NULL → Jardim Londres</li><li><span class="field">cidade</span>: NULL → Campinas</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Gomezluciana809@gmail.com</li></ul></td></tr>
+<tr>
+<td>110</td><td>143</td>
+<td>Mayara Alves Ferreira de Souza freitas</td><td>Mayara Fernanda Alves de Souza freitas</td><td>5261</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 43191469800</li><li><span class="field">data_nascimento</span>: NULL → 04/04/1993</li><li><span class="field">cep</span>: NULL → 13837400</li><li><span class="field">logradouro</span>: NULL → Rua irmã Julieta Francisca</li><li><span class="field">bairro</span>: NULL → Jardim das palmeiras</li><li><span class="field">cidade</span>: NULL → Conchal</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">profissao</span>: NULL → EMPRESARIO</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Mayarasouza</li></ul></td></tr>
+<tr>
+<td>111</td><td>144</td>
+<td>Julio hector mamani choque</td><td>Julio hector mamani mamani choque</td><td>1749</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 24305775859</li><li><span class="field">data_nascimento</span>: NULL → 29/02/1996</li><li><span class="field">cep</span>: NULL → 03012010</li><li><span class="field">logradouro</span>: NULL → Rua largo da concordia 972</li><li><span class="field">bairro</span>: NULL → Bras</li><li><span class="field">cidade</span>: NULL → São Paulo</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Hector</li></ul></td></tr>
+<tr>
+<td>112</td><td>145</td>
+<td>João Vitor</td><td>João Vitor dos Santos da Silva</td><td>130</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Ointegrado</li></ul></td></tr>
+<tr>
+<td>113</td><td>146</td>
+<td>SUSANA SAGRADIM</td><td>SUSANA SAGRADIM</td><td>3117</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → @susanasagradim.psic</li></ul></td></tr>
+<tr>
+<td>114</td><td>147</td>
+<td>Kevin pires de oliveira</td><td>Kevin Pires De Oliveira</td><td>1705</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 44304221841</li><li><span class="field">data_nascimento</span>: NULL → 09/06/2005</li><li><span class="field">cep</span>: NULL → 13468500</li><li><span class="field">logradouro</span>: NULL → Rua indaia</li><li><span class="field">bairro</span>: NULL → Jd ipiranga</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Kevin_Oliveira</li></ul></td></tr>
+<tr>
+<td>115</td><td>148</td>
+<td>Thiago Lisboa Sanches</td><td>THIAGO LISBOA SANCHES</td><td>5102</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">data_nascimento</span>: NULL → 04/10/1983</li><li><span class="field">cep</span>: NULL → 11080400</li><li><span class="field">logradouro</span>: NULL → Guilherme russo 420</li><li><span class="field">bairro</span>: NULL → Nova Cintra</li><li><span class="field">cidade</span>: NULL → Santos</li><li><span class="field">estado</span>: NULL → Sp</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → viladoscriadores@gmail.com</li></ul></td></tr>
+<tr>
+<td>116</td><td>149</td>
+<td>Eliana Maria Sagradim</td><td>ELIANA MARIA SAGRADIM</td><td>1789</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Elianamariasagradim</li></ul></td></tr>
+</table>
+<h2>2. Alunos de Outras Turmas (7 registros)</h2>
+<div class="info">Estes alunos existem no sistema mas NÃO estão na turma 60. Seria necessário adicioná-los à turma e potencialmente atualizar campos.</div>
+<table>
+<tr><th>#</th><th>Row</th><th>Nome (Planilha)</th><th>Nome (DB)</th><th>ID Aluno</th><th>Match</th><th>Campos a Atualizar</th></tr>
+<tr>
+<td>1</td><td>16</td>
+<td>Thalles Hermínio Fonseca</td><td>THALLES HERMINIO FONSECA</td><td>1718</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 37067628890</li><li><span class="field">data_nascimento</span>: NULL → 01/10/1988</li><li><span class="field">cep</span>: NULL → 13469-790</li><li><span class="field">logradouro</span>: NULL → Av Rogério zanaga de camargo Neves 92</li><li><span class="field">bairro</span>: NULL → Jd das orquídeas</li><li><span class="field">cidade</span>: NULL → Americana</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → @fonseca.thalles21</li></ul></td></tr>
+<tr>
+<td>2</td><td>92</td>
+<td>Siane Simeire Pacheco</td><td>Siane</td><td>5211</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Siane Simeire</li></ul></td></tr>
+<tr>
+<td>3</td><td>100</td>
+<td>Girleide Gonçalves</td><td>GIRLEIDE DA COSTA GONÇALVES</td><td>2596</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 10163241465</li><li><span class="field">data_nascimento</span>: NULL → 03/10/1992</li><li><span class="field">cep</span>: NULL → 58150000</li><li><span class="field">logradouro</span>: NULL → Rua Luiz Anselmo Pereira N09</li><li><span class="field">bairro</span>: NULL → Jardim Etelvina</li><li><span class="field">cidade</span>: NULL → Pocinhos</li><li><span class="field">estado</span>: NULL → PB</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → girleide_____</li></ul></td></tr>
+<tr>
+<td>4</td><td>101</td>
+<td>isabela Kauani</td><td>ERICA DE OLIVEIRA PIRES</td><td>2958</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 21876244801</li><li><span class="field">data_nascimento</span>: NULL → 18/05/2012</li><li><span class="field">cep</span>: NULL → 13456430</li><li><span class="field">logradouro</span>: NULL → Rua indaiá 1010</li><li><span class="field">bairro</span>: NULL → Jd ipiranga</li><li><span class="field">cidade</span>: NULL → americana</li><li><span class="field">estado</span>: NULL → SP</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Isabela.kauani</li></ul></td></tr>
+<tr>
+<td>5</td><td>105</td>
+<td>Eliana de Fatima Cardoso dos Santos</td><td>ELIANA DE FÁTIMA CARDOSO DOS SANTOS</td><td>1603</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 06992561863</li><li><span class="field">data_nascimento</span>: NULL → 24/11/2026</li><li><span class="field">cep</span>: NULL → 11463-240</li><li><span class="field">logradouro</span>: NULL → Rua da paz 147</li><li><span class="field">bairro</span>: NULL → Pae cara</li><li><span class="field">cidade</span>: NULL → Vicente de Carvalho</li><li><span class="field">estado</span>: NULL → São Paulo</li><li><span class="field">genero</span>: NULL → Feminino</li><li><span class="field">instagram</span>: NULL → Terapeutaelianacrista</li></ul></td></tr>
+<tr>
+<td>6</td><td>107</td>
+<td>William barros dos santos</td><td>WILLIAM BARROS DOS SANTOS</td><td>2639</td>
+<td><span class="badge badge-email">email</span></td>
+<td><ul class="update-list"><li><span class="field">cpf</span>: NULL → 09131895450</li><li><span class="field">data_nascimento</span>: NULL → 09/09/1999</li><li><span class="field">cep</span>: NULL → 58150000</li><li><span class="field">logradouro</span>: NULL → Manoel Porto Da Silva Neto</li><li><span class="field">bairro</span>: NULL → Jardim etelvina</li><li><span class="field">cidade</span>: NULL → Pocinhos</li><li><span class="field">estado</span>: NULL → Paraiba</li><li><span class="field">genero</span>: NULL → MASCULINO</li><li><span class="field">instagram</span>: NULL → Wemotos_preparaçoes</li></ul></td></tr>
+<tr>
+<td>7</td><td>142</td>
+<td>João Amadeu da Silva</td><td>SÔNIA APARECIDA DA SILVA DE LARA PIRES</td><td>58</td>
+<td><span class="badge badge-phone">phone</span></td>
+<td><ul class="update-list"><li><span class="field">instagram</span>: NULL → Não tenho</li></ul></td></tr>
+</table>
+<h2>3. Sem Match - Novos Registros (25 registros)</h2>
+<div class="info">Estes registros NÃO foram encontrados no banco de dados. Seriam novos cadastros + vinculação à turma 60.</div>
+<table>
+<tr><th>#</th><th>Row</th><th>Nome</th><th>Email</th><th>Telefone</th><th>CPF</th><th>Cidade</th><th>Estado</th><th>Profissão</th></tr>
+<tr>
+<td>1</td><td>7</td>
+<td>Alícia Maria Pinheiro da Cunha</td><td>ali.mapi@hotmail.com</td><td>11946316416</td>
+<td>46291258846</td><td>Salto</td><td>Sp</td>
+<td>EMPRESARIO</td></tr>
+<tr>
+<td>2</td><td>11</td>
+<td>Alessandra Siqueira e Silva</td><td>alessandrass1995@gmail.com</td><td>11967894520</td>
+<td>44366363801</td><td>Atibaia</td><td>São Paulo</td>
+<td>CLT</td></tr>
+<tr>
+<td>3</td><td>19</td>
+<td>Dalva Maria Barros</td><td>nurse2002dmb@yahoo.com.br</td><td>19 997564933</td>
+<td>75475316953</td><td>Limeira</td><td>Sp</td>
+<td>CLT</td></tr>
+<tr>
+<td>4</td><td>20</td>
+<td>Luís Augusto Alves Palma</td><td>la_apalma@hotmail.com</td><td>19996229181</td>
+<td>36882850852</td><td>Piracicaba</td><td>SP</td>
+<td>CLT</td></tr>
+<tr>
+<td>5</td><td>24</td>
+<td>Igor Caruso de Oliveira</td><td>Imin_vanyar@Hotmail.com</td><td>11981406949</td>
+<td>33489146808</td><td>Sorocaba</td><td>SP</td>
+<td>DESEMPREGADO</td></tr>
+<tr>
+<td>6</td><td>32</td>
+<td>Katsuiti Assato</td><td>katsuiti@kyotojapanfood.com.br</td><td>19984158262</td>
+<td>35942704830</td><td>Limeira</td><td>SP</td>
+<td>EMPRESARIO</td></tr>
+<tr>
+<td>7</td><td>49</td>
+<td>Ryan Henrique Santos Silva</td><td>Ryan.residentiv.silva@gmail.com</td><td>11950487986</td>
+<td>47846179810</td><td>Atibaia</td><td>São Paulo</td>
+<td>EMPRESARIO</td></tr>
+<tr>
+<td>8</td><td>60</td>
+<td>Francine Lopes regonha</td><td>Franlopesmf@gmail.com</td><td>19 989005774</td>
+<td>29200910858</td><td>Americana</td><td>Sao paulo</td>
+<td>EMPRESARIO</td></tr>
+<tr>
+<td>9</td><td>61</td>
+<td>GeisianeNayara frati</td><td>nayarafratti33@gmail.com</td><td>16997349864</td>
+<td>37184397860</td><td>Ibitinga</td><td>Sp</td>
+<td>PROFISSIONAL_LIBERAL</td></tr>
+<tr>
+<td>10</td><td>62</td>
+<td>Erica da Silva Souza</td><td>ericas0107.es@gmail.com</td><td>19981115991</td>
+<td>25260062840</td><td>Americana</td><td>Sp</td>
+<td>CLT</td></tr>
+<tr>
+<td>11</td><td>67</td>
+<td>Aline Gomez Rodrigues Thomaz</td><td>agrthomaz@gmail.com</td><td>1945241451</td>
+<td>08535725180</td><td>Campinas</td><td>São Paulo</td>
+<td>PROFISSIONAL_LIBERAL</td></tr>
+<tr>
+<td>12</td><td>74</td>
+<td>Geisa de Andrade Saraiva</td><td>gesaraiva30@gmail.com</td><td>1699262-1860</td>
+<td>22420980808</td><td>Ribeirão Preto</td><td>São Paulo</td>
+<td>CLT</td></tr>
+<tr>
+<td>13</td><td>83</td>
+<td>Eduardo Almeida felippe</td><td>Eduardoalmeida.felippe@gmail.com</td><td>19994673086</td>
+<td>51187618837</td><td>Santa Bárbara d'Oeste</td><td>SP</td>
+<td>CLT</td></tr>
+<tr>
+<td>14</td><td>86</td>
+<td>Allan Léo da Cunha</td><td>brutale.0768@gmail.com</td><td>19987247139</td>
+<td>35500116878</td><td>Salto</td><td>Sp</td>
+<td>EMPRESARIO</td></tr>
+<tr>
+<td>15</td><td>88</td>
+<td>Carla Geane Alves Nogueira</td><td>carla.nogueira.jk@hotmail.com</td><td>11939572874</td>
+<td>37654214804</td><td>Ferraz de Vasconcelos</td><td>São Paulo</td>
+<td>CLT</td></tr>
+<tr>
+<td>16</td><td>106</td>
+<td>Edson Dias de Oliveira</td><td>edson.oliveira@adv.oabsp.org.br</td><td>19981859870</td>
+<td>28628512802</td><td>Sumaré</td><td>Sp</td>
+<td>PROFISSIONAL_LIBERAL</td></tr>
+<tr>
+<td>17</td><td>110</td>
+<td>Priscila Alves dos Santos</td><td>prinscilasts@gmail.com</td><td>19974150105</td>
+<td>46314365813</td><td>Hortolândia</td><td>SP</td>
+<td>CLT</td></tr>
+<tr>
+<td>18</td><td>119</td>
+<td>WILLIAM SANTOS</td><td>santos151724@gmail.com</td><td>19992377844</td>
+<td>11539558819</td><td>Americana</td><td>São Paulo</td>
+<td>PROFISSIONAL_LIBERAL</td></tr>
+<tr>
+<td>19</td><td>120</td>
+<td>Celso Luiz Pivovar da Cruz</td><td>celso_wsc@hotmail.com</td><td>41988543444</td>
+<td>03586412924</td><td>Tijucas do Sul</td><td>Paraná</td>
+<td>FUNCIONARIO_PUBLICO</td></tr>
+<tr>
+<td>20</td><td>125</td>
+<td>Luiz Fernando Guidini</td><td>Guidinifernandoluiz@gmail.com</td><td>19991511373</td>
+<td>27290588851</td><td>Conchal</td><td>São Paulo</td>
+<td>CLT</td></tr>
+<tr>
+<td>21</td><td>126</td>
+<td>Glenda Catacora borras</td><td>glendacatacoraborras@gmail.com</td><td>55 11 91745-0515</td>
+<td></td><td>São Paulo</td><td>São Paulo</td>
+<td>DESEMPREGADO</td></tr>
+<tr>
+<td>22</td><td>128</td>
+<td>Sérgio Manoel Ferreira</td><td>sergiomanoelferreira81@gmail.com</td><td>(19) 9.9801-1560</td>
+<td>12702774806</td><td>Americana</td><td>São Paulo</td>
+<td>EMPRESARIO</td></tr>
+<tr>
+<td>23</td><td>129</td>
+<td>Rosângela de Queiroz Baiao</td><td>queiroz.rose@hotmaul.com</td><td>11973296855</td>
+<td>02829631897</td><td>Salto</td><td>Sp</td>
+<td>FUNCIONARIO_PUBLICO</td></tr>
+<tr>
+<td>24</td><td>139</td>
+<td>Erivelto Venâncio</td><td>eri.venancio@live.cim</td><td>15998002619</td>
+<td>27529237837</td><td>Sorocaba</td><td>Sp</td>
+<td>CLT</td></tr>
+<tr>
+<td>25</td><td>141</td>
+<td>Neusa Rodrigues Fornitani</td><td>fornitanineusinha@gmail.com</td><td>12981585830</td>
+<td>10098144863</td><td>Taubaté</td><td>São Paulo</td>
+<td>FUNCIONARIO_PUBLICO</td></tr>
+</table>
+
+<div class="warning" style="margin-top: 30px;">
+⚠️ <strong>LEMBRETE:</strong> Este relatório é apenas um PREVIEW. Nenhuma alteração foi feita no banco de dados.
+Para executar as atualizações, será necessário confirmação explícita.
+</div>
+
+</body>
+</html>

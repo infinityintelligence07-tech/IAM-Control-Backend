@@ -434,6 +434,7 @@ export class AlunoTurmaResponseDto {
         telefone_dois?: string;
         nome_cracha: string;
         cpf?: string;
+        instagram?: string;
         cep?: string;
         logradouro?: string;
         complemento?: string;

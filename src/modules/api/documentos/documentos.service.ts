@@ -1475,183 +1475,120 @@ export class DocumentosService {
 
             console.log('Contrato encontrado no banco:', contrato.id);
 
-            // Buscar dados do contrato para identificar alunos relacionados
             const dadosContrato = contrato.dados_contrato || {};
-            const alunoContrato = dadosContrato.aluno || {};
-            const idAlunoComprador = alunoContrato.id || alunoContrato.id_aluno;
-            const emailComprador = alunoContrato.email || '';
-            const idTurmaOrigem = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma
-                ? Number(contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma)
-                : null;
+            const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
+            const idTurmaAlunoComprador = turmaAlunoComprador?.id || null;
+            const idAlunoComprador = turmaAlunoComprador?.id_aluno || dadosContrato?.aluno?.id || dadosContrato?.aluno?.id_aluno || null;
 
-            console.log('📋 Dados do contrato:', {
+            console.log('📋 Cancelamento por IDs:', {
+                idContrato: contrato.id,
+                idTurmaAlunoComprador,
                 idAlunoComprador,
-                emailComprador,
-                nomeComprador: alunoContrato.nome,
-                idTurmaOrigem,
             });
 
-            // Lista de IDs de turmas_alunos para remover
-            const idsTurmasAlunosParaRemover: string[] = [];
-            const adicionarTurmaAlunoParaRemocao = (
-                turmaAluno: { id: string; id_turma?: number | string | null } | null | undefined,
-                contexto: string,
-            ) => {
-                if (!turmaAluno?.id) {
-                    return;
-                }
-
-                const turmaAtualId = turmaAluno.id_turma != null ? Number(turmaAluno.id_turma) : null;
-                if (idTurmaOrigem !== null && turmaAtualId !== null && turmaAtualId === idTurmaOrigem) {
-                    console.log(`🛡️ Matrícula preservada na turma de origem (${idTurmaOrigem}) [${contexto}]:`, turmaAluno.id);
-                    return;
-                }
-
-                if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                    idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                    console.log(`✅ Matrícula marcada para remoção [${contexto}]:`, turmaAluno.id);
-                }
+            const idsTurmasAlunosParaRemover = new Set<string>();
+            const adicionarTurmaAlunoParaRemocao = (idTurmaAluno?: string | null) => {
+                if (!idTurmaAluno) return;
+                idsTurmasAlunosParaRemover.add(idTurmaAluno);
             };
-
-            // 1. Buscar o aluno comprador na turma relacionada ao contrato
-            if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk) {
-                const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk;
-                adicionarTurmaAlunoParaRemocao(turmaAlunoComprador, 'aluno comprador');
-            }
-
-            // 2. Buscar alunos convidados (criados com email @convidado.temp ou nome contendo "Convidado")
-            if (emailComprador || alunoContrato.nome) {
-                const emailBase = emailComprador ? emailComprador.split('@')[0] : '';
-                const nomeComprador = alunoContrato.nome || '';
-
-                // Buscar por email @convidado.temp
-                if (emailBase) {
-                    const alunosConvidadosEmail = await this.uow.alunosRP
-                        .createQueryBuilder('aluno')
-                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.conv%` })
-                        .andWhere('aluno.email LIKE :suffix', { suffix: '%@convidado.temp' })
-                        .andWhere('aluno.deletado_em IS NULL')
-                        .getMany();
-
-                    console.log(`🔍 Encontrados ${alunosConvidadosEmail.length} alunos convidados por email`);
-
-                    for (const alunoConvidado of alunosConvidadosEmail) {
-                        const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
-                            where: {
-                                id_aluno: alunoConvidado.id as any,
-                                origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
-                                deletado_em: null,
-                            },
-                        });
-
-                        for (const turmaAluno of turmasAlunosConvidado) {
-                            adicionarTurmaAlunoParaRemocao(turmaAluno, 'convidado por email');
-                        }
-                    }
-                }
-
-                // Buscar por nome contendo o nome do comprador + "Convidado"
-                if (nomeComprador) {
-                    // Buscar alunos com nome que contém o nome do comprador e "Convidado"
-                    const alunosConvidadosNome = await this.uow.alunosRP
-                        .createQueryBuilder('aluno')
-                        .where('aluno.nome LIKE :pattern', { pattern: `%${nomeComprador}%Convidado%` })
-                        .andWhere('aluno.deletado_em IS NULL')
-                        .getMany();
-
-                    console.log(`🔍 Encontrados ${alunosConvidadosNome.length} alunos convidados por nome`);
-
-                    for (const alunoConvidado of alunosConvidadosNome) {
-                        // Verificar se o email também é de convidado ou se está na mesma turma
-                        const isConvidadoEmail = alunoConvidado.email?.includes('@convidado.temp') || false;
-
-                        if (isConvidadoEmail || nomeComprador) {
-                            const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
-                                where: {
-                                    id_aluno: alunoConvidado.id as any,
-                                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
-                                    deletado_em: null,
-                                },
-                            });
-
-                            for (const turmaAluno of turmasAlunosConvidado) {
-                                adicionarTurmaAlunoParaRemocao(turmaAluno, `convidado por nome (${alunoConvidado.nome})`);
-                            }
-                        }
-                    }
-                }
-
-                // Também buscar diretamente na turma por alunos com nome contendo "Convidado" e origem COMPROU_INGRESSO
-                // se tivermos a turma relacionada ao contrato
-                if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma) {
-                    const idTurma = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma;
-
-                    const turmasAlunosConvidados = await this.uow.turmasAlunosRP
-                        .createQueryBuilder('turma_aluno')
-                        .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
-                        .where('turma_aluno.id_turma = :idTurma', { idTurma })
-                        .andWhere('turma_aluno.origem_aluno = :origem', { origem: EOrigemAlunos.COMPROU_INGRESSO })
-                        .andWhere('turma_aluno.deletado_em IS NULL')
-                        .andWhere('(aluno.email LIKE :emailPattern OR aluno.nome LIKE :nomePattern)', {
-                            emailPattern: '%@convidado.temp',
-                            nomePattern: nomeComprador ? `%${nomeComprador}%Convidado%` : '%Convidado%',
-                        })
-                        .getMany();
-
-                    console.log(`🔍 Encontrados ${turmasAlunosConvidados.length} alunos convidados na turma ${idTurma}`);
-
-                    for (const turmaAluno of turmasAlunosConvidados) {
-                        adicionarTurmaAlunoParaRemocao(turmaAluno, 'convidado por busca direta');
-                    }
-                }
-            }
-
-            // 3. Buscar alunos bônus (criados com email @bonus.temp ou com id_aluno_bonus)
-            if (idAlunoComprador) {
-                const alunosBonus = await this.uow.turmasAlunosRP.find({
+            const podeRemoverTurmaAlunoSemAfetarOutrosContratos = async (idTurmaAluno: string) => {
+                const treinamentosDaMatricula = await this.uow.turmasAlunosTreinamentosRP.find({
                     where: {
-                        id_aluno_bonus: idAlunoComprador as any,
-                        origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                        id_turma_aluno: idTurmaAluno,
                         deletado_em: null,
+                    },
+                    select: {
+                        id: true,
                     },
                 });
 
-                console.log(`🔍 Encontrados ${alunosBonus.length} alunos bônus por id_aluno_bonus`);
-
-                for (const turmaAluno of alunosBonus) {
-                    adicionarTurmaAlunoParaRemocao(turmaAluno, 'bônus por id_aluno_bonus');
+                const idsTreinamentosDaMatricula = treinamentosDaMatricula.map((item) => item.id);
+                if (idsTreinamentosDaMatricula.length === 0) {
+                    return true;
                 }
 
-                // Também buscar por email @bonus.temp
-                if (emailComprador) {
-                    const emailBase = emailComprador.split('@')[0];
-                    const alunosBonusEmail = await this.uow.alunosRP
-                        .createQueryBuilder('aluno')
-                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.bon%.%bonus.temp` })
-                        .andWhere('aluno.deletado_em IS NULL')
-                        .getMany();
+                const outrosContratosAtivosVinculados = await this.uow.turmasAlunosTreinamentosContratosRP
+                    .createQueryBuilder('contrato')
+                    .where('contrato.deletado_em IS NULL')
+                    .andWhere('contrato.id <> :idContratoAtual', { idContratoAtual: contrato.id })
+                    .andWhere('contrato.id_turma_aluno_treinamento IN (:...idsTreinamentos)', {
+                        idsTreinamentos: idsTreinamentosDaMatricula,
+                    })
+                    .getCount();
 
-                    console.log(`🔍 Encontrados ${alunosBonusEmail.length} alunos bônus por email`);
+                return outrosContratosAtivosVinculados === 0;
+            };
 
-                    for (const alunoBonus of alunosBonusEmail) {
-                        const turmasAlunosBonus = await this.uow.turmasAlunosRP.find({
-                            where: {
-                                id_aluno: alunoBonus.id as any,
-                                origem_aluno: EOrigemAlunos.ALUNO_BONUS,
-                                deletado_em: null,
-                            },
+            // 1) Matrícula principal do aluno comprador na turma desta venda
+            adicionarTurmaAlunoParaRemocao(idTurmaAlunoComprador);
+
+            // 2) Matrículas bônus vinculadas ao comprador (somente por IDs)
+            if (idAlunoComprador) {
+                const idsTurmasBonusRelacionadas = new Set<number>();
+
+                if (idTurmaAlunoComprador) {
+                    const vinculosBonus = await this.uow.turmasAlunosTreinamentosBonusRP.find({
+                        where: {
+                            id_turma_aluno: idTurmaAlunoComprador,
+                            deletado_em: null,
+                        },
+                    });
+
+                    vinculosBonus.forEach((vinculo) => {
+                        const ganhadores = Array.isArray(vinculo.ganhadores_bonus) ? vinculo.ganhadores_bonus : [];
+                        ganhadores.forEach((ganhador) => {
+                            const idTurmaBonus = Number(ganhador.id_turma_gb);
+                            if (Number.isInteger(idTurmaBonus)) {
+                                idsTurmasBonusRelacionadas.add(idTurmaBonus);
+                            }
                         });
+                    });
+                }
 
-                        for (const turmaAluno of turmasAlunosBonus) {
-                            adicionarTurmaAlunoParaRemocao(turmaAluno, 'bônus por email');
-                        }
+                const turmaBonusInfo = (dadosContrato?.bonus?.turma_bonus_info || dadosContrato?.turma_bonus_info) as
+                    | { id?: unknown; id_turma?: unknown }
+                    | undefined;
+                const idTurmaBonusInfo = Number(turmaBonusInfo?.id_turma ?? turmaBonusInfo?.id);
+                if (Number.isInteger(idTurmaBonusInfo)) {
+                    idsTurmasBonusRelacionadas.add(idTurmaBonusInfo);
+                }
+
+                if (idsTurmasBonusRelacionadas.size > 0) {
+                    const matriculasBonus = await this.uow.turmasAlunosRP.find({
+                        where: {
+                            id_aluno_bonus: idAlunoComprador as any,
+                            origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                            deletado_em: null,
+                            id_turma: In(Array.from(idsTurmasBonusRelacionadas)),
+                        },
+                    });
+
+                    for (const turmaAlunoBonus of matriculasBonus) {
+                        adicionarTurmaAlunoParaRemocao(turmaAlunoBonus.id);
                     }
+
+                    console.log(
+                        '✅ Matrículas bônus identificadas por IDs:',
+                        matriculasBonus.map((item) => item.id),
+                    );
+                } else {
+                    console.log('ℹ️ Nenhuma turma bônus vinculada por ID encontrada para este contrato; bônus não será removido por segurança.');
                 }
             }
 
-            // 4. Remover todos os alunos identificados das turmas
-            console.log(`🗑️ Removendo ${idsTurmasAlunosParaRemover.length} aluno(s) das turmas...`);
+            // 3) Remover matrículas apenas quando não houver outro contrato ativo vinculado
+            const idsTurmasAlunosElegiveisParaRemocao = new Set<string>();
             for (const idTurmaAluno of idsTurmasAlunosParaRemover) {
+                const podeRemover = await podeRemoverTurmaAlunoSemAfetarOutrosContratos(idTurmaAluno);
+                if (podeRemover) {
+                    idsTurmasAlunosElegiveisParaRemocao.add(idTurmaAluno);
+                } else {
+                    console.log(`🛡️ Matrícula ${idTurmaAluno} preservada: existem outros contratos ativos vinculados ao mesmo registro.`);
+                }
+            }
+
+            console.log(`🗑️ Removendo ${idsTurmasAlunosElegiveisParaRemocao.size} matrícula(s) de turma por ID sem impactar outros contratos...`);
+            for (const idTurmaAluno of idsTurmasAlunosElegiveisParaRemocao) {
                 try {
                     await this.turmasService.removeAlunoTurma(idTurmaAluno);
                     console.log(`✅ Aluno removido da turma: ${idTurmaAluno}`);
@@ -1681,7 +1618,9 @@ export class DocumentosService {
 
             console.log('✅ Contrato removido do banco (soft delete)');
 
-            return { message: 'Documento cancelado e removido com sucesso' };
+            return {
+                message: 'Documento cancelado com sucesso. Contrato removido e vínculos de turma/bônus tratados por ID, sem afetar contratos duplicados ativos.',
+            };
         } catch (error) {
             console.error('Erro ao cancelar documento:', error);
             throw new BadRequestException(`Erro ao cancelar documento: ${(error as Error).message}`);
@@ -1695,6 +1634,10 @@ export class DocumentosService {
         try {
             console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
             console.log('ID do contrato:', contratoId);
+            const contratoIdNumerico = Number(contratoId);
+            if (!Number.isInteger(contratoIdNumerico)) {
+                throw new BadRequestException('ID de contrato inválido');
+            }
 
             // Buscar o contrato no banco de dados com relacionamentos
             const contrato = await this.uow.turmasAlunosTreinamentosContratosRP
@@ -1703,7 +1646,7 @@ export class DocumentosService {
                 .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
                 .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
                 .where('contrato.deletado_em IS NULL')
-                .andWhere('contrato.id = :contratoId', { contratoId: parseInt(contratoId) })
+                .andWhere('contrato.id = :contratoId', { contratoId: contratoIdNumerico })
                 .getOne();
 
             if (!contrato) {
@@ -1712,179 +1655,121 @@ export class DocumentosService {
 
             console.log('Contrato encontrado no banco:', contrato.id);
 
-            // Buscar dados do contrato para identificar alunos relacionados
             const dadosContrato = contrato.dados_contrato || {};
-            const alunoContrato = dadosContrato.aluno || {};
-            const idAlunoComprador = alunoContrato.id || alunoContrato.id_aluno;
-            const emailComprador = alunoContrato.email || '';
+            const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
+            const idTurmaAlunoComprador = turmaAlunoComprador?.id || null;
+            const idAlunoComprador = turmaAlunoComprador?.id_aluno || dadosContrato?.aluno?.id || dadosContrato?.aluno?.id_aluno || null;
 
-            console.log('📋 Dados do contrato:', {
+            console.log('📋 Exclusão por IDs:', {
+                idContrato: contrato.id,
+                idTurmaAlunoComprador,
                 idAlunoComprador,
-                emailComprador,
-                nomeComprador: alunoContrato.nome,
             });
 
-            // Lista de IDs de turmas_alunos para remover
-            const idsTurmasAlunosParaRemover: string[] = [];
-
-            // 1. Buscar o aluno comprador na turma relacionada ao contrato
-            if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk) {
-                const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk;
-                if (turmaAlunoComprador && turmaAlunoComprador.id) {
-                    idsTurmasAlunosParaRemover.push(turmaAlunoComprador.id);
-                    console.log('✅ Aluno comprador identificado na turma:', turmaAlunoComprador.id);
-                }
-            }
-
-            // 2. Buscar alunos convidados (criados com email @convidado.temp ou nome contendo "Convidado")
-            if (emailComprador || alunoContrato.nome) {
-                const emailBase = emailComprador ? emailComprador.split('@')[0] : '';
-                const nomeComprador = alunoContrato.nome || '';
-
-                // Buscar por email @convidado.temp
-                if (emailBase) {
-                    const alunosConvidadosEmail = await this.uow.alunosRP
-                        .createQueryBuilder('aluno')
-                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.conv%` })
-                        .andWhere('aluno.email LIKE :suffix', { suffix: '%@convidado.temp' })
-                        .andWhere('aluno.deletado_em IS NULL')
-                        .getMany();
-
-                    console.log(`🔍 Encontrados ${alunosConvidadosEmail.length} alunos convidados por email`);
-
-                    for (const alunoConvidado of alunosConvidadosEmail) {
-                        const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
-                            where: {
-                                id_aluno: alunoConvidado.id as any,
-                                origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
-                                deletado_em: null,
-                            },
-                        });
-
-                        for (const turmaAluno of turmasAlunosConvidado) {
-                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                                console.log('✅ Convidado identificado na turma (por email):', turmaAluno.id);
-                            }
-                        }
-                    }
-                }
-
-                // Buscar por nome contendo o nome do comprador + "Convidado"
-                if (nomeComprador) {
-                    // Buscar alunos com nome que contém o nome do comprador e "Convidado"
-                    const alunosConvidadosNome = await this.uow.alunosRP
-                        .createQueryBuilder('aluno')
-                        .where('aluno.nome LIKE :pattern', { pattern: `%${nomeComprador}%Convidado%` })
-                        .andWhere('aluno.deletado_em IS NULL')
-                        .getMany();
-
-                    console.log(`🔍 Encontrados ${alunosConvidadosNome.length} alunos convidados por nome`);
-
-                    for (const alunoConvidado of alunosConvidadosNome) {
-                        // Verificar se o email também é de convidado ou se está na mesma turma
-                        const isConvidadoEmail = alunoConvidado.email?.includes('@convidado.temp') || false;
-
-                        if (isConvidadoEmail || nomeComprador) {
-                            const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
-                                where: {
-                                    id_aluno: alunoConvidado.id as any,
-                                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
-                                    deletado_em: null,
-                                },
-                            });
-
-                            for (const turmaAluno of turmasAlunosConvidado) {
-                                if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                                    idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                                    console.log('✅ Convidado identificado na turma (por nome):', turmaAluno.id, alunoConvidado.nome);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Também buscar diretamente na turma por alunos com nome contendo "Convidado" e origem COMPROU_INGRESSO
-                // se tivermos a turma relacionada ao contrato
-                if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma) {
-                    const idTurma = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma;
-
-                    const turmasAlunosConvidados = await this.uow.turmasAlunosRP
-                        .createQueryBuilder('turma_aluno')
-                        .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
-                        .where('turma_aluno.id_turma = :idTurma', { idTurma })
-                        .andWhere('turma_aluno.origem_aluno = :origem', { origem: EOrigemAlunos.COMPROU_INGRESSO })
-                        .andWhere('turma_aluno.deletado_em IS NULL')
-                        .andWhere('(aluno.email LIKE :emailPattern OR aluno.nome LIKE :nomePattern)', {
-                            emailPattern: '%@convidado.temp',
-                            nomePattern: nomeComprador ? `%${nomeComprador}%Convidado%` : '%Convidado%',
-                        })
-                        .getMany();
-
-                    console.log(`🔍 Encontrados ${turmasAlunosConvidados.length} alunos convidados na turma ${idTurma}`);
-
-                    for (const turmaAluno of turmasAlunosConvidados) {
-                        if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                            idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                            console.log('✅ Convidado identificado na turma (busca direta):', turmaAluno.id);
-                        }
-                    }
-                }
-            }
-
-            // 3. Buscar alunos bônus (criados com email @bonus.temp ou com id_aluno_bonus)
-            if (idAlunoComprador) {
-                // Buscar por id_aluno_bonus
-                const alunosBonus = await this.uow.turmasAlunosRP.find({
+            // IDs de matrícula em turma a remover (comprador + bônus da venda)
+            const idsTurmasAlunosParaRemover = new Set<string>();
+            const adicionarTurmaAlunoParaRemocao = (idTurmaAluno?: string | null) => {
+                if (!idTurmaAluno) return;
+                idsTurmasAlunosParaRemover.add(idTurmaAluno);
+            };
+            const podeRemoverTurmaAlunoSemAfetarOutrosContratos = async (idTurmaAluno: string) => {
+                const treinamentosDaMatricula = await this.uow.turmasAlunosTreinamentosRP.find({
                     where: {
-                        id_aluno_bonus: idAlunoComprador as any,
-                        origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                        id_turma_aluno: idTurmaAluno,
                         deletado_em: null,
+                    },
+                    select: {
+                        id: true,
                     },
                 });
 
-                console.log(`🔍 Encontrados ${alunosBonus.length} alunos bônus por id_aluno_bonus`);
-
-                for (const turmaAluno of alunosBonus) {
-                    if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                        idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                        console.log('✅ Bônus identificado na turma:', turmaAluno.id);
-                    }
+                const idsTreinamentosDaMatricula = treinamentosDaMatricula.map((item) => item.id);
+                if (idsTreinamentosDaMatricula.length === 0) {
+                    return true;
                 }
 
-                // Também buscar por email @bonus.temp
-                if (emailComprador) {
-                    const emailBase = emailComprador.split('@')[0];
-                    const alunosBonusEmail = await this.uow.alunosRP
-                        .createQueryBuilder('aluno')
-                        .where('aluno.email LIKE :pattern', { pattern: `${emailBase}.bon%.%bonus.temp` })
-                        .andWhere('aluno.deletado_em IS NULL')
-                        .getMany();
+                const outrosContratosAtivosVinculados = await this.uow.turmasAlunosTreinamentosContratosRP
+                    .createQueryBuilder('contrato')
+                    .where('contrato.deletado_em IS NULL')
+                    .andWhere('contrato.id <> :idContratoAtual', { idContratoAtual: contrato.id })
+                    .andWhere('contrato.id_turma_aluno_treinamento IN (:...idsTreinamentos)', {
+                        idsTreinamentos: idsTreinamentosDaMatricula,
+                    })
+                    .getCount();
 
-                    console.log(`🔍 Encontrados ${alunosBonusEmail.length} alunos bônus por email`);
+                return outrosContratosAtivosVinculados === 0;
+            };
 
-                    for (const alunoBonus of alunosBonusEmail) {
-                        const turmasAlunosBonus = await this.uow.turmasAlunosRP.find({
-                            where: {
-                                id_aluno: alunoBonus.id as any,
-                                origem_aluno: EOrigemAlunos.ALUNO_BONUS,
-                                deletado_em: null,
-                            },
-                        });
+            // 1) Matrícula principal do aluno comprador na turma desta venda
+            adicionarTurmaAlunoParaRemocao(idTurmaAlunoComprador);
 
-                        for (const turmaAluno of turmasAlunosBonus) {
-                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                                console.log('✅ Bônus identificado na turma:', turmaAluno.id);
+            // 2) Matrículas bônus vinculadas ao comprador (sempre por IDs)
+            if (idAlunoComprador) {
+                const idsTurmasBonusRelacionadas = new Set<number>();
+
+                if (idTurmaAlunoComprador) {
+                    const vinculosBonus = await this.uow.turmasAlunosTreinamentosBonusRP.find({
+                        where: {
+                            id_turma_aluno: idTurmaAlunoComprador,
+                            deletado_em: null,
+                        },
+                    });
+
+                    vinculosBonus.forEach((vinculo) => {
+                        const ganhadores = Array.isArray(vinculo.ganhadores_bonus) ? vinculo.ganhadores_bonus : [];
+                        ganhadores.forEach((ganhador) => {
+                            const idTurmaBonus = Number(ganhador.id_turma_gb);
+                            if (Number.isInteger(idTurmaBonus)) {
+                                idsTurmasBonusRelacionadas.add(idTurmaBonus);
                             }
-                        }
+                        });
+                    });
+                }
+
+                const turmaBonusInfo = (dadosContrato?.bonus?.turma_bonus_info || dadosContrato?.turma_bonus_info) as
+                    | { id?: unknown; id_turma?: unknown }
+                    | undefined;
+                const idTurmaBonusInfo = Number(turmaBonusInfo?.id_turma ?? turmaBonusInfo?.id);
+                if (Number.isInteger(idTurmaBonusInfo)) {
+                    idsTurmasBonusRelacionadas.add(idTurmaBonusInfo);
+                }
+
+                if (idsTurmasBonusRelacionadas.size > 0) {
+                    const matriculasBonus = await this.uow.turmasAlunosRP.find({
+                        where: {
+                            id_aluno_bonus: idAlunoComprador as any,
+                            origem_aluno: EOrigemAlunos.ALUNO_BONUS,
+                            deletado_em: null,
+                            id_turma: In(Array.from(idsTurmasBonusRelacionadas)),
+                        },
+                    });
+
+                    for (const turmaAlunoBonus of matriculasBonus) {
+                        adicionarTurmaAlunoParaRemocao(turmaAlunoBonus.id);
                     }
+
+                    console.log(
+                        '✅ Matrículas bônus identificadas por IDs:',
+                        matriculasBonus.map((item) => item.id),
+                    );
+                } else {
+                    console.log('ℹ️ Nenhuma turma bônus vinculada por ID encontrada para esta venda; bônus não será removido por segurança.');
                 }
             }
 
-            // 4. Remover todos os alunos identificados das turmas
-            console.log(`🗑️ Removendo ${idsTurmasAlunosParaRemover.length} aluno(s) das turmas...`);
+            // 3) Remover matrículas de turma (não remove cadastro base do aluno)
+            const idsTurmasAlunosElegiveisParaRemocao = new Set<string>();
             for (const idTurmaAluno of idsTurmasAlunosParaRemover) {
+                const podeRemover = await podeRemoverTurmaAlunoSemAfetarOutrosContratos(idTurmaAluno);
+                if (podeRemover) {
+                    idsTurmasAlunosElegiveisParaRemocao.add(idTurmaAluno);
+                } else {
+                    console.log(`🛡️ Matrícula ${idTurmaAluno} preservada: existem outros contratos ativos vinculados ao mesmo registro.`);
+                }
+            }
+
+            console.log(`🗑️ Removendo ${idsTurmasAlunosElegiveisParaRemocao.size} matrícula(s) de turma por ID sem impactar outros contratos...`);
+            for (const idTurmaAluno of idsTurmasAlunosElegiveisParaRemocao) {
                 try {
                     await this.turmasService.removeAlunoTurma(idTurmaAluno);
                     console.log(`✅ Aluno removido da turma: ${idTurmaAluno}`);
@@ -1906,14 +1791,14 @@ export class DocumentosService {
                 }
             }
 
-            // Fazer soft delete do contrato
+            // 4) Fazer soft delete do contrato (por ID do contrato)
             await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
                 deletado_em: new Date(),
                 atualizado_por: userId,
             });
 
-            console.log('✅ Contrato excluído com sucesso');
-            return { message: 'Contrato excluído com sucesso' };
+            console.log('✅ Contrato e vínculos de turma removidos com sucesso');
+            return { message: 'Contrato, matrícula da turma e bônus removidos com sucesso. Cadastro do aluno preservado.' };
         } catch (error) {
             console.error('Erro ao excluir contrato:', error);
             throw new BadRequestException(`Erro ao excluir contrato: ${(error as Error).message}`);
@@ -2464,6 +2349,12 @@ export class DocumentosService {
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk.id_polo_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_fk.id_treinamento_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_transferencia_de_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_transferencia_de_fk.id_treinamento_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_transferencia_para_fk',
+                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_transferencia_para_fk.id_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_treinamento_fk',
                     'id_documento_fk',
                 ],
@@ -2478,6 +2369,7 @@ export class DocumentosService {
             });
 
             // Mapear dados para o formato esperado pelo frontend
+            const cacheTurmaPorId = new Map<number, any | null>();
             const contratosMapeados = await Promise.all(
                 contratos.map(async (contrato) => {
                     const dadosContrato = contrato.dados_contrato || {};
@@ -2541,6 +2433,73 @@ export class DocumentosService {
 
                     // Usar treinamento das relations ou dos dados do contrato
                     const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
+                    const turmaDestinoEvento = turmaAluno?.id_turma_fk || null;
+                    let turmaOrigemEvento = turmaAluno?.id_turma_transferencia_de_fk || null;
+
+                    // Fallback relacional: quando a transferência de origem não está gravada,
+                    // usar a relação de turmas IPR vinculadas à turma de destino.
+                    if (!turmaOrigemEvento && turmaDestinoEvento?.id) {
+                        const turmasIprRelacionadas = Array.isArray(turmaDestinoEvento?.turmas_ipr_relacionadas)
+                            ? (turmaDestinoEvento.turmas_ipr_relacionadas as number[])
+                            : [];
+
+                        if (turmasIprRelacionadas.length > 0) {
+                            const idsTurmasOrigem = turmasIprRelacionadas.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+
+                            const idsSemCache = idsTurmasOrigem.filter((id) => !cacheTurmaPorId.has(id));
+
+                            if (idsSemCache.length > 0) {
+                                const turmasOrigemRelacionadas = await this.uow.turmasRP.find({
+                                    where: {
+                                        id: In(idsSemCache),
+                                        deletado_em: IsNull(),
+                                    },
+                                    relations: ['id_treinamento_fk'],
+                                });
+
+                                turmasOrigemRelacionadas.forEach((turma) => {
+                                    cacheTurmaPorId.set(turma.id, turma);
+                                });
+                                idsSemCache.forEach((id) => {
+                                    if (!cacheTurmaPorId.has(id)) {
+                                        cacheTurmaPorId.set(id, null);
+                                    }
+                                });
+                            }
+
+                            const turmasCandidatas = idsTurmasOrigem
+                                .map((id) => cacheTurmaPorId.get(id))
+                                .filter((turma): turma is NonNullable<typeof turma> => Boolean(turma));
+
+                            const turmaIpr = turmasCandidatas.find((turma) => {
+                                const nomeTreinamento = (turma.id_treinamento_fk?.treinamento || '').toLowerCase();
+                                return (
+                                    nomeTreinamento.includes('imersão prosperar') || nomeTreinamento.includes('imersao prosperar') || nomeTreinamento.includes('ipr')
+                                );
+                            });
+
+                            turmaOrigemEvento = turmaIpr || turmasCandidatas[0] || null;
+                        }
+                    }
+                    const formatarTurmaEvento = (
+                        turma:
+                            | {
+                                  id?: number;
+                                  edicao_turma?: string | null;
+                                  id_treinamento_fk?: { treinamento?: string | null } | null;
+                              }
+                            | null
+                            | undefined,
+                    ): string | null => {
+                        if (!turma) return null;
+                        const nomeTreinamento = turma.id_treinamento_fk?.treinamento || 'Treinamento';
+                        const edicao = turma.edicao_turma || null;
+                        return edicao ? `${nomeTreinamento} - ${edicao}` : `${nomeTreinamento} - ${turma.id ?? ''}`.trim();
+                    };
+                    const fluxoEventoOrigemTreinamento = turmaOrigemEvento?.id_treinamento_fk?.treinamento || null;
+                    const fluxoEventoDestinoTreinamento = turmaDestinoEvento?.id_treinamento_fk?.treinamento || treinamento?.treinamento || null;
+                    const fluxoEventoOrigemTurma = formatarTurmaEvento(turmaOrigemEvento);
+                    const fluxoEventoDestinoTurma = formatarTurmaEvento(turmaDestinoEvento);
                     const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
                     const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
                     const contratoDuplo = turmaAluno?.contrato_duplo ?? turmaAlunoDadosContrato.contrato_duplo ?? false;
@@ -2548,18 +2507,26 @@ export class DocumentosService {
                     const criadoPorContrato = contrato?.criado_por ?? null;
                     const criadoPorTurmaAlunoTreinamento = turmaAlunoTreinamento?.criado_por ?? null;
                     const criadoPorTurmaAluno = turmaAluno?.criado_por ?? null;
-                    const criadosPorValidos = [
-                        criadoPorContrato,
-                        criadoPorTurmaAlunoTreinamento,
-                        criadoPorTurmaAluno,
-                    ].filter((value) => value !== null && value !== undefined);
+                    const criadosPorValidos = [criadoPorContrato, criadoPorTurmaAlunoTreinamento, criadoPorTurmaAluno].filter(
+                        (value) => value !== null && value !== undefined,
+                    );
                     const criadosPorUnicos = Array.from(new Set(criadosPorValidos.map((value) => String(value))));
-                    const criadoPorConsolidado =
-                        criadoPorContrato ?? criadoPorTurmaAlunoTreinamento ?? criadoPorTurmaAluno ?? null;
+                    const criadoPorConsolidado = criadoPorContrato ?? criadoPorTurmaAlunoTreinamento ?? criadoPorTurmaAluno ?? null;
                     const criadoPorDivergente = criadosPorUnicos.length > 1;
 
                     return {
                         id: contrato.id,
+                        id_turma_aluno_treinamento: turmaAlunoTreinamento?.id ?? null,
+                        id_turma_aluno: turmaAluno?.id ?? null,
+                        id_turma: turmaAluno?.id_turma ?? null,
+                        fluxo_evento_origem_id_turma: turmaOrigemEvento?.id ?? null,
+                        fluxo_evento_origem_id_treinamento: turmaOrigemEvento?.id_treinamento ?? null,
+                        fluxo_evento_origem_treinamento: fluxoEventoOrigemTreinamento,
+                        fluxo_evento_origem_turma: fluxoEventoOrigemTurma,
+                        fluxo_evento_destino_id_turma: turmaDestinoEvento?.id ?? null,
+                        fluxo_evento_destino_id_treinamento: turmaDestinoEvento?.id_treinamento ?? turmaAlunoTreinamento?.id_treinamento ?? null,
+                        fluxo_evento_destino_treinamento: fluxoEventoDestinoTreinamento,
+                        fluxo_evento_destino_turma: fluxoEventoDestinoTurma,
                         status_ass_aluno: contrato.status_ass_aluno,
                         status_ass_test_um: contrato.status_ass_test_um,
                         status_ass_test_dois: contrato.status_ass_test_dois,
@@ -2690,10 +2657,7 @@ export class DocumentosService {
                 });
 
                 usuarios.forEach((usuario) => {
-                    const nomeCompleto =
-                        usuario.nome ||
-                        `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() ||
-                        `Usuário ${usuario.id}`;
+                    const nomeCompleto = usuario.nome || `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() || `Usuário ${usuario.id}`;
                     nomeUsuarioPorId.set(usuario.id, nomeCompleto);
                 });
             }
@@ -2708,29 +2672,15 @@ export class DocumentosService {
             const contratosMapeadosComNomes = contratosMapeados.map((contratoMapeado) => ({
                 ...contratoMapeado,
                 criado_por_nome: obterNomePorId(contratoMapeado.criado_por),
-                criado_por_contrato_nome: obterNomePorId(
-                    contratoMapeado.criado_por_contrato,
-                ),
-                criado_por_turma_aluno_treinamento_nome: obterNomePorId(
-                    contratoMapeado.criado_por_turma_aluno_treinamento,
-                ),
-                criado_por_turma_aluno_nome: obterNomePorId(
-                    contratoMapeado.criado_por_turma_aluno,
-                ),
+                criado_por_contrato_nome: obterNomePorId(contratoMapeado.criado_por_contrato),
+                criado_por_turma_aluno_treinamento_nome: obterNomePorId(contratoMapeado.criado_por_turma_aluno_treinamento),
+                criado_por_turma_aluno_nome: obterNomePorId(contratoMapeado.criado_por_turma_aluno),
                 criado_por_confronto: {
                     ...contratoMapeado.criado_por_confronto,
-                    consolidado_nome: obterNomePorId(
-                        contratoMapeado.criado_por_confronto?.consolidado,
-                    ),
-                    contrato_nome: obterNomePorId(
-                        contratoMapeado.criado_por_confronto?.contrato,
-                    ),
-                    turma_aluno_treinamento_nome: obterNomePorId(
-                        contratoMapeado.criado_por_confronto?.turma_aluno_treinamento,
-                    ),
-                    turma_aluno_nome: obterNomePorId(
-                        contratoMapeado.criado_por_confronto?.turma_aluno,
-                    ),
+                    consolidado_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.consolidado),
+                    contrato_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.contrato),
+                    turma_aluno_treinamento_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.turma_aluno_treinamento),
+                    turma_aluno_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.turma_aluno),
                 },
             }));
 

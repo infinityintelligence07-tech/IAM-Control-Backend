@@ -1722,24 +1722,6 @@ export class TurmasService {
                 throw new NotFoundException('Turma não encontrada');
             }
 
-            // Verificar se a turma permite inserção de alunos
-            if (turma.status_turma === EStatusTurmas.ENCERRADA) {
-                const hoje = new Date();
-                hoje.setHours(0, 0, 0, 0);
-
-                const dataInicio = turma.data_inicio ? new Date(turma.data_inicio) : null;
-                const dataFinal = turma.data_final ? new Date(turma.data_final) : null;
-
-                if (dataInicio) dataInicio.setHours(0, 0, 0, 0);
-                if (dataFinal) dataFinal.setHours(23, 59, 59, 999);
-
-                const dentroPeriodoEvento = !!dataInicio && !!dataFinal && hoje >= dataInicio && hoje <= dataFinal;
-
-                if (!dentroPeriodoEvento) {
-                    throw new BadRequestException('Turma encerrada: só é possível adicionar alunos durante o período do evento');
-                }
-            }
-
             if (turma.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
                 throw new BadRequestException('Não é possível adicionar alunos em turmas com inscrições pausadas');
             }
@@ -1874,7 +1856,6 @@ export class TurmasService {
             where: {
                 id_treinamento,
                 id: Not(id_turma_origem),
-                status_turma: Not(EStatusTurmas.ENCERRADA),
             },
             relations: ['id_treinamento_fk', 'id_polo_fk'],
             order: { data_inicio: 'ASC' },
@@ -1954,9 +1935,6 @@ export class TurmasService {
         }
         if (turmaDestino.id_treinamento_fk?.tipo_palestra === true) {
             throw new BadRequestException('Turma de destino não pode ser palestra');
-        }
-        if (turmaDestino.status_turma === EStatusTurmas.ENCERRADA) {
-            throw new BadRequestException('Não é possível transferir para turma encerrada');
         }
         if (turmaDestino.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
             throw new BadRequestException('Não é possível transferir para turma com inscrições pausadas');

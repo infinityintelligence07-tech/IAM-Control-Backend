@@ -1480,23 +1480,43 @@ export class DocumentosService {
             const alunoContrato = dadosContrato.aluno || {};
             const idAlunoComprador = alunoContrato.id || alunoContrato.id_aluno;
             const emailComprador = alunoContrato.email || '';
+            const idTurmaOrigem = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma
+                ? Number(contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma)
+                : null;
 
             console.log('📋 Dados do contrato:', {
                 idAlunoComprador,
                 emailComprador,
                 nomeComprador: alunoContrato.nome,
+                idTurmaOrigem,
             });
 
             // Lista de IDs de turmas_alunos para remover
             const idsTurmasAlunosParaRemover: string[] = [];
+            const adicionarTurmaAlunoParaRemocao = (
+                turmaAluno: { id: string; id_turma?: number | string | null } | null | undefined,
+                contexto: string,
+            ) => {
+                if (!turmaAluno?.id) {
+                    return;
+                }
+
+                const turmaAtualId = turmaAluno.id_turma != null ? Number(turmaAluno.id_turma) : null;
+                if (idTurmaOrigem !== null && turmaAtualId !== null && turmaAtualId === idTurmaOrigem) {
+                    console.log(`🛡️ Matrícula preservada na turma de origem (${idTurmaOrigem}) [${contexto}]:`, turmaAluno.id);
+                    return;
+                }
+
+                if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
+                    idsTurmasAlunosParaRemover.push(turmaAluno.id);
+                    console.log(`✅ Matrícula marcada para remoção [${contexto}]:`, turmaAluno.id);
+                }
+            };
 
             // 1. Buscar o aluno comprador na turma relacionada ao contrato
             if (contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk) {
                 const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk;
-                if (turmaAlunoComprador && turmaAlunoComprador.id) {
-                    idsTurmasAlunosParaRemover.push(turmaAlunoComprador.id);
-                    console.log('✅ Aluno comprador identificado na turma:', turmaAlunoComprador.id);
-                }
+                adicionarTurmaAlunoParaRemocao(turmaAlunoComprador, 'aluno comprador');
             }
 
             // 2. Buscar alunos convidados (criados com email @convidado.temp ou nome contendo "Convidado")
@@ -1525,10 +1545,7 @@ export class DocumentosService {
                         });
 
                         for (const turmaAluno of turmasAlunosConvidado) {
-                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                                console.log('✅ Convidado identificado na turma (por email):', turmaAluno.id);
-                            }
+                            adicionarTurmaAlunoParaRemocao(turmaAluno, 'convidado por email');
                         }
                     }
                 }
@@ -1558,10 +1575,7 @@ export class DocumentosService {
                             });
 
                             for (const turmaAluno of turmasAlunosConvidado) {
-                                if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                                    idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                                    console.log('✅ Convidado identificado na turma (por nome):', turmaAluno.id, alunoConvidado.nome);
-                                }
+                                adicionarTurmaAlunoParaRemocao(turmaAluno, `convidado por nome (${alunoConvidado.nome})`);
                             }
                         }
                     }
@@ -1587,10 +1601,7 @@ export class DocumentosService {
                     console.log(`🔍 Encontrados ${turmasAlunosConvidados.length} alunos convidados na turma ${idTurma}`);
 
                     for (const turmaAluno of turmasAlunosConvidados) {
-                        if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                            idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                            console.log('✅ Convidado identificado na turma (busca direta):', turmaAluno.id);
-                        }
+                        adicionarTurmaAlunoParaRemocao(turmaAluno, 'convidado por busca direta');
                     }
                 }
             }
@@ -1608,10 +1619,7 @@ export class DocumentosService {
                 console.log(`🔍 Encontrados ${alunosBonus.length} alunos bônus por id_aluno_bonus`);
 
                 for (const turmaAluno of alunosBonus) {
-                    if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                        idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                        console.log('✅ Bônus identificado na turma:', turmaAluno.id);
-                    }
+                    adicionarTurmaAlunoParaRemocao(turmaAluno, 'bônus por id_aluno_bonus');
                 }
 
                 // Também buscar por email @bonus.temp
@@ -1635,10 +1643,7 @@ export class DocumentosService {
                         });
 
                         for (const turmaAluno of turmasAlunosBonus) {
-                            if (!idsTurmasAlunosParaRemover.includes(turmaAluno.id)) {
-                                idsTurmasAlunosParaRemover.push(turmaAluno.id);
-                                console.log('✅ Bônus identificado na turma:', turmaAluno.id);
-                            }
+                            adicionarTurmaAlunoParaRemocao(turmaAluno, 'bônus por email');
                         }
                     }
                 }

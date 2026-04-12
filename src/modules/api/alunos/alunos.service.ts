@@ -531,9 +531,8 @@ export class AlunosService {
             await this.uow.alunosRP.save(aluno);
 
             const dataDelecao = new Date(softDeleteDto.deletado_em);
-            const idAlunoStr = id.toString();
             const turmasAlunosDoAluno = await this.uow.turmasAlunosRP.find({
-                where: { id_aluno: idAlunoStr, deletado_em: null },
+                where: { id_aluno: id as any, deletado_em: null },
             });
             for (const ta of turmasAlunosDoAluno) {
                 ta.deletado_em = dataDelecao;

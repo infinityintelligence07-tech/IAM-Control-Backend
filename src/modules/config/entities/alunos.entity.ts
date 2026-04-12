@@ -22,7 +22,7 @@ export class Alunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'nome_cracha', nullable: true })
     nome_cracha: string | null;
 
-    @Column({ type: 'varchar', name: 'email', nullable: false, unique: true })
+    @Column({ type: 'varchar', name: 'email', nullable: false })
     email: string;
 
     @Column({ type: 'varchar', name: 'senha', nullable: true })

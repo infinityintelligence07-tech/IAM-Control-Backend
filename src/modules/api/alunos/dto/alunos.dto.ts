@@ -239,6 +239,11 @@ export class CreateAlunoDto {
 export class UpdateAlunoDto {
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_polo?: number;
 
     @IsOptional()
@@ -378,6 +383,11 @@ export class UpdateAlunoDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     atualizado_por?: number;
 
     @IsOptional()

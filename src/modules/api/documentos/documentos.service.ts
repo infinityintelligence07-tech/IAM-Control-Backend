@@ -5,7 +5,7 @@ import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/tur
 import { EStatusAssinaturasContratos, EOrigemAlunos, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import * as crypto from 'crypto';
 import axios from 'axios';
-import { Not, IsNull } from 'typeorm';
+import { Not, IsNull, In } from 'typeorm';
 import {
     CreateDocumentoDto,
     UpdateDocumentoDto,
@@ -1538,7 +1538,7 @@ export class DocumentosService {
                     for (const alunoConvidado of alunosConvidadosEmail) {
                         const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
                             where: {
-                                id_aluno: alunoConvidado.id.toString(),
+                                id_aluno: alunoConvidado.id as any,
                                 origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
                                 deletado_em: null,
                             },
@@ -1568,7 +1568,7 @@ export class DocumentosService {
                         if (isConvidadoEmail || nomeComprador) {
                             const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
                                 where: {
-                                    id_aluno: alunoConvidado.id.toString(),
+                                    id_aluno: alunoConvidado.id as any,
                                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
                                     deletado_em: null,
                                 },
@@ -1610,7 +1610,7 @@ export class DocumentosService {
             if (idAlunoComprador) {
                 const alunosBonus = await this.uow.turmasAlunosRP.find({
                     where: {
-                        id_aluno_bonus: idAlunoComprador.toString(),
+                        id_aluno_bonus: idAlunoComprador as any,
                         origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                         deletado_em: null,
                     },
@@ -1636,7 +1636,7 @@ export class DocumentosService {
                     for (const alunoBonus of alunosBonusEmail) {
                         const turmasAlunosBonus = await this.uow.turmasAlunosRP.find({
                             where: {
-                                id_aluno: alunoBonus.id.toString(),
+                                id_aluno: alunoBonus.id as any,
                                 origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                                 deletado_em: null,
                             },
@@ -1755,7 +1755,7 @@ export class DocumentosService {
                     for (const alunoConvidado of alunosConvidadosEmail) {
                         const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
                             where: {
-                                id_aluno: alunoConvidado.id.toString(),
+                                id_aluno: alunoConvidado.id as any,
                                 origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
                                 deletado_em: null,
                             },
@@ -1788,7 +1788,7 @@ export class DocumentosService {
                         if (isConvidadoEmail || nomeComprador) {
                             const turmasAlunosConvidado = await this.uow.turmasAlunosRP.find({
                                 where: {
-                                    id_aluno: alunoConvidado.id.toString(),
+                                    id_aluno: alunoConvidado.id as any,
                                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
                                     deletado_em: null,
                                 },
@@ -1837,7 +1837,7 @@ export class DocumentosService {
                 // Buscar por id_aluno_bonus
                 const alunosBonus = await this.uow.turmasAlunosRP.find({
                     where: {
-                        id_aluno_bonus: idAlunoComprador.toString(),
+                        id_aluno_bonus: idAlunoComprador as any,
                         origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                         deletado_em: null,
                     },
@@ -1866,7 +1866,7 @@ export class DocumentosService {
                     for (const alunoBonus of alunosBonusEmail) {
                         const turmasAlunosBonus = await this.uow.turmasAlunosRP.find({
                             where: {
-                                id_aluno: alunoBonus.id.toString(),
+                                id_aluno: alunoBonus.id as any,
                                 origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                                 deletado_em: null,
                             },
@@ -2279,7 +2279,7 @@ export class DocumentosService {
                         .where('turma_aluno_treinamento.id_treinamento = :idTreinamento', {
                             idTreinamento: fallbackTreinamentoId,
                         })
-                        .andWhere('turma_aluno.id_aluno = :idAluno', { idAluno: fallbackAlunoId.toString() })
+                        .andWhere('turma_aluno.id_aluno = :idAluno', { idAluno: fallbackAlunoId })
                         .andWhere('turma_aluno_treinamento.deletado_em IS NULL')
                         .andWhere('turma_aluno.deletado_em IS NULL')
                         .orderBy('turma_aluno_treinamento.atualizado_em', 'DESC')
@@ -2296,7 +2296,7 @@ export class DocumentosService {
                     const turmaAlunoDiretoFallback = await this.uow.turmasAlunosRP
                         .createQueryBuilder('turma_aluno')
                         .where('turma_aluno.id_aluno = :idAluno', {
-                            idAluno: fallbackAlunoId.toString(),
+                            idAluno: fallbackAlunoId,
                         })
                         .andWhere('turma_aluno.deletado_em IS NULL')
                         .orderBy(
@@ -2496,7 +2496,7 @@ export class DocumentosService {
                                     idTreinamento: fallbackTreinamentoId,
                                 })
                                 .andWhere('turma_aluno.id_aluno = :idAluno', {
-                                    idAluno: fallbackAlunoId.toString(),
+                                    idAluno: fallbackAlunoId,
                                 })
                                 .andWhere('turma_aluno_treinamento.deletado_em IS NULL')
                                 .andWhere('turma_aluno.deletado_em IS NULL')
@@ -2514,7 +2514,7 @@ export class DocumentosService {
                             const turmaAlunoDiretoFallback = await this.uow.turmasAlunosRP
                                 .createQueryBuilder('turma_aluno')
                                 .where('turma_aluno.id_aluno = :idAluno', {
-                                    idAluno: fallbackAlunoId.toString(),
+                                    idAluno: fallbackAlunoId,
                                 })
                                 .andWhere('turma_aluno.deletado_em IS NULL')
                                 .orderBy(
@@ -2545,6 +2545,18 @@ export class DocumentosService {
                     const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
                     const contratoDuplo = turmaAluno?.contrato_duplo ?? turmaAlunoDadosContrato.contrato_duplo ?? false;
                     const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
+                    const criadoPorContrato = contrato?.criado_por ?? null;
+                    const criadoPorTurmaAlunoTreinamento = turmaAlunoTreinamento?.criado_por ?? null;
+                    const criadoPorTurmaAluno = turmaAluno?.criado_por ?? null;
+                    const criadosPorValidos = [
+                        criadoPorContrato,
+                        criadoPorTurmaAlunoTreinamento,
+                        criadoPorTurmaAluno,
+                    ].filter((value) => value !== null && value !== undefined);
+                    const criadosPorUnicos = Array.from(new Set(criadosPorValidos.map((value) => String(value))));
+                    const criadoPorConsolidado =
+                        criadoPorContrato ?? criadoPorTurmaAlunoTreinamento ?? criadoPorTurmaAluno ?? null;
+                    const criadoPorDivergente = criadosPorUnicos.length > 1;
 
                     return {
                         id: contrato.id,
@@ -2556,6 +2568,19 @@ export class DocumentosService {
                         data_ass_test_dois: contrato.data_ass_test_dois,
                         criado_em: contrato.criado_em,
                         atualizado_em: contrato.atualizado_em,
+                        criado_por: criadoPorConsolidado,
+                        criado_por_contrato: criadoPorContrato,
+                        criado_por_turma_aluno_treinamento: criadoPorTurmaAlunoTreinamento,
+                        criado_por_turma_aluno: criadoPorTurmaAluno,
+                        criado_por_divergente: criadoPorDivergente,
+                        criado_por_confronto: {
+                            consolidado: criadoPorConsolidado,
+                            contrato: criadoPorContrato,
+                            turma_aluno_treinamento: criadoPorTurmaAlunoTreinamento,
+                            turma_aluno: criadoPorTurmaAluno,
+                            divergente: criadoPorDivergente,
+                            valores_distintos: criadosPorUnicos,
+                        },
                         // Campos para compatibilidade com frontend
                         created_at: contrato.criado_em,
                         updated_at: contrato.atualizado_em,
@@ -2635,10 +2660,84 @@ export class DocumentosService {
                 }),
             );
 
+            const idsCriadoresUnicos = Array.from(
+                new Set(
+                    contratosMapeados
+                        .flatMap((contrato) => [
+                            contrato.criado_por,
+                            contrato.criado_por_contrato,
+                            contrato.criado_por_turma_aluno_treinamento,
+                            contrato.criado_por_turma_aluno,
+                        ])
+                        .map((valor) => Number(valor))
+                        .filter((valor) => Number.isFinite(valor) && valor > 0),
+                ),
+            );
+
+            const nomeUsuarioPorId = new Map<number, string>();
+            if (idsCriadoresUnicos.length > 0) {
+                const usuarios = await this.uow.usuariosRP.find({
+                    where: {
+                        id: In(idsCriadoresUnicos),
+                        deletado_em: IsNull(),
+                    },
+                    select: {
+                        id: true,
+                        nome: true,
+                        primeiro_nome: true,
+                        sobrenome: true,
+                    },
+                });
+
+                usuarios.forEach((usuario) => {
+                    const nomeCompleto =
+                        usuario.nome ||
+                        `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() ||
+                        `Usuário ${usuario.id}`;
+                    nomeUsuarioPorId.set(usuario.id, nomeCompleto);
+                });
+            }
+
+            const obterNomePorId = (valor?: number | string | null): string | null => {
+                if (valor === null || valor === undefined) return null;
+                const id = Number(valor);
+                if (!Number.isFinite(id) || id <= 0) return null;
+                return nomeUsuarioPorId.get(id) || null;
+            };
+
+            const contratosMapeadosComNomes = contratosMapeados.map((contratoMapeado) => ({
+                ...contratoMapeado,
+                criado_por_nome: obterNomePorId(contratoMapeado.criado_por),
+                criado_por_contrato_nome: obterNomePorId(
+                    contratoMapeado.criado_por_contrato,
+                ),
+                criado_por_turma_aluno_treinamento_nome: obterNomePorId(
+                    contratoMapeado.criado_por_turma_aluno_treinamento,
+                ),
+                criado_por_turma_aluno_nome: obterNomePorId(
+                    contratoMapeado.criado_por_turma_aluno,
+                ),
+                criado_por_confronto: {
+                    ...contratoMapeado.criado_por_confronto,
+                    consolidado_nome: obterNomePorId(
+                        contratoMapeado.criado_por_confronto?.consolidado,
+                    ),
+                    contrato_nome: obterNomePorId(
+                        contratoMapeado.criado_por_confronto?.contrato,
+                    ),
+                    turma_aluno_treinamento_nome: obterNomePorId(
+                        contratoMapeado.criado_por_confronto?.turma_aluno_treinamento,
+                    ),
+                    turma_aluno_nome: obterNomePorId(
+                        contratoMapeado.criado_por_confronto?.turma_aluno,
+                    ),
+                },
+            }));
+
             const totalPages = Math.ceil(total / limit);
 
             const resultado = {
-                data: contratosMapeados,
+                data: contratosMapeadosComNomes,
                 total,
                 page,
                 limit,

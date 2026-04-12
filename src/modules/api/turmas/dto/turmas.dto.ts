@@ -50,13 +50,28 @@ export class GetTurmasDto {
 
 export class CreateTurmaDto {
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_polo: number;
 
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_treinamento: number;
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     lider_evento?: number;
 
     @IsOptional()
@@ -66,6 +81,11 @@ export class CreateTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_endereco_evento?: number;
 
     @ValidateIf((o) => !o.id_endereco_evento)
@@ -106,12 +126,27 @@ export class CreateTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_turma_bonus?: number;
 
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     capacidade_turma: number;
 
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     meta: number;
 
     @IsString()
@@ -127,16 +162,28 @@ export class CreateTurmaDto {
     @IsOptional()
     @IsArray()
     @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return value;
+        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+    })
     bonus_treinamentos?: number[];
 
     @IsOptional()
     @IsArray()
     @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return value;
+        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+    })
     turmas_imersao_ofertadas?: number[];
 
     @IsOptional()
     @IsArray()
     @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return value;
+        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+    })
     turmas_ipr_relacionadas?: number[];
 
     @IsOptional()
@@ -161,20 +208,40 @@ export class CreateTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     criado_por?: number;
 }
 
 export class UpdateTurmaDto {
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_polo?: number;
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_treinamento?: number;
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     lider_evento?: number;
 
     @IsOptional()
@@ -184,6 +251,11 @@ export class UpdateTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_endereco_evento?: number;
 
     @IsOptional()
@@ -224,14 +296,29 @@ export class UpdateTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_turma_bonus?: number;
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     capacidade_turma?: number;
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     meta?: number;
 
     @IsOptional()
@@ -249,16 +336,28 @@ export class UpdateTurmaDto {
     @IsOptional()
     @IsArray()
     @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return value;
+        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+    })
     bonus_treinamentos?: number[];
 
     @IsOptional()
     @IsArray()
     @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return value;
+        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+    })
     turmas_imersao_ofertadas?: number[];
 
     @IsOptional()
     @IsArray()
     @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return value;
+        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+    })
     turmas_ipr_relacionadas?: number[];
 
     @IsOptional()
@@ -283,6 +382,11 @@ export class UpdateTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     atualizado_por?: number;
 
     @IsOptional()
@@ -292,6 +396,11 @@ export class UpdateTurmaDto {
 
 export class AddAlunoTurmaDto {
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_aluno: number;
 
     @IsOptional()
@@ -360,6 +469,11 @@ export class UpdateAlunoTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     atualizado_por?: number;
 
     @IsOptional()
@@ -508,6 +622,11 @@ export class OpcoesTransferenciaResponseDto {
 
 export class TransferirAlunoDto {
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     id_turma_destino: number;
 }
 
@@ -611,5 +730,10 @@ export class SoftDeleteTurmaDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
     atualizado_por?: number;
 }

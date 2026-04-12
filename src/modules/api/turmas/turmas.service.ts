@@ -992,7 +992,7 @@ export class TurmasService {
 
             // Buscar turmas onde o aluno está vinculado (excluir vínculos com data de deleção)
             const turmasAluno = await this.uow.turmasAlunosRP.find({
-                where: { id_aluno: id_aluno.toString(), deletado_em: null },
+                where: { id_aluno: id_aluno as any, deletado_em: null },
                 relations: ['id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
                 order: { criado_em: 'DESC' },
             });
@@ -1001,7 +1001,7 @@ export class TurmasService {
             const idsTurmasAluno = turmasAluno.map((ta) => ta.id_turma).filter((id) => id);
 
             // Buscar masterclass/palestras onde o aluno está vinculado diretamente
-            const idAlunoString = id_aluno.toString();
+            const idAlunoString = String(id_aluno);
 
             let masterclassAluno = await this.uow.masterclassPreCadastrosRP
                 .createQueryBuilder('mc')
@@ -1752,7 +1752,7 @@ export class TurmasService {
 
             // Verificar se aluno já está na turma (considerar apenas vínculos ativos)
             const alunoJaNaTurma = await this.uow.turmasAlunosRP.findOne({
-                where: { id_turma, id_aluno: addAlunoDto.id_aluno.toString(), deletado_em: null },
+                where: { id_turma, id_aluno: addAlunoDto.id_aluno as any, deletado_em: null },
             });
 
             if (alunoJaNaTurma) {
@@ -1776,7 +1776,7 @@ export class TurmasService {
             // Criar registro na turmas_alunos
             const dadosParaSalvar = {
                 id_turma,
-                id_aluno: addAlunoDto.id_aluno.toString(),
+                id_aluno: addAlunoDto.id_aluno as any,
                 nome_cracha: nomeCracha,
                 numero_cracha: numeroCracha,
                 vaga_bonus: addAlunoDto.vaga_bonus || false,

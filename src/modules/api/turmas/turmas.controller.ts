@@ -176,12 +176,14 @@ export class TurmasController {
     }
 
     @Put(':id')
+    @UseGuards(JwtAuthGuard)
     async update(@Param('id', ParseIntPipe) id: number, @Body() updateTurmaDto: UpdateTurmaDto): Promise<TurmaResponseDto> {
         console.log('Atualizando turma ID:', id, 'com dados:', updateTurmaDto);
         return this.turmasService.update(id, updateTurmaDto);
     }
 
     @Put(':id/soft-delete')
+    @UseGuards(JwtAuthGuard)
     async softDelete(@Param('id', ParseIntPipe) id: number, @Body() softDeleteDto: SoftDeleteTurmaDto): Promise<{ message: string }> {
         console.log('Soft delete da turma ID:', id, 'Dados:', softDeleteDto);
         await this.turmasService.softDelete(id, softDeleteDto);
@@ -189,6 +191,7 @@ export class TurmasController {
     }
 
     @Delete(':id')
+    @UseGuards(JwtAuthGuard)
     async delete(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
         console.log('Deletando turma ID (hard delete):', id);
         await this.turmasService.delete(id);
@@ -208,6 +211,7 @@ export class TurmasController {
     }
 
     @Post(':id/alunos')
+    @UseGuards(JwtAuthGuard)
     async addAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Body() addAlunoDto: AddAlunoTurmaDto): Promise<AlunoTurmaResponseDto> {
         console.log('Adicionando aluno à turma:', id_turma, 'aluno:', addAlunoDto);
         return this.turmasService.addAlunoTurma(id_turma, addAlunoDto);
@@ -227,6 +231,7 @@ export class TurmasController {
     }
 
     @Delete(':id/alunos/:id_turma_aluno')
+    @UseGuards(JwtAuthGuard)
     async removeAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Param('id_turma_aluno') id_turma_aluno: string): Promise<{ message: string }> {
         console.log('Removendo aluno da turma:', id_turma_aluno);
         await this.turmasService.removeAlunoTurma(id_turma_aluno);

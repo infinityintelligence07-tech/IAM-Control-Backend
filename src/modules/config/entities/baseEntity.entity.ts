@@ -1,4 +1,5 @@
 import { CreateDateColumn, UpdateDateColumn, DeleteDateColumn, BeforeInsert, BeforeUpdate, Column } from 'typeorm';
+import { getRequestUserId } from '@/common/context/request-user.context';
 
 export class BaseEntity {
     /*======================================================================================*/
@@ -15,11 +16,20 @@ export class BaseEntity {
     updateTimestamps() {
         this.criado_em = new Date();
         this.atualizado_em = new Date();
+        const userId = getRequestUserId();
+        if (userId) {
+            this.criado_por = userId;
+            this.atualizado_por = userId;
+        }
     }
 
     @BeforeUpdate()
     updateUpdatedAt() {
         this.atualizado_em = new Date();
+        const userId = getRequestUserId();
+        if (userId) {
+            this.atualizado_por = userId;
+        }
     }
     /*======================================================================================*/
     @Column({ type: 'int', name: 'criado_por', nullable: true })

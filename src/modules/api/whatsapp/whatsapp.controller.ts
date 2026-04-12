@@ -9,6 +9,12 @@ export interface SendMessageDto {
     contactName?: string;
 }
 
+export interface SendContractLinkDto {
+    phone: string;
+    contactName?: string;
+    signingUrl: string;
+}
+
 export interface CheckInStudentDto {
     alunoTurmaId: string;
     alunoNome: string;
@@ -47,6 +53,13 @@ export class WhatsAppController {
     async sendMessage(@Body() data: SendMessageDto) {
         console.log('Enviando mensagem WhatsApp via ChatGuru:', data);
         return this.whatsappService.sendMessage(data.phone, data.message, data.contactName);
+    }
+
+    @Post('send-contract-link')
+    @UseGuards(JwtAuthGuard)
+    async sendContractLink(@Body() data: SendContractLinkDto) {
+        console.log('Enviando link de contrato via template WhatsApp:', data);
+        return this.whatsappService.sendContractLinkTemplate(data.phone, data.signingUrl, data.contactName);
     }
 
     @Post('send-checkin-links')

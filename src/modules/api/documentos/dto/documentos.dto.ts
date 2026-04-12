@@ -138,6 +138,10 @@ export class CriarContratoZapSignDto {
 
     @IsOptional()
     @IsString()
+    id_turma?: string;
+
+    @IsOptional()
+    @IsString()
     cidade_treinamento?: string;
 
     @IsOptional()

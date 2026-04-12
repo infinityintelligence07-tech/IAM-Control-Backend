@@ -402,8 +402,6 @@ export class ContractTemplateService {
     <div class="header">
         <div class="iam-brand">
             <img src="{{IAM_LOGO_URL}}" alt="Logo IAM" class="iam-logo-image" onerror="this.style.display='none';">
-            <div class="logo-divider"></div>
-            <div class="company-name">INSTITUTO ACADEMY MIND</div>
         </div>
     </div>
     
@@ -1806,11 +1804,7 @@ export class ContractTemplateService {
               <div class="page">
               <div class="header">
                 <div class="logo-container">
-                  <img src="${logoUrl}" alt="Instituto Academy Mind" class="logo-image" onerror="this.style.display='none';">
-                  <hr class="logo-divider">
-                  <div class="logo-text">
-                    <div class="logo">INSTITUTO ACADEMY MIND</div>
-                  </div>
+                  <img src="${logoUrl}" alt="IAM Treinamentos" class="logo-image" onerror="this.style.display='none';">
                 </div>
               </div>
               

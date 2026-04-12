@@ -224,17 +224,24 @@ export class DocumentosService {
                 });
             }
 
+            const idTurmaReferencia = criarContratoDto.id_turma
+                ? parseInt(criarContratoDto.id_turma)
+                : criarContratoDto.id_turma_bonus
+                  ? parseInt(criarContratoDto.id_turma_bonus)
+                  : undefined;
+
             // Buscar ou criar registro de TurmasAlunos primeiro
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: {
                     id_aluno: criarContratoDto.id_aluno,
+                    ...(idTurmaReferencia ? { id_turma: idTurmaReferencia } : {}),
                     deletado_em: null,
                 },
             });
 
             // Se não existir, criar um registro temporário
             if (!turmaAluno) {
-                const idTurmaParaCracha = criarContratoDto.id_turma_bonus ? parseInt(criarContratoDto.id_turma_bonus) : 1;
+                const idTurmaParaCracha = idTurmaReferencia || 1;
                 // Gerar número de crachá único para esta turma
                 const numeroCracha = await this.turmasService.generateUniqueCrachaNumber(idTurmaParaCracha);
 
@@ -2252,13 +2259,68 @@ export class DocumentosService {
 
             // Mapear dados para o formato esperado pelo frontend
             const dadosContrato = contrato.dados_contrato || {};
-            const turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
-            const turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
-            const aluno = turmaAluno?.id_aluno_fk;
+            let turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
+            let turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
             const documento = contrato.id_documento_fk;
+
+            if (!turmaAluno) {
+                const fallbackAlunoId = Number(dadosContrato?.aluno?.id || 0);
+                const fallbackTreinamentoId = Number(dadosContrato?.treinamento?.id || turmaAlunoTreinamento?.id_treinamento || 0);
+
+                if (fallbackAlunoId && fallbackTreinamentoId) {
+                    const turmaAlunoTreinamentoFallback = await this.uow.turmasAlunosTreinamentosRP
+                        .createQueryBuilder('turma_aluno_treinamento')
+                        .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
+                        .where('turma_aluno_treinamento.id_treinamento = :idTreinamento', {
+                            idTreinamento: fallbackTreinamentoId,
+                        })
+                        .andWhere('turma_aluno.id_aluno = :idAluno', { idAluno: fallbackAlunoId.toString() })
+                        .andWhere('turma_aluno_treinamento.deletado_em IS NULL')
+                        .andWhere('turma_aluno.deletado_em IS NULL')
+                        .orderBy('turma_aluno_treinamento.atualizado_em', 'DESC')
+                        .addOrderBy('turma_aluno_treinamento.id', 'DESC')
+                        .getOne();
+
+                    if (turmaAlunoTreinamentoFallback?.id_turma_aluno_fk) {
+                        turmaAlunoTreinamento = turmaAlunoTreinamentoFallback;
+                        turmaAluno = turmaAlunoTreinamentoFallback.id_turma_aluno_fk;
+                    }
+                }
+
+                if (!turmaAluno && fallbackAlunoId) {
+                    const turmaAlunoDiretoFallback = await this.uow.turmasAlunosRP
+                        .createQueryBuilder('turma_aluno')
+                        .where('turma_aluno.id_aluno = :idAluno', {
+                            idAluno: fallbackAlunoId.toString(),
+                        })
+                        .andWhere('turma_aluno.deletado_em IS NULL')
+                        .orderBy(
+                            `CASE
+                                WHEN turma_aluno.pendencia_pagamento IS TRUE
+                                  OR turma_aluno.contrato_duplo IS TRUE
+                                  OR turma_aluno.comprovante_pagamento_base64 IS NOT NULL
+                                THEN 0
+                                ELSE 1
+                              END`,
+                            'ASC',
+                        )
+                        .addOrderBy('turma_aluno.atualizado_em', 'DESC')
+                        .addOrderBy('turma_aluno.id', 'DESC')
+                        .getOne();
+
+                    if (turmaAlunoDiretoFallback) {
+                        turmaAluno = turmaAlunoDiretoFallback;
+                    }
+                }
+            }
+            const aluno = turmaAluno?.id_aluno_fk;
             const polo = aluno?.id_polo_fk;
             // Buscar treinamento dos dados do contrato ou das relations
             const treinamento = dadosContrato.treinamento || turmaAlunoTreinamento?.id_treinamento_fk || null;
+            const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
+            const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
+            const contratoDuplo = turmaAluno?.contrato_duplo ?? turmaAlunoDadosContrato.contrato_duplo ?? false;
+            const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
 
             // Log para debug do treinamento
             console.log('=== DEBUG BUSCAR CONTRATO COMPLETO ===');
@@ -2286,6 +2348,11 @@ export class DocumentosService {
                 zapsign_document_status: contrato.zapsign_document_status,
                 aluno_nome: aluno?.nome,
                 treinamento_nome: treinamento?.treinamento,
+                turma_aluno: {
+                    pendencia_pagamento: pendenciaPagamento,
+                    contrato_duplo: contratoDuplo,
+                    comprovante_pagamento_base64: comprovantePagamentoBase64,
+                },
                 dados_contrato: {
                     aluno: {
                         id: aluno?.id,
@@ -2343,6 +2410,11 @@ export class DocumentosService {
                     data_inicio_treinamento: dadosContrato.data_inicio_treinamento,
                     data_final_treinamento: dadosContrato.data_final_treinamento,
                     cidade_treinamento: dadosContrato.cidade_treinamento,
+                    turma_aluno: {
+                        pendencia_pagamento: pendenciaPagamento,
+                        contrato_duplo: contratoDuplo,
+                        comprovante_pagamento_base64: comprovantePagamentoBase64,
+                    },
                 },
             };
 
@@ -2401,94 +2473,162 @@ export class DocumentosService {
             });
 
             // Mapear dados para o formato esperado pelo frontend
-            const contratosMapeados = contratos.map((contrato) => {
-                const dadosContrato = contrato.dados_contrato || {};
-                const turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
-                const turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
-                const aluno = turmaAluno?.id_aluno_fk;
-                const documento = contrato.id_documento_fk;
-                const polo = aluno?.id_polo_fk;
+            const contratosMapeados = await Promise.all(
+                contratos.map(async (contrato) => {
+                    const dadosContrato = contrato.dados_contrato || {};
+                    let turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
+                    let turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
+                    const documento = contrato.id_documento_fk;
+                    if (!turmaAluno) {
+                        const fallbackAlunoId = Number(dadosContrato?.aluno?.id || 0);
+                        const fallbackTreinamentoId = Number(dadosContrato?.treinamento?.id || turmaAlunoTreinamento?.id_treinamento || 0);
 
-                // Usar treinamento das relations ou dos dados do contrato
-                const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
+                        if (fallbackAlunoId && fallbackTreinamentoId) {
+                            const turmaAlunoTreinamentoFallback = await this.uow.turmasAlunosTreinamentosRP
+                                .createQueryBuilder('turma_aluno_treinamento')
+                                .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
+                                .where('turma_aluno_treinamento.id_treinamento = :idTreinamento', {
+                                    idTreinamento: fallbackTreinamentoId,
+                                })
+                                .andWhere('turma_aluno.id_aluno = :idAluno', {
+                                    idAluno: fallbackAlunoId.toString(),
+                                })
+                                .andWhere('turma_aluno_treinamento.deletado_em IS NULL')
+                                .andWhere('turma_aluno.deletado_em IS NULL')
+                                .orderBy('turma_aluno_treinamento.atualizado_em', 'DESC')
+                                .addOrderBy('turma_aluno_treinamento.id', 'DESC')
+                                .getOne();
 
-                return {
-                    id: contrato.id,
-                    status_ass_aluno: contrato.status_ass_aluno,
-                    status_ass_test_um: contrato.status_ass_test_um,
-                    status_ass_test_dois: contrato.status_ass_test_dois,
-                    data_ass_aluno: contrato.data_ass_aluno,
-                    data_ass_test_um: contrato.data_ass_test_um,
-                    data_ass_test_dois: contrato.data_ass_test_dois,
-                    criado_em: contrato.criado_em,
-                    atualizado_em: contrato.atualizado_em,
-                    // Campos para compatibilidade com frontend
-                    created_at: contrato.criado_em,
-                    updated_at: contrato.atualizado_em,
-                    zapsign_document_id: contrato.zapsign_document_id,
-                    zapsign_signers_data: contrato.zapsign_signers_data,
-                    zapsign_document_status: contrato.zapsign_document_status,
-                    // Campos diretos para compatibilidade com frontend
-                    aluno_nome: aluno?.nome,
-                    treinamento_nome: treinamento?.treinamento,
-                    dados_contrato: {
-                        aluno: {
-                            id: aluno?.id,
-                            nome: aluno?.nome,
-                            cpf: aluno?.cpf,
-                            email: aluno?.email,
-                            data_nascimento: aluno?.data_nascimento,
-                            telefone_um: aluno?.telefone_um,
-                            polo: {
-                                id: polo?.id,
-                                cidade: polo?.cidade,
-                                estado: polo?.estado,
+                            if (turmaAlunoTreinamentoFallback?.id_turma_aluno_fk) {
+                                turmaAlunoTreinamento = turmaAlunoTreinamentoFallback;
+                                turmaAluno = turmaAlunoTreinamentoFallback.id_turma_aluno_fk;
+                            }
+                        }
+
+                        if (!turmaAluno && fallbackAlunoId) {
+                            const turmaAlunoDiretoFallback = await this.uow.turmasAlunosRP
+                                .createQueryBuilder('turma_aluno')
+                                .where('turma_aluno.id_aluno = :idAluno', {
+                                    idAluno: fallbackAlunoId.toString(),
+                                })
+                                .andWhere('turma_aluno.deletado_em IS NULL')
+                                .orderBy(
+                                    `CASE
+                                    WHEN turma_aluno.pendencia_pagamento IS TRUE
+                                      OR turma_aluno.contrato_duplo IS TRUE
+                                      OR turma_aluno.comprovante_pagamento_base64 IS NOT NULL
+                                    THEN 0
+                                    ELSE 1
+                                  END`,
+                                    'ASC',
+                                )
+                                .addOrderBy('turma_aluno.atualizado_em', 'DESC')
+                                .addOrderBy('turma_aluno.id', 'DESC')
+                                .getOne();
+
+                            if (turmaAlunoDiretoFallback) {
+                                turmaAluno = turmaAlunoDiretoFallback;
+                            }
+                        }
+                    }
+                    const aluno = turmaAluno?.id_aluno_fk;
+                    const polo = aluno?.id_polo_fk;
+
+                    // Usar treinamento das relations ou dos dados do contrato
+                    const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
+                    const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
+                    const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
+                    const contratoDuplo = turmaAluno?.contrato_duplo ?? turmaAlunoDadosContrato.contrato_duplo ?? false;
+                    const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
+
+                    return {
+                        id: contrato.id,
+                        status_ass_aluno: contrato.status_ass_aluno,
+                        status_ass_test_um: contrato.status_ass_test_um,
+                        status_ass_test_dois: contrato.status_ass_test_dois,
+                        data_ass_aluno: contrato.data_ass_aluno,
+                        data_ass_test_um: contrato.data_ass_test_um,
+                        data_ass_test_dois: contrato.data_ass_test_dois,
+                        criado_em: contrato.criado_em,
+                        atualizado_em: contrato.atualizado_em,
+                        // Campos para compatibilidade com frontend
+                        created_at: contrato.criado_em,
+                        updated_at: contrato.atualizado_em,
+                        zapsign_document_id: contrato.zapsign_document_id,
+                        zapsign_signers_data: contrato.zapsign_signers_data,
+                        zapsign_document_status: contrato.zapsign_document_status,
+                        // Campos diretos para compatibilidade com frontend
+                        aluno_nome: aluno?.nome,
+                        treinamento_nome: treinamento?.treinamento,
+                        turma_aluno: {
+                            pendencia_pagamento: pendenciaPagamento,
+                            contrato_duplo: contratoDuplo,
+                            comprovante_pagamento_base64: comprovantePagamentoBase64,
+                        },
+                        dados_contrato: {
+                            aluno: {
+                                id: aluno?.id,
+                                nome: aluno?.nome,
+                                cpf: aluno?.cpf,
+                                email: aluno?.email,
+                                data_nascimento: aluno?.data_nascimento,
+                                telefone_um: aluno?.telefone_um,
+                                polo: {
+                                    id: polo?.id,
+                                    cidade: polo?.cidade,
+                                    estado: polo?.estado,
+                                },
+                                endereco: dadosContrato.aluno?.endereco || {
+                                    logradouro: aluno?.logradouro || '',
+                                    numero: aluno?.numero || '',
+                                    complemento: aluno?.complemento || '',
+                                    bairro: aluno?.bairro || '',
+                                    cidade: aluno?.cidade || polo?.cidade || '',
+                                    estado: aluno?.estado || polo?.estado || '',
+                                    cep: aluno?.cep || '',
+                                },
                             },
-                            endereco: dadosContrato.aluno?.endereco || {
-                                logradouro: aluno?.logradouro || '',
-                                numero: aluno?.numero || '',
-                                complemento: aluno?.complemento || '',
-                                bairro: aluno?.bairro || '',
-                                cidade: aluno?.cidade || polo?.cidade || '',
-                                estado: aluno?.estado || polo?.estado || '',
-                                cep: aluno?.cep || '',
+                            treinamento: {
+                                id: treinamento?.id,
+                                nome: treinamento?.treinamento,
+                                sigla: treinamento?.sigla_treinamento,
+                                preco: treinamento?.preco_treinamento,
+                                url_logo_treinamento: treinamento?.url_logo_treinamento,
                             },
-                        },
-                        treinamento: {
-                            id: treinamento?.id,
-                            nome: treinamento?.treinamento,
-                            sigla: treinamento?.sigla_treinamento,
-                            preco: treinamento?.preco_treinamento,
-                            url_logo_treinamento: treinamento?.url_logo_treinamento,
-                        },
-                        template: {
-                            id: documento?.id,
-                            nome: documento?.documento,
-                            clausulas: documento?.clausulas,
-                        },
-                        pagamento: {
-                            forma_pagamento: dadosContrato.pagamento?.forma_pagamento || dadosContrato.forma_pagamento || 'A_VISTA',
-                            formas_pagamento: dadosContrato.pagamento?.formas_pagamento || dadosContrato.formas_pagamento || [],
-                            valores_formas_pagamento: dadosContrato.pagamento?.valores_formas_pagamento || dadosContrato.valores_formas_pagamento || {},
-                        },
-                        testemunhas: dadosContrato.testemunhas || {},
-                        campos_variaveis: dadosContrato.campos_variaveis || {},
-                        formas_pagamento: dadosContrato.formas_pagamento || [],
-                        valores_formas_pagamento: dadosContrato.valores_formas_pagamento || {},
-                        bonus_selecionados: dadosContrato.bonus_selecionados || [],
-                        valores_bonus: dadosContrato.valores_bonus || {},
-                        bonus: {
-                            tipos_bonus: dadosContrato.bonus_selecionados || [],
+                            template: {
+                                id: documento?.id,
+                                nome: documento?.documento,
+                                clausulas: documento?.clausulas,
+                            },
+                            pagamento: {
+                                forma_pagamento: dadosContrato.pagamento?.forma_pagamento || dadosContrato.forma_pagamento || 'A_VISTA',
+                                formas_pagamento: dadosContrato.pagamento?.formas_pagamento || dadosContrato.formas_pagamento || [],
+                                valores_formas_pagamento: dadosContrato.pagamento?.valores_formas_pagamento || dadosContrato.valores_formas_pagamento || {},
+                            },
+                            testemunhas: dadosContrato.testemunhas || {},
+                            campos_variaveis: dadosContrato.campos_variaveis || {},
+                            formas_pagamento: dadosContrato.formas_pagamento || [],
+                            valores_formas_pagamento: dadosContrato.valores_formas_pagamento || {},
+                            bonus_selecionados: dadosContrato.bonus_selecionados || [],
                             valores_bonus: dadosContrato.valores_bonus || {},
-                            turma_bonus_info: dadosContrato.turma_bonus_info || null,
+                            bonus: {
+                                tipos_bonus: dadosContrato.bonus_selecionados || [],
+                                valores_bonus: dadosContrato.valores_bonus || {},
+                                turma_bonus_info: dadosContrato.turma_bonus_info || null,
+                            },
+                            observacoes: dadosContrato.observacoes || '',
+                            data_inicio_treinamento: dadosContrato.data_inicio_treinamento,
+                            data_final_treinamento: dadosContrato.data_final_treinamento,
+                            cidade_treinamento: dadosContrato.cidade_treinamento,
+                            turma_aluno: {
+                                pendencia_pagamento: pendenciaPagamento,
+                                contrato_duplo: contratoDuplo,
+                                comprovante_pagamento_base64: comprovantePagamentoBase64,
+                            },
                         },
-                        observacoes: dadosContrato.observacoes || '',
-                        data_inicio_treinamento: dadosContrato.data_inicio_treinamento,
-                        data_final_treinamento: dadosContrato.data_final_treinamento,
-                        cidade_treinamento: dadosContrato.cidade_treinamento,
-                    },
-                };
-            });
+                    };
+                }),
+            );
 
             const totalPages = Math.ceil(total / limit);
 

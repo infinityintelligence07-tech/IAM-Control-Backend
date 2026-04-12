@@ -48,6 +48,7 @@ export class DocumentosController {
     }
 
     @Put(':id')
+    @UseGuards(JwtAuthGuard)
     async updateDocumento(
         @Param('id', ParseIntPipe) id: number,
         @Body() updateDocumentoDto: UpdateDocumentoDto,
@@ -59,6 +60,7 @@ export class DocumentosController {
     }
 
     @Delete(':id')
+    @UseGuards(JwtAuthGuard)
     async deleteDocumento(@Param('id', ParseIntPipe) id: number, @Req() req: Request): Promise<{ message: string }> {
         console.log('Removendo documento ID:', id);
         const userId = (req.user as any)?.sub;
@@ -183,9 +185,11 @@ export class DocumentosController {
 
     // Endpoint público para teste (TEMPORÁRIO)
     @Post('public/criar-contrato')
-    async criarContratoZapSignPublico(@Body() criarContratoDto: CriarContratoZapSignDto): Promise<RespostaContratoZapSignDto> {
+    @UseGuards(JwtAuthGuard)
+    async criarContratoZapSignPublico(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
         console.log('Criando contrato no ZapSign para aluno (público):', criarContratoDto.id_aluno);
-        return this.documentosService.criarContratoZapSign(criarContratoDto, 1); // Usar userId 1 para teste
+        const userId = (req.user as any)?.sub;
+        return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
     }
 
     // Endpoint público para listar contratos do banco (para compatibilidade com frontend)
@@ -233,6 +237,7 @@ export class DocumentosController {
 
     // Endpoint para salvar assinatura (para compatibilidade com frontend)
     @Post('salvar-assinatura')
+    @UseGuards(JwtAuthGuard)
     salvarAssinatura(@Body() signatureData: any) {
         console.log('Salvando assinatura:', signatureData);
         // Retornar sucesso mockado para compatibilidade
@@ -315,6 +320,7 @@ export class DocumentosController {
 
     // Endpoint para cancelar documento do ZapSign e fazer soft delete
     @Delete('zapsign/documento/:documentoId/cancelar')
+    @UseGuards(JwtAuthGuard)
     async cancelarDocumentoZapSign(@Param('documentoId') documentoId: string, @Req() req: Request): Promise<{ message: string }> {
         try {
             console.log('=== CANCELANDO DOCUMENTO ZAPSIGN ===');

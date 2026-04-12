@@ -25,6 +25,15 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'url_comprovante_pgto', nullable: true })
     url_comprovante_pgto: string;
 
+    @Column({ type: 'boolean', name: 'pendencia_pagamento', nullable: true })
+    pendencia_pagamento: boolean | null;
+
+    @Column({ type: 'boolean', name: 'contrato_duplo', nullable: true })
+    contrato_duplo: boolean | null;
+
+    @Column({ type: 'text', name: 'comprovante_pagamento_base64', nullable: true })
+    comprovante_pagamento_base64: string | null;
+
     @Column({ type: 'enum', enum: EOrigemAlunos, enumName: 'EOrigemAlunos', name: 'origem_aluno', nullable: true })
     origem_aluno: EOrigemAlunos;
 

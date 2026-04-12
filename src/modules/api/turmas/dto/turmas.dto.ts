@@ -130,6 +130,16 @@ export class CreateTurmaDto {
     bonus_treinamentos?: number[];
 
     @IsOptional()
+    @IsArray()
+    @IsNumber({}, { each: true })
+    turmas_imersao_ofertadas?: number[];
+
+    @IsOptional()
+    @IsArray()
+    @IsNumber({}, { each: true })
+    turmas_ipr_relacionadas?: number[];
+
+    @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
     url_midia_kit?: string;
@@ -242,6 +252,16 @@ export class UpdateTurmaDto {
     bonus_treinamentos?: number[];
 
     @IsOptional()
+    @IsArray()
+    @IsNumber({}, { each: true })
+    turmas_imersao_ofertadas?: number[];
+
+    @IsOptional()
+    @IsArray()
+    @IsNumber({}, { each: true })
+    turmas_ipr_relacionadas?: number[];
+
+    @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
     url_midia_kit?: string;
@@ -294,6 +314,18 @@ export class AddAlunoTurmaDto {
     @IsOptional()
     @IsString()
     id_aluno_bonus?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    pendencia_pagamento?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    contrato_duplo?: boolean;
+
+    @IsOptional()
+    @IsString()
+    comprovante_pagamento_base64?: string;
 }
 
 export class UpdateAlunoTurmaDto {
@@ -305,6 +337,18 @@ export class UpdateAlunoTurmaDto {
     @IsOptional()
     @IsString()
     url_comprovante_pgto?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    pendencia_pagamento?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    contrato_duplo?: boolean;
+
+    @IsOptional()
+    @IsString()
+    comprovante_pagamento_base64?: string;
 
     @IsOptional()
     @IsString()
@@ -347,6 +391,8 @@ export class TurmaResponseDto {
     turma_aberta: boolean;
     bonus_treinamentos?: number[];
     detalhamento_bonus?: { id_treinamento_db: number }[];
+    turmas_imersao_ofertadas?: number[];
+    turmas_ipr_relacionadas?: number[];
     url_midia_kit?: string;
     url_grupo_whatsapp?: string;
     url_grupo_whatsapp_2?: string;
@@ -404,6 +450,9 @@ export class AlunoTurmaResponseDto {
     presenca_turma?: string;
     ficha_preenchida?: boolean;
     url_comprovante_pgto?: string;
+    pendencia_pagamento?: boolean;
+    contrato_duplo?: boolean;
+    comprovante_pagamento_base64?: string;
     created_at: Date;
     /** Tag "Transferência Para": turma para a qual o aluno foi transferido (permanece na turma atual com esta referência). */
     transferencia_para_turma?: {

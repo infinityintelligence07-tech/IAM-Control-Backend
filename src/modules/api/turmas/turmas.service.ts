@@ -469,6 +469,8 @@ export class TurmasService {
                     turma_aberta: turma.turma_aberta,
                     bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                     detalhamento_bonus: turma.detalhamento_bonus,
+                    turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
+                    turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
                     url_midia_kit: turma.url_midia_kit,
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
                     url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
@@ -596,6 +598,8 @@ export class TurmasService {
                 turma_aberta: turma.turma_aberta,
                 bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                 detalhamento_bonus: turma.detalhamento_bonus,
+                turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
+                turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
                 url_midia_kit: turma.url_midia_kit,
                 url_grupo_whatsapp: turma.url_grupo_whatsapp,
                 url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
@@ -1315,6 +1319,8 @@ export class TurmasService {
                     turma_aberta: turma.turma_aberta,
                     bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                     detalhamento_bonus: turma.detalhamento_bonus,
+                    turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
+                    turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
                     url_midia_kit: turma.url_midia_kit,
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
                     url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
@@ -1655,6 +1661,9 @@ export class TurmasService {
                 status_aluno_turma: turmaAluno.status_aluno_turma,
                 presenca_turma: turmaAluno.presenca_turma,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
+                pendencia_pagamento: turmaAluno.pendencia_pagamento ?? undefined,
+                contrato_duplo: turmaAluno.contrato_duplo ?? undefined,
+                comprovante_pagamento_base64: turmaAluno.comprovante_pagamento_base64 ?? undefined,
                 created_at: turmaAluno.criado_em,
                 transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
                 transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
@@ -1774,6 +1783,11 @@ export class TurmasService {
                 origem_aluno: (addAlunoDto.origem_aluno as EOrigemAlunos) || EOrigemAlunos.COMPROU_INGRESSO,
                 status_aluno_turma: (addAlunoDto.status_aluno_turma as EStatusAlunosTurmas) || EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                 ...(addAlunoDto.id_aluno_bonus && { id_aluno_bonus: addAlunoDto.id_aluno_bonus }),
+                ...(addAlunoDto.pendencia_pagamento !== undefined && { pendencia_pagamento: addAlunoDto.pendencia_pagamento }),
+                ...(addAlunoDto.contrato_duplo !== undefined && { contrato_duplo: addAlunoDto.contrato_duplo }),
+                ...(addAlunoDto.comprovante_pagamento_base64 !== undefined && {
+                    comprovante_pagamento_base64: addAlunoDto.comprovante_pagamento_base64,
+                }),
             };
 
             console.log('=== DADOS QUE SERÃO SALVOS ===');
@@ -1812,6 +1826,9 @@ export class TurmasService {
                 nome_cracha: turmaAlunoCompleta.nome_cracha,
                 numero_cracha: turmaAlunoCompleta.numero_cracha,
                 vaga_bonus: turmaAlunoCompleta.vaga_bonus,
+                pendencia_pagamento: turmaAlunoCompleta.pendencia_pagamento,
+                contrato_duplo: turmaAlunoCompleta.contrato_duplo,
+                comprovante_pagamento_base64: turmaAlunoCompleta.comprovante_pagamento_base64,
                 created_at: turmaAlunoCompleta.criado_em,
                 aluno: turmaAlunoCompleta.id_aluno_fk
                     ? {
@@ -2008,6 +2025,9 @@ export class TurmasService {
             status_aluno_turma: turmaAlunoCompleta.status_aluno_turma,
             presenca_turma: turmaAlunoCompleta.presenca_turma,
             url_comprovante_pgto: turmaAlunoCompleta.url_comprovante_pgto,
+            pendencia_pagamento: turmaAlunoCompleta.pendencia_pagamento,
+            contrato_duplo: turmaAlunoCompleta.contrato_duplo,
+            comprovante_pagamento_base64: turmaAlunoCompleta.comprovante_pagamento_base64,
             created_at: turmaAlunoCompleta.criado_em,
             transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAlunoCompleta.id_turma_transferencia_de_fk),
             aluno: turmaAlunoCompleta.id_aluno_fk
@@ -2529,6 +2549,15 @@ export class TurmasService {
             if (updateAlunoDto.url_comprovante_pgto !== undefined) {
                 turmaAluno.url_comprovante_pgto = updateAlunoDto.url_comprovante_pgto;
             }
+            if (updateAlunoDto.pendencia_pagamento !== undefined) {
+                turmaAluno.pendencia_pagamento = updateAlunoDto.pendencia_pagamento;
+            }
+            if (updateAlunoDto.contrato_duplo !== undefined) {
+                turmaAluno.contrato_duplo = updateAlunoDto.contrato_duplo;
+            }
+            if (updateAlunoDto.comprovante_pagamento_base64 !== undefined) {
+                turmaAluno.comprovante_pagamento_base64 = updateAlunoDto.comprovante_pagamento_base64;
+            }
             if (updateAlunoDto.status_aluno_turma !== undefined) {
                 turmaAluno.status_aluno_turma = updateAlunoDto.status_aluno_turma as EStatusAlunosTurmas;
             }
@@ -2566,6 +2595,9 @@ export class TurmasService {
                 nome_cracha: turmaAlunoAtualizada.nome_cracha,
                 numero_cracha: turmaAlunoAtualizada.numero_cracha,
                 vaga_bonus: turmaAlunoAtualizada.vaga_bonus,
+                pendencia_pagamento: turmaAlunoAtualizada.pendencia_pagamento,
+                contrato_duplo: turmaAlunoAtualizada.contrato_duplo,
+                comprovante_pagamento_base64: turmaAlunoAtualizada.comprovante_pagamento_base64,
                 created_at: turmaAlunoAtualizada.criado_em,
                 aluno: turmaAlunoAtualizada.id_aluno_fk
                     ? {

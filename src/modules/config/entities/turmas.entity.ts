@@ -79,6 +79,12 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'jsonb', name: 'detalhamento_bonus', nullable: true })
     detalhamento_bonus: { id_treinamento_db: number }[];
 
+    @Column({ type: 'jsonb', name: 'turmas_imersao_ofertadas', nullable: true })
+    turmas_imersao_ofertadas: number[];
+
+    @Column({ type: 'jsonb', name: 'turmas_ipr_relacionadas', nullable: true })
+    turmas_ipr_relacionadas: number[];
+
     @Column({ type: 'varchar', name: 'url_midia_kit', nullable: true })
     url_midia_kit: string;
 

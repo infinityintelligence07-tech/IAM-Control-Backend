@@ -43,6 +43,10 @@ export class WhatsAppService {
     // Facebook Template ID (pode funcionar melhor que o UUID)
     private readonly QRCODE_TEMPLATE_ID_FACEBOOK = '1187423773526893';
     private readonly QRCODE_TEMPLATE_NAME: string;
+    private readonly CONTRATO_TEMPLATE_ID_FACEBOOK = '1646443339593705';
+    private readonly CONTRATO_TEMPLATE_ID_GUPSHUP = 'e7633245-fff9-40d9-b732-63f9ecf52dd9';
+    private readonly CONTRATO_TEMPLATE_NAME_DEFAULT = 'template_iamcontrol_envio_contrato';
+    private readonly CONTRATO_TEMPLATE_NAME: string;
     private readonly confirmacaoInboundResponses: any[] = [];
     private static readonly MAX_CONFIRMACAO_INBOUND_TRACK = 1000;
 
@@ -56,96 +60,165 @@ export class WhatsAppService {
         this.CHECKIN_TEMPLATE_NAME = process.env.GUPSHUP_TEMPLATE_NAME || this.CHECKIN_TEMPLATE_ID_GUPSHUP;
         // UUID do template de QR Code na Gupshup
         this.QRCODE_TEMPLATE_NAME = process.env.GUPSHUP_QRCODE_TEMPLATE_NAME || this.QRCODE_TEMPLATE_ID_GUPSHUP;
+        this.CONTRATO_TEMPLATE_NAME = process.env.GUPSHUP_CONTRATO_TEMPLATE_NAME || process.env.GUPSHUP_CONTRATO_TEMPLATE_ID || '';
     }
 
     /**
-     * Envia mensagem via ChatGuru
-     * Cria o chat com o nome do contato e telefone primário
+     * Envia mensagem via ChatGuru/Gupshup (sem fluxo Z-API).
      */
     async sendMessage(phone: string, message: string, contactName?: string): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
-            // Formatar número de telefone (remover caracteres especiais)
             let formattedPhone = phone.replace(/\D/g, '');
-
-            // Adicionar código do país (55) se não estiver presente
             if (!formattedPhone.startsWith('55')) {
                 formattedPhone = '55' + formattedPhone;
             }
 
-            console.log(`📱 [Z-API] Enviando mensagem via ChatGuru para ${formattedPhone}${contactName ? ` (${contactName})` : ''}`);
+            console.log(`📱 [GUPSHUP] Enviando mensagem para ${formattedPhone}${contactName ? ` (${contactName})` : ''}`);
 
-            // Usa o método createChatAndSendMessage que cria o chat com o nome e envia a mensagem
-            const phoneToUse = formattedPhone;
-            try {
-                const result = await this.chatGuruService.createChatAndSendMessage(phoneToUse, message, contactName);
-
-                if (result.success) {
-                    console.log(`✅ [Z-API] Mensagem enviada com sucesso via ChatGuru`);
-                    return {
-                        success: true,
-                        message: 'Mensagem enviada com sucesso via Z-API',
-                    };
-                } else {
-                    const errorMsg = result.error || result.warning || 'Falha ao enviar mensagem via ChatGuru';
-                    console.warn(`⚠️ [Z-API] Falha ao enviar mensagem: ${errorMsg}`);
-
-                    // Se for erro de chat não encontrado, tenta com número alternado
-                    if (this.isChatNotFoundError({ message: errorMsg })) {
-                        const alternatePhone = this.tryAlternatePhoneNumber(phoneToUse);
-                        if (alternatePhone && alternatePhone !== phoneToUse) {
-                            console.log(`🔄 [Z-API] Tentando enviar mensagem com número alternado: ${alternatePhone}`);
-                            try {
-                                const retryResult = await this.chatGuruService.createChatAndSendMessage(alternatePhone, message, contactName);
-                                if (retryResult.success) {
-                                    console.log(`✅ [Z-API] Mensagem enviada com sucesso usando número alternado ${alternatePhone}`);
-                                    return {
-                                        success: true,
-                                        message: 'Mensagem enviada com sucesso via Z-API (número alternado)',
-                                    };
-                                }
-                            } catch (retryError: any) {
-                                console.error(`❌ [Z-API] Também falhou com número alternado: ${retryError.message}`);
-                            }
-                        }
-                    }
-
-                    return {
-                        success: false,
-                        error: errorMsg,
-                    };
-                }
-            } catch (serviceError: any) {
-                console.error(`❌ [Z-API] Erro no serviço ChatGuru: ${serviceError.message}`);
-                console.error(`   Stack: ${serviceError.stack}`);
-
-                // Se for erro de chat não encontrado, tenta com número alternado
-                if (this.isChatNotFoundError(serviceError)) {
-                    const alternatePhone = this.tryAlternatePhoneNumber(phoneToUse);
-                    if (alternatePhone && alternatePhone !== phoneToUse) {
-                        console.log(`🔄 [Z-API] Tentando enviar mensagem com número alternado: ${alternatePhone}`);
-                        try {
-                            const retryResult = await this.chatGuruService.createChatAndSendMessage(alternatePhone, message, contactName);
-                            if (retryResult.success) {
-                                console.log(`✅ [Z-API] Mensagem enviada com sucesso usando número alternado ${alternatePhone}`);
-                                return {
-                                    success: true,
-                                    message: 'Mensagem enviada com sucesso via Z-API (número alternado)',
-                                };
-                            }
-                        } catch (retryError: any) {
-                            console.error(`❌ [Z-API] Também falhou com número alternado: ${retryError.message}`);
-                        }
-                    }
-                }
-
+            const primaryResult = await this.chatGuruService.sendMessageViaGupshup(formattedPhone, message);
+            if (primaryResult?.success) {
+                console.log(`✅ [GUPSHUP] Mensagem aceita para envio`);
                 return {
-                    success: false,
-                    error: serviceError.message || 'Erro ao enviar mensagem via Z-API',
+                    success: true,
+                    message: 'Mensagem enviada com sucesso via Gupshup',
                 };
             }
+
+            const primaryError = primaryResult?.error || 'Falha ao enviar mensagem via Gupshup';
+            console.warn(`⚠️ [GUPSHUP] Falha no envio principal: ${primaryError}`);
+
+            const alternatePhone = this.tryAlternatePhoneNumber(formattedPhone);
+            if (alternatePhone && alternatePhone !== formattedPhone) {
+                console.log(`🔄 [GUPSHUP] Tentando número alternado: ${alternatePhone}`);
+                const retryResult = await this.chatGuruService.sendMessageViaGupshup(alternatePhone, message);
+                if (retryResult?.success) {
+                    console.log(`✅ [GUPSHUP] Mensagem aceita com número alternado`);
+                    return {
+                        success: true,
+                        message: 'Mensagem enviada com sucesso via Gupshup (número alternado)',
+                    };
+                }
+                const retryError = retryResult?.error || 'Falha no número alternado';
+                console.warn(`⚠️ [GUPSHUP] Falha no número alternado: ${retryError}`);
+                return {
+                    success: false,
+                    error: retryError,
+                };
+            }
+
+            return {
+                success: false,
+                error: primaryError,
+            };
         } catch (error: unknown) {
-            console.error(`❌ [Z-API] Erro geral ao enviar mensagem via ChatGuru:`, error);
-            const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar mensagem via Z-API';
+            console.error(`❌ [GUPSHUP] Erro geral ao enviar mensagem:`, error);
+            const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar mensagem via Gupshup';
+            return {
+                success: false,
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
+     * Envia link de assinatura de contrato usando template aprovado na Gupshup.
+     * Esse fluxo evita depender da janela de 24h de mensagens livres.
+     */
+    async sendContractLinkTemplate(phone: string, signingUrl: string, contactName?: string): Promise<{ success: boolean; message?: string; error?: string }> {
+        try {
+            if (!phone) {
+                return {
+                    success: false,
+                    error: 'Telefone é obrigatório para envio do contrato',
+                };
+            }
+
+            if (!signingUrl) {
+                return {
+                    success: false,
+                    error: 'Link de assinatura é obrigatório',
+                };
+            }
+
+            const rawTemplateCandidates = Array.from(
+                new Set(
+                    [
+                        process.env.GUPSHUP_CONTRATO_TEMPLATE_ID,
+                        this.CONTRATO_TEMPLATE_ID_GUPSHUP,
+                        process.env.GUPSHUP_CONTRATO_TEMPLATE_ID_FACEBOOK,
+                        this.CONTRATO_TEMPLATE_ID_FACEBOOK,
+                        process.env.GUPSHUP_CONTRATO_TEMPLATE_NAME,
+                        this.CONTRATO_TEMPLATE_NAME_DEFAULT,
+                        this.CONTRATO_TEMPLATE_NAME,
+                    ]
+                        .map((item) => item?.trim())
+                        .filter((item): item is string => Boolean(item)),
+                ),
+            );
+
+            const uuidTemplates = rawTemplateCandidates.filter((candidate) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate));
+            const facebookIdTemplates = rawTemplateCandidates.filter((candidate) => /^\d+$/.test(candidate));
+            const namedTemplates = rawTemplateCandidates.filter(
+                (candidate) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidate) && !/^\d+$/.test(candidate),
+            );
+
+            // Ordem alinhada com os outros fluxos:
+            // 1) UUID da Gupshup, 2) ID numérico do Facebook, 3) nome do template.
+            const templateCandidates = [...uuidTemplates, ...facebookIdTemplates, ...namedTemplates];
+
+            if (templateCandidates.length === 0) {
+                return {
+                    success: false,
+                    error: 'Template de contrato não configurado. Defina GUPSHUP_CONTRATO_TEMPLATE_NAME (ou GUPSHUP_CONTRATO_TEMPLATE_ID).',
+                };
+            }
+
+            const nomeContato = contactName?.trim() || 'Cliente';
+
+            // Envio do contrato deve usar somente:
+            // {1} = nome, {2} = link da ZapSign.
+            const templateParams = [nomeContato, signingUrl];
+            let lastError = 'Falha ao enviar template de contrato';
+
+            for (const templateId of templateCandidates) {
+                const result = await this.sendTemplateMessage(phone, templateId, templateParams, nomeContato);
+                if (result.success) {
+                    const mensagemContrato = `Olá ${nomeContato}! 👋\n\nVocê recebeu um contrato para assinar.\n\nPor favor, clique no link abaixo para acessar e assinar:\n${signingUrl}\n\nObrigado! 📝`;
+                    try {
+                        await new Promise((resolve) => setTimeout(resolve, 1000));
+                        const redundancy = await this.sendMessage(phone, mensagemContrato, nomeContato);
+                        if (redundancy.success) {
+                            console.log(`✅ [GUPSHUP] Redundância de contrato enviada com sucesso`);
+                        } else {
+                            console.warn(`[GUPSHUP] Template de contrato aceito, mas redundância falhou: ${redundancy.error || 'erro desconhecido'}`);
+                        }
+                    } catch (redundancyError: unknown) {
+                        const redundancyMsg =
+                            redundancyError instanceof Error
+                                ? redundancyError.message
+                                : typeof redundancyError === 'object' && redundancyError !== null
+                                  ? JSON.stringify(redundancyError)
+                                  : typeof redundancyError === 'string'
+                                    ? redundancyError
+                                    : 'Erro desconhecido na redundância';
+                        console.warn(`[GUPSHUP] Template de contrato aceito, mas houve erro na redundância: ${redundancyMsg}`);
+                    }
+
+                    return {
+                        success: true,
+                        message: `Template de contrato enviado com sucesso via Gupshup (${templateId})`,
+                    };
+                }
+                lastError = result.error || lastError;
+                console.warn(`[GUPSHUP] Falha no template de contrato "${templateId}" com parâmetros [nome, link]: ${lastError}`);
+            }
+
+            return {
+                success: false,
+                error: lastError,
+            };
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Erro interno ao enviar template de contrato';
             return {
                 success: false,
                 error: errorMessage,

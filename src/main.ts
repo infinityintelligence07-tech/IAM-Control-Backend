@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import * as bodyParser from 'body-parser';
+import { RequestUserContextInterceptor } from './common/interceptors/request-user-context.interceptor';
 
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
@@ -35,6 +36,7 @@ async function bootstrap() {
             transform: true,
         }),
     );
+    app.useGlobalInterceptors(new RequestUserContextInterceptor());
 
     const port = process.env.PORT || 3000;
     await app.listen(port);

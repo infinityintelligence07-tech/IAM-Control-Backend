@@ -264,7 +264,7 @@ export class TermTemplateService {
     <div class="page">
         <!-- Header -->
         <div class="header">
-            <img src="${logoUrl}" alt="Instituto Academy Mind" style="max-width: 180px; max-height: 40px; object-fit: contain;" onerror="this.style.display='none';">
+            <img src="${logoUrl}" alt="IAM Treinamentos" style="max-width: 180px; max-height: 40px; object-fit: contain;" onerror="this.style.display='none';">
         </div>
         
         <!-- Título -->

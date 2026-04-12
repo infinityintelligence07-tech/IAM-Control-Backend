@@ -38,6 +38,7 @@ export class PostgresSQLProvider {
             migrationsRun: true,
             migrationsTransactionMode: 'each', // cada migration em sua própria transação (evita erro 55P04 com enum no PostgreSQL)
             entities: [path.join(__dirname, '../entities/*.entity{.ts,.js}')],
+            subscribers: [path.join(__dirname, '../subscribers/*{.ts,.js}')],
             migrations: [path.join(__dirname, '../migrations/*{.ts,.js}')],
         });
 
@@ -73,6 +74,7 @@ export const ds = new DataSource({
     migrationsRun: true,
     migrationsTransactionMode: 'each', // cada migration em sua própria transação (evita erro 55P04 com enum no PostgreSQL)
     entities: [path.join(__dirname, '../entities/*.entity{.ts,.js}')],
+    subscribers: [path.join(__dirname, '../subscribers/*{.ts,.js}')],
     migrations: [path.join(__dirname, '../migrations/*{.ts,.js}')],
 });
 

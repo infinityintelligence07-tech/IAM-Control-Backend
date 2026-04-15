@@ -773,7 +773,7 @@ export class UploadService {
             throw new BadRequestException('Formato inválido. Envie um arquivo .xls ou .xlsx');
         }
 
-        const rows = this.parseXlsxRows(file.buffer);
+        const rows = this.parseMasterclassXlsxRows(file.buffer);
         const parsedRows = this.parseMasterclassSpreadsheetRows(rows);
         const turmaCodigoMap = await this.buildTurmaCodigoMap();
         const turmaConfrontoMap = await this.buildTurmaConfrontoMap();
@@ -784,7 +784,7 @@ export class UploadService {
         let totalCriadas = 0;
         let totalAtualizadas = 0;
         let totalSemTurma = 0;
-        const occurrenceByPessoa = new Map<string, number>();
+        const inscricoesGeradasPorPessoa = new Map<string, number>();
 
         const candidates: Array<{
             linha: number;
@@ -859,11 +859,8 @@ export class UploadService {
             }
 
             const codigoDestino = this.normalizeCodeKey(row.turmaDestinoCodigo);
-            // Detectar se esta linha é repetição de mesmo nome+origem (bônus por duplicação)
             const dedupeKey = `${nomeNormalizado}|${codigoOrigem}|${codigoDestino}`;
-            const prevOccurrence = occurrenceByPessoa.get(dedupeKey) || 0;
-            occurrenceByPessoa.set(dedupeKey, prevOccurrence + 1);
-            const isLinhaRepetida = prevOccurrence > 0;
+            const inscricoesJaGeradas = inscricoesGeradasPorPessoa.get(dedupeKey) || 0;
 
             const quantidadeInscricoes = Math.max(1, row.quantidadeInscricoes || 1);
             const quantidadeBonusExtraPorPessoa = Math.max(0, row.quantidadeBonusTurma || 0);
@@ -875,8 +872,7 @@ export class UploadService {
                     avisos.push(
                         `Linha ${row.linha}: treinamento de destino é Confronto. Quantidade de bônus (${quantidadeBonusExtraPorPessoa}) será ignorada e as inscrições extras serão importadas como principais.`,
                     );
-                } else
-                if (!turmaBonusCodigoFinal) {
+                } else if (!turmaBonusCodigoFinal) {
                     avisos.push(
                         `Linha ${row.linha}: quantidade de bônus (${quantidadeBonusExtraPorPessoa}) informada sem "BÔNUS PARA QUAL TURMA?". Bônus extra ignorado.`,
                     );
@@ -897,35 +893,15 @@ export class UploadService {
                 }
             }
 
-            // Total de candidatos a gerar: inscrições da coluna + se for repetida, a própria linha é bônus
-            const startIndex = isLinhaRepetida ? 0 : 0;
-            const totalSlots = isLinhaRepetida ? quantidadeInscricoes : quantidadeInscricoes;
-            // Offset global para numerar bônus: acumulado de ocorrências anteriores
-            const globalBonusOffset = isLinhaRepetida ? prevOccurrence * Math.max(1, quantidadeInscricoes) : 0;
+            const statusImportacao = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
+            const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
 
-            for (let i = startIndex; i < totalSlots; i++) {
-                const globalIndex = globalBonusOffset + i;
-                const isInscricaoAdicional = globalIndex > 0;
-                const isBonus = isTurmaDestinoConfronto ? false : isLinhaRepetida || i > 0;
-                const nomeCracha =
-                    isTurmaDestinoConfronto && isInscricaoAdicional
-                        ? `${row.nome.trim()} insc ${globalIndex + 1}`
-                        : globalIndex === 0
-                          ? row.nome.trim()
-                          : `${row.nome.trim()} ${globalIndex + 1}`;
-                const origemFinal = isBonus ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO;
-                const emailCandidato =
-                    isTurmaDestinoConfronto && isInscricaoAdicional
-                        ? this.buildInscricaoEmailFromBase(emailNormalizado, globalIndex + 1)
-                        : isBonus
-                          ? this.buildBonusEmailFromBase(emailNormalizado, globalIndex)
-                          : emailNormalizado;
-                const quantidadeBonusRegraAtual = isTurmaDestinoConfronto
-                    ? 0
-                    : Math.max(0, quantidadeInscricoes - 1) + (isLinhaRepetida ? quantidadeInscricoes : 0);
-                const quantidadeBonusTotalLinha = quantidadeBonusRegraAtual + quantidadeBonusExtraPorPessoa;
-                const statusImportacao = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
-                const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
+            // Regra nova: todas as inscrições vão para a turma de destino.
+            for (let i = 0; i < quantidadeInscricoes; i++) {
+                const numeroInscricao = inscricoesJaGeradas + i + 1;
+                const isPrimeiraInscricao = numeroInscricao === 1;
+                const nomeCracha = isPrimeiraInscricao ? row.nome.trim() : `${row.nome.trim()} insc ${numeroInscricao}`;
+                const emailCandidato = isPrimeiraInscricao ? emailNormalizado : this.buildInscricaoEmailFromBase(emailNormalizado, numeroInscricao);
 
                 candidates.push({
                     linha: row.linha,
@@ -934,62 +910,65 @@ export class UploadService {
                     cpfCnpj: row.cpfCnpj,
                     email: emailCandidato,
                     titularEmail: emailNormalizado,
-                    emailGeradoAutomaticamente,
+                    emailGeradoAutomaticamente: emailGeradoAutomaticamente || !isPrimeiraInscricao,
                     telefone: telefoneNormalizado,
                     turmaDestinoId,
                     turmaDestinoCodigo: row.turmaDestinoCodigo,
                     turmaOrigemCodigo: row.turmaOrigemCodigo,
                     turmaOrigemDescricao: origemVenda ? 'Time de Vendas IAM' : row.turmaOrigemCodigo,
                     dataInclusao: row.dataInclusao,
-                    quantidadeBonus: quantidadeBonusTotalLinha,
+                    quantidadeBonus: quantidadeBonusExtraPorPessoa,
                     quantidadeBonusExtraPorPessoa,
                     turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
                     isTimeDeVendas: origemVenda,
-                    isBonusEntry: isBonus,
+                    isBonusEntry: false,
                     isBonusExtraEntry: false,
                     modoConfronto: isTurmaDestinoConfronto,
                     statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
                     statusFinal: statusImportacao,
-                    origemFinal,
-                    idTurmaTransferenciaDe: isBonus ? null : idTurmaTransferenciaDe,
+                    origemFinal: EOrigemAlunos.COMPROU_INGRESSO,
+                    idTurmaTransferenciaDe,
                 });
+            }
 
-                if (isTurmaDestinoConfronto || !turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
-                    continue;
-                }
+            inscricoesGeradasPorPessoa.set(dedupeKey, inscricoesJaGeradas + quantidadeInscricoes);
 
-                for (let bonusExtraPos = 0; bonusExtraPos < quantidadeBonusExtraPorPessoa; bonusExtraPos++) {
-                    const numeradorExtra = globalIndex * quantidadeBonusExtraPorPessoa + bonusExtraPos + 1;
-                    const nomeCrachaBonusExtra = `${row.nome.trim()} ${numeradorExtra} ${row.turmaDestinoCodigo}`.trim();
-                    const emailBonusExtra = this.buildBonusEmailFromBaseWithEvent(emailCandidato, numeradorExtra, slugEvento);
+            // Regra nova: bônus da planilha gera vagas na turma de bônus.
+            if (isTurmaDestinoConfronto || !turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
+                continue;
+            }
 
-                    candidates.push({
-                        linha: row.linha,
-                        nomeOriginal: row.nome.trim(),
-                        nomeCracha: nomeCrachaBonusExtra,
-                        cpfCnpj: row.cpfCnpj,
-                        email: emailBonusExtra,
-                        titularEmail: emailCandidato,
-                        emailGeradoAutomaticamente: true,
-                        telefone: telefoneNormalizado,
-                        turmaDestinoId: turmaBonusId,
-                        turmaDestinoCodigo: turmaBonusCodigoFinal,
-                        turmaOrigemCodigo: row.turmaOrigemCodigo,
-                        turmaOrigemDescricao: `Bônus de ${row.turmaDestinoCodigo}`,
-                        dataInclusao: row.dataInclusao,
-                        quantidadeBonus: 0,
-                        quantidadeBonusExtraPorPessoa,
-                        turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
-                        isTimeDeVendas: origemVenda,
-                        isBonusEntry: true,
-                        isBonusExtraEntry: true,
-                        modoConfronto: false,
-                        statusPlanilha: `BONUS_EXTRA:${row.dataInclusao || '-'}`,
-                        statusFinal: statusImportacao,
-                        origemFinal: EOrigemAlunos.ALUNO_BONUS,
-                        idTurmaTransferenciaDe: null,
-                    });
-                }
+            for (let bonusExtraPos = 0; bonusExtraPos < quantidadeBonusExtraPorPessoa; bonusExtraPos++) {
+                const numeradorExtra = bonusExtraPos + 1;
+                const nomeCrachaBonusExtra = `${row.nome.trim()} bonus ${numeradorExtra} ${row.turmaDestinoCodigo}`.trim();
+                const emailBonusExtra = this.buildBonusEmailFromBaseWithEvent(emailNormalizado, numeradorExtra, slugEvento);
+
+                candidates.push({
+                    linha: row.linha,
+                    nomeOriginal: row.nome.trim(),
+                    nomeCracha: nomeCrachaBonusExtra,
+                    cpfCnpj: row.cpfCnpj,
+                    email: emailBonusExtra,
+                    titularEmail: emailNormalizado,
+                    emailGeradoAutomaticamente: true,
+                    telefone: telefoneNormalizado,
+                    turmaDestinoId: turmaBonusId,
+                    turmaDestinoCodigo: turmaBonusCodigoFinal,
+                    turmaOrigemCodigo: row.turmaOrigemCodigo,
+                    turmaOrigemDescricao: `Bônus de ${row.turmaDestinoCodigo}`,
+                    dataInclusao: row.dataInclusao,
+                    quantidadeBonus: 0,
+                    quantidadeBonusExtraPorPessoa,
+                    turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
+                    isTimeDeVendas: origemVenda,
+                    isBonusEntry: true,
+                    isBonusExtraEntry: true,
+                    modoConfronto: false,
+                    statusPlanilha: `BONUS_EXTRA:${row.dataInclusao || '-'}`,
+                    statusFinal: statusImportacao,
+                    origemFinal: EOrigemAlunos.ALUNO_BONUS,
+                    idTurmaTransferenciaDe: null,
+                });
             }
         }
 
@@ -1364,6 +1343,69 @@ export class UploadService {
 
         const worksheet = workbook.Sheets[abaSubirAluno];
         return XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+    }
+
+    private parseMasterclassXlsxRows(buffer: Buffer): any[][] {
+        const workbook = XLSX.read(buffer, {
+            type: 'buffer',
+            cellDates: true,
+            raw: false,
+        });
+
+        if (!workbook.SheetNames.length) {
+            throw new BadRequestException('Planilha sem abas');
+        }
+
+        const normalizeSheetName = (sheetName: string) => this.normalizeText(String(sheetName || '')).replace(/[\s./-]/g, '');
+
+        const hasMasterclassHeaders = (rows: any[][]): boolean => {
+            if (!rows.length) return false;
+            const header = (rows[0] || []).map((cell) => this.normalizeText(String(cell || '')));
+            const hasTurmaOrigem = header.some((h) => h.includes('TURMA ORIGEM'));
+            const hasTurmaDestino = header.some((h) => h.includes('TURMA DESTINO'));
+            const hasInscricoes = header.some((h) => h.includes('NUMERO DE INSCRICOES'));
+            return hasTurmaOrigem && hasTurmaDestino && hasInscricoes;
+        };
+
+        const getRowsFromSheet = (sheetName: string): any[][] => {
+            const sheet = workbook.Sheets[sheetName];
+            return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        };
+
+        // Seleção por estrutura (modelo de colunas), sem priorizar data/aba específica:
+        // 1) tenta primeiro abas de "subir aluno"/"iam control";
+        // 2) depois escolhe a aba com estrutura masterclass e mais linhas.
+        const candidateByName = workbook.SheetNames.find((sheetName) => {
+            const normalized = normalizeSheetName(sheetName);
+            return normalized.includes('SUBIRALUNO') || normalized.includes('SUBIR') || normalized.includes('IAMCONTROL');
+        });
+        if (candidateByName) {
+            const rows = getRowsFromSheet(candidateByName);
+            if (hasMasterclassHeaders(rows)) {
+                return rows;
+            }
+        }
+
+        // Fallback: escolhe a aba com cabeçalho masterclass e maior volume de dados.
+        let selectedRows: any[][] | null = null;
+        let selectedDataSize = -1;
+        for (const sheetName of workbook.SheetNames) {
+            const rows = getRowsFromSheet(sheetName);
+            if (!hasMasterclassHeaders(rows)) continue;
+
+            const dataSize = Math.max(0, rows.length - 1);
+            if (dataSize > selectedDataSize) {
+                selectedRows = rows;
+                selectedDataSize = dataSize;
+            }
+        }
+
+        if (selectedRows) {
+            return selectedRows;
+        }
+
+        // Último fallback: mantém comportamento legado.
+        return this.parseXlsxRows(buffer);
     }
 
     private parseMasterclassSpreadsheetRows(rows: any[][]): Array<{
@@ -2113,9 +2155,7 @@ export class UploadService {
 
         const map = new Map<number, boolean>();
         for (const turma of turmas) {
-            const nomeTreinamento = this.normalizeText(
-                `${turma.id_treinamento_fk?.sigla_treinamento || ''} ${turma.id_treinamento_fk?.treinamento || ''}`,
-            );
+            const nomeTreinamento = this.normalizeText(`${turma.id_treinamento_fk?.sigla_treinamento || ''} ${turma.id_treinamento_fk?.treinamento || ''}`);
             map.set(turma.id, nomeTreinamento.includes('CONFRONTO'));
         }
         return map;

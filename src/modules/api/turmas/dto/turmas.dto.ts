@@ -692,6 +692,10 @@ export class AlunosDisponiveisResponseDto {
 export class TurmaStatusResumoResponseDto {
     id_turma: number;
     inscritos: number;
+    origem_masterclass: number;
+    origem_bonus: number;
+    origem_time_vendas: number;
+    origem_transferencia: number;
     transferidos: number;
     transferidos_dessa_turma_para_outra: number;
     transferidos_de_outra_turma_para_essa: number;

@@ -2333,6 +2333,57 @@ export class TurmasService {
             where: { id_turma, deletado_em: null },
         });
 
+        const alunosOrigemRaw = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoin(
+                'historico_transferencias_alunos',
+                'hta',
+                'hta.id_turma_aluno_para = ta.id AND hta.id_turma_para = :id_turma AND hta.deletado_em IS NULL',
+                { id_turma },
+            )
+            .select('ta.id', 'id_turma_aluno')
+            .addSelect('ta.origem_aluno', 'origem_aluno')
+            .addSelect('ta.vaga_bonus', 'vaga_bonus')
+            .addSelect('MAX(hta.id_turma_de)', 'id_turma_de_historico')
+            .where('ta.id_turma = :id_turma', { id_turma })
+            .andWhere('ta.deletado_em IS NULL')
+            .groupBy('ta.id')
+            .addGroupBy('ta.origem_aluno')
+            .addGroupBy('ta.vaga_bonus')
+            .getRawMany();
+
+        let origemMasterclass = 0;
+        let origemBonus = 0;
+        let origemTimeVendas = 0;
+        let origemTransferencia = 0;
+
+        for (const alunoOrigem of alunosOrigemRaw) {
+            const origemAluno = String(alunoOrigem.origem_aluno || '').toUpperCase();
+            const vagaBonus = Boolean(alunoOrigem.vaga_bonus);
+            const idTurmaDeHistorico = alunoOrigem.id_turma_de_historico
+                ? Number(alunoOrigem.id_turma_de_historico)
+                : null;
+
+            if (vagaBonus || origemAluno === EOrigemAlunos.ALUNO_BONUS) {
+                origemBonus += 1;
+                continue;
+            }
+
+            if (origemAluno === EOrigemAlunos.TRANSFERENCIA) {
+                origemTransferencia += 1;
+                continue;
+            }
+
+            if (idTurmaDeHistorico === id_turma) {
+                origemTimeVendas += 1;
+                continue;
+            }
+
+            if (idTurmaDeHistorico !== null && idTurmaDeHistorico !== id_turma) {
+                origemMasterclass += 1;
+            }
+        }
+
         const transferidosDessaTurmaParaOutra = await this.uow.historicoTransferenciasRP.count({
             where: {
                 id_turma_de: id_turma,
@@ -2358,6 +2409,10 @@ export class TurmasService {
         return {
             id_turma,
             inscritos,
+            origem_masterclass: origemMasterclass,
+            origem_bonus: origemBonus,
+            origem_time_vendas: origemTimeVendas,
+            origem_transferencia: origemTransferencia,
             transferidos: transferidosDessaTurmaParaOutra + transferidosDeOutraTurmaParaEssa,
             transferidos_dessa_turma_para_outra: transferidosDessaTurmaParaOutra,
             transferidos_de_outra_turma_para_essa: transferidosDeOutraTurmaParaEssa,
@@ -2410,6 +2465,54 @@ export class TurmasService {
         switch (tipo) {
             case 'inscritos':
                 titulo = 'Inscritos';
+                break;
+            case 'origem_masterclass':
+                titulo = 'Origem: Masterclass';
+                qb.andWhere('ta.vaga_bonus = false');
+                qb.andWhere('ta.origem_aluno <> :origemTransferencia', {
+                    origemTransferencia: EOrigemAlunos.TRANSFERENCIA,
+                });
+                qb.andWhere(
+                    `EXISTS (
+                        SELECT 1
+                        FROM historico_transferencias_alunos hta
+                        WHERE hta.id_turma_aluno_para = ta.id
+                          AND hta.id_turma_para = :id_turma
+                          AND hta.id_turma_de <> :id_turma
+                          AND hta.deletado_em IS NULL
+                    )`,
+                    { id_turma },
+                );
+                break;
+            case 'origem_bonus':
+                titulo = 'Origem: Bônus';
+                qb.andWhere('(ta.vaga_bonus = true OR ta.origem_aluno = :origemBonus)', {
+                    origemBonus: EOrigemAlunos.ALUNO_BONUS,
+                });
+                break;
+            case 'origem_time_vendas':
+                titulo = 'Origem: Time de vendas';
+                qb.andWhere('ta.vaga_bonus = false');
+                qb.andWhere('ta.origem_aluno <> :origemTransferencia', {
+                    origemTransferencia: EOrigemAlunos.TRANSFERENCIA,
+                });
+                qb.andWhere(
+                    `EXISTS (
+                        SELECT 1
+                        FROM historico_transferencias_alunos hta
+                        WHERE hta.id_turma_aluno_para = ta.id
+                          AND hta.id_turma_para = :id_turma
+                          AND hta.id_turma_de = :id_turma
+                          AND hta.deletado_em IS NULL
+                    )`,
+                    { id_turma },
+                );
+                break;
+            case 'origem_transferencia':
+                titulo = 'Origem: Transferência';
+                qb.andWhere('ta.origem_aluno = :origemTransferencia', {
+                    origemTransferencia: EOrigemAlunos.TRANSFERENCIA,
+                });
                 break;
             case 'transferidos':
                 titulo = 'Transferidos';

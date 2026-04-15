@@ -32,6 +32,7 @@ interface ImportPreviewItem {
     data_inclusao?: string;
     turma_bonus_codigo?: string;
     tipo_linha?: 'PRINCIPAL' | 'BONUS_INSCRICAO' | 'BONUS_EXTRA';
+    '+ Inscrições Confronto'?: boolean;
     status_planilha: string;
     status_final: EStatusAlunosTurmas;
     origem_final: EOrigemAlunos;
@@ -775,6 +776,7 @@ export class UploadService {
         const rows = this.parseXlsxRows(file.buffer);
         const parsedRows = this.parseMasterclassSpreadsheetRows(rows);
         const turmaCodigoMap = await this.buildTurmaCodigoMap();
+        const turmaConfrontoMap = await this.buildTurmaConfrontoMap();
 
         const erros: string[] = [];
         const avisos: string[] = [];
@@ -804,6 +806,7 @@ export class UploadService {
             isTimeDeVendas: boolean;
             isBonusEntry: boolean;
             isBonusExtraEntry: boolean;
+            modoConfronto: boolean;
             statusPlanilha: string;
             statusFinal: EStatusAlunosTurmas;
             origemFinal: EOrigemAlunos;
@@ -846,6 +849,7 @@ export class UploadService {
                 erros.push(`Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" não encontrada`);
                 continue;
             }
+            const isTurmaDestinoConfronto = turmaConfrontoMap.get(turmaDestinoId) === true;
 
             const codigoOrigem = this.normalizeCodeKey(row.turmaOrigemCodigo);
             const origemVenda = codigoOrigem.includes('TIME_DE_VENDAS') || codigoOrigem.includes('TIMEDEVENDAS');
@@ -867,6 +871,11 @@ export class UploadService {
             let turmaBonusCodigoFinal = row.turmaBonusCodigo || '';
 
             if (quantidadeBonusExtraPorPessoa > 0) {
+                if (isTurmaDestinoConfronto) {
+                    avisos.push(
+                        `Linha ${row.linha}: treinamento de destino é Confronto. Quantidade de bônus (${quantidadeBonusExtraPorPessoa}) será ignorada e as inscrições extras serão importadas como principais.`,
+                    );
+                } else
                 if (!turmaBonusCodigoFinal) {
                     avisos.push(
                         `Linha ${row.linha}: quantidade de bônus (${quantidadeBonusExtraPorPessoa}) informada sem "BÔNUS PARA QUAL TURMA?". Bônus extra ignorado.`,
@@ -896,11 +905,24 @@ export class UploadService {
 
             for (let i = startIndex; i < totalSlots; i++) {
                 const globalIndex = globalBonusOffset + i;
-                const isBonus = isLinhaRepetida || i > 0;
-                const nomeCracha = globalIndex === 0 ? row.nome.trim() : `${row.nome.trim()} ${globalIndex + 1}`;
+                const isInscricaoAdicional = globalIndex > 0;
+                const isBonus = isTurmaDestinoConfronto ? false : isLinhaRepetida || i > 0;
+                const nomeCracha =
+                    isTurmaDestinoConfronto && isInscricaoAdicional
+                        ? `${row.nome.trim()} insc ${globalIndex + 1}`
+                        : globalIndex === 0
+                          ? row.nome.trim()
+                          : `${row.nome.trim()} ${globalIndex + 1}`;
                 const origemFinal = isBonus ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO;
-                const emailCandidato = isBonus ? this.buildBonusEmailFromBase(emailNormalizado, globalIndex) : emailNormalizado;
-                const quantidadeBonusRegraAtual = Math.max(0, quantidadeInscricoes - 1) + (isLinhaRepetida ? quantidadeInscricoes : 0);
+                const emailCandidato =
+                    isTurmaDestinoConfronto && isInscricaoAdicional
+                        ? this.buildInscricaoEmailFromBase(emailNormalizado, globalIndex + 1)
+                        : isBonus
+                          ? this.buildBonusEmailFromBase(emailNormalizado, globalIndex)
+                          : emailNormalizado;
+                const quantidadeBonusRegraAtual = isTurmaDestinoConfronto
+                    ? 0
+                    : Math.max(0, quantidadeInscricoes - 1) + (isLinhaRepetida ? quantidadeInscricoes : 0);
                 const quantidadeBonusTotalLinha = quantidadeBonusRegraAtual + quantidadeBonusExtraPorPessoa;
                 const statusImportacao = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
                 const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
@@ -925,13 +947,14 @@ export class UploadService {
                     isTimeDeVendas: origemVenda,
                     isBonusEntry: isBonus,
                     isBonusExtraEntry: false,
+                    modoConfronto: isTurmaDestinoConfronto,
                     statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
                     statusFinal: statusImportacao,
                     origemFinal,
                     idTurmaTransferenciaDe: isBonus ? null : idTurmaTransferenciaDe,
                 });
 
-                if (!turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
+                if (isTurmaDestinoConfronto || !turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
                     continue;
                 }
 
@@ -960,6 +983,7 @@ export class UploadService {
                         isTimeDeVendas: origemVenda,
                         isBonusEntry: true,
                         isBonusExtraEntry: true,
+                        modoConfronto: false,
                         statusPlanilha: `BONUS_EXTRA:${row.dataInclusao || '-'}`,
                         statusFinal: statusImportacao,
                         origemFinal: EOrigemAlunos.ALUNO_BONUS,
@@ -1126,6 +1150,7 @@ export class UploadService {
                         data_inclusao: item.dataInclusao,
                         turma_bonus_codigo: item.turmaBonusCodigo,
                         tipo_linha: item.isBonusExtraEntry ? 'BONUS_EXTRA' : item.isBonusEntry ? 'BONUS_INSCRICAO' : 'PRINCIPAL',
+                        '+ Inscrições Confronto': item.modoConfronto,
                         status_planilha: item.statusPlanilha,
                         status_final: item.statusFinal,
                         origem_final: item.origemFinal,
@@ -1153,6 +1178,7 @@ export class UploadService {
                         data_inclusao: item.dataInclusao,
                         turma_bonus_codigo: item.turmaBonusCodigo,
                         tipo_linha: item.isBonusExtraEntry ? 'BONUS_EXTRA' : item.isBonusEntry ? 'BONUS_INSCRICAO' : 'PRINCIPAL',
+                        '+ Inscrições Confronto': item.modoConfronto,
                         status_planilha: item.statusPlanilha,
                         status_final: item.statusFinal,
                         origem_final: item.origemFinal,
@@ -1210,6 +1236,7 @@ export class UploadService {
                     data_inclusao: item.dataInclusao,
                     turma_bonus_codigo: item.turmaBonusCodigo,
                     tipo_linha: item.isBonusExtraEntry ? 'BONUS_EXTRA' : item.isBonusEntry ? 'BONUS_INSCRICAO' : 'PRINCIPAL',
+                    '+ Inscrições Confronto': item.modoConfronto,
                     status_planilha: item.statusPlanilha,
                     status_final: item.statusFinal,
                     origem_final: item.origemFinal,
@@ -1888,6 +1915,17 @@ export class UploadService {
         return `${local}+bonus${bonusIndex}-${safeEvento}@${domain}`;
     }
 
+    private buildInscricaoEmailFromBase(email: string, numeroInscricao: number): string {
+        const normalized = (email || '').trim().toLowerCase();
+        const atIndex = normalized.indexOf('@');
+        if (atIndex <= 0) {
+            return `${normalized}+insc${numeroInscricao}@sememail.com`;
+        }
+        const local = normalized.slice(0, atIndex);
+        const domain = normalized.slice(atIndex + 1);
+        return `${local}+insc${numeroInscricao}@${domain}`;
+    }
+
     private async resolveTurmaIdByCodigo(params: { codigoRaw: string; turmaCodigoMap: Map<string, number> }): Promise<{
         turmaId: number | null;
         matchType: 'codigo' | 'edicao' | 'ambigua' | 'nao_encontrada';
@@ -2064,6 +2102,22 @@ export class UploadService {
             map.set(codigo, turma.id);
         }
 
+        return map;
+    }
+
+    private async buildTurmaConfrontoMap(): Promise<Map<number, boolean>> {
+        const turmas = await this.uow.turmasRP.find({
+            where: { deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+
+        const map = new Map<number, boolean>();
+        for (const turma of turmas) {
+            const nomeTreinamento = this.normalizeText(
+                `${turma.id_treinamento_fk?.sigla_treinamento || ''} ${turma.id_treinamento_fk?.treinamento || ''}`,
+            );
+            map.set(turma.id, nomeTreinamento.includes('CONFRONTO'));
+        }
         return map;
     }
 

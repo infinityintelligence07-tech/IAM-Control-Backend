@@ -60,6 +60,13 @@ export class TurmasService {
         return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas);
     }
 
+    private isTurmaBloqueadaParaTransferencia(turma: any): boolean {
+        const edicao = String(turma?.edicao_turma ?? '')
+            .trim()
+            .toUpperCase();
+        return ['SEM_TURMA', 'INADIMPLENTE', 'JURIDICA', 'CANCELADA'].includes(edicao);
+    }
+
     private hasValue(value: unknown): boolean {
         if (value === null || value === undefined) return false;
         if (typeof value !== 'string') return true;
@@ -1831,8 +1838,8 @@ export class TurmasService {
     }
 
     /**
-     * Opções de transferência para um aluno na turma: apenas treinamentos (não palestras).
-     * Retorna: edição mais próxima por data e próxima edição no mesmo polo.
+     * Opções de transferência para um aluno na turma de origem.
+     * Retorna sugestões do mesmo treinamento: edição mais próxima por data e próxima edição no mesmo polo.
      */
     async getOpcoesTransferencia(id_turma_aluno: string): Promise<OpcoesTransferenciaResponseDto> {
         const turmaAluno = await this.uow.turmasAlunosRP.findOne({
@@ -1860,7 +1867,9 @@ export class TurmasService {
             relations: ['id_treinamento_fk', 'id_polo_fk'],
             order: { data_inicio: 'ASC' },
         });
-        const turmasTreinamento = outrasTurmas.filter((t) => t.id_treinamento_fk?.tipo_palestra !== true);
+        const turmasTreinamento = outrasTurmas.filter(
+            (t) => t.id_treinamento_fk?.tipo_palestra !== true && !this.isTurmaBloqueadaParaTransferencia(t),
+        );
 
         const comDataFutura = turmasTreinamento.filter((t) => (t.data_inicio ?? '') >= hoje);
         const edicaoMaisProximaData = comDataFutura[0] ?? null;
@@ -1890,7 +1899,7 @@ export class TurmasService {
     }
 
     /**
-     * Transfere o aluno para outra turma (mesmo treinamento, outra edição).
+     * Transfere o aluno para outra turma (inclusive de outro treinamento, exceto palestras).
      * Remove o vínculo ativo da turma de origem (soft delete), mantendo lastro no histórico de transferências.
      */
     async transferirAluno(id_turma_aluno: string, id_turma_destino: number): Promise<AlunoTurmaResponseDto> {
@@ -1930,11 +1939,11 @@ export class TurmasService {
             relations: ['id_treinamento_fk', 'id_polo_fk'],
         });
         if (!turmaDestino) throw new NotFoundException('Turma de destino não encontrada');
-        if (turmaDestino.id_treinamento !== turmaOrigem.id_treinamento) {
-            throw new BadRequestException('Só é possível transferir para outra edição do mesmo treinamento');
-        }
         if (turmaDestino.id_treinamento_fk?.tipo_palestra === true) {
             throw new BadRequestException('Turma de destino não pode ser palestra');
+        }
+        if (this.isTurmaBloqueadaParaTransferencia(turmaDestino)) {
+            throw new BadRequestException('Não é possível transferir para turmas SEM_TURMA, INADIMPLENTE, JURIDICA ou CANCELADA');
         }
         if (turmaDestino.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
             throw new BadRequestException('Não é possível transferir para turma com inscrições pausadas');
@@ -2064,112 +2073,229 @@ export class TurmasService {
         return { data };
     }
 
+    private async softDeleteAlunoTurmaCascade(id_turma_aluno: string, turmaAluno?: any): Promise<void> {
+        const matricula = turmaAluno
+            ? turmaAluno
+            : await this.uow.turmasAlunosRP.findOne({
+                  where: { id: id_turma_aluno },
+              });
+
+        if (!matricula) {
+            throw new NotFoundException('Aluno não encontrado na turma');
+        }
+
+        // First, find all related turmas_alunos_treinamentos records
+        const turmasAlunosTreinamentos = await this.uow.turmasAlunosTreinamentosRP.find({
+            where: {
+                id_turma_aluno: id_turma_aluno,
+                deletado_em: null,
+            },
+        });
+
+        // Soft delete all related turmas_alunos_treinamentos_contratos records
+        for (const turmaAlunoTreinamento of turmasAlunosTreinamentos) {
+            const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+                where: {
+                    id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                    deletado_em: null,
+                },
+            });
+
+            for (const contrato of contratos) {
+                contrato.deletado_em = new Date();
+                await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+            }
+        }
+
+        // Soft delete all related turmas_alunos_treinamentos records
+        for (const turmaAlunoTreinamento of turmasAlunosTreinamentos) {
+            turmaAlunoTreinamento.deletado_em = new Date();
+            await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
+        }
+
+        // Soft delete all related turmas_alunos_produtos records
+        const produtos = await this.uow.turmasAlunosProdutosRP.find({
+            where: {
+                id_turma_aluno: id_turma_aluno,
+                deletado_em: null,
+            },
+        });
+
+        for (const produto of produtos) {
+            produto.deletado_em = new Date();
+            await this.uow.turmasAlunosProdutosRP.save(produto);
+        }
+
+        // Soft delete all related turmas_alunos_treinamentos_bonus records
+        const bonuses = await this.uow.turmasAlunosTreinamentosBonusRP.find({
+            where: {
+                id_turma_aluno: id_turma_aluno,
+                deletado_em: null,
+            },
+        });
+
+        for (const bonus of bonuses) {
+            bonus.deletado_em = new Date();
+            await this.uow.turmasAlunosTreinamentosBonusRP.save(bonus);
+        }
+
+        // Ao remover uma matrícula, manter o histórico de transferência para fins de auditoria.
+        // Apenas limpamos referências diretas em matrículas ativas relacionadas.
+        const historicosTransferencia = await this.uow.historicoTransferenciasRP.find({
+            where: [
+                { id_turma_aluno_de: id_turma_aluno, deletado_em: null },
+                { id_turma_aluno_para: id_turma_aluno, deletado_em: null },
+            ],
+        });
+
+        for (const historico of historicosTransferencia) {
+            // Limpa referência "transferência para" na matrícula de origem, se existir e estiver ativa.
+            if (historico.id_turma_aluno_de && historico.id_turma_aluno_de !== id_turma_aluno) {
+                const matriculaOrigem = await this.uow.turmasAlunosRP.findOne({
+                    where: { id: historico.id_turma_aluno_de, deletado_em: null },
+                });
+                if (matriculaOrigem) {
+                    matriculaOrigem.id_turma_transferencia_para = null;
+                    await this.uow.turmasAlunosRP.save(matriculaOrigem);
+                }
+            }
+
+            // Limpa referência "transferência de" na matrícula de destino, se existir e estiver ativa.
+            if (historico.id_turma_aluno_para && historico.id_turma_aluno_para !== id_turma_aluno) {
+                const matriculaDestino = await this.uow.turmasAlunosRP.findOne({
+                    where: { id: historico.id_turma_aluno_para, deletado_em: null },
+                });
+                if (matriculaDestino) {
+                    matriculaDestino.id_turma_transferencia_de = null;
+                    await this.uow.turmasAlunosRP.save(matriculaDestino);
+                }
+            }
+        }
+
+        // Finally, soft delete the turmas_alunos record
+        matricula.deletado_em = new Date();
+        await this.uow.turmasAlunosRP.save(matricula);
+    }
+
+    private async transferirCancelamentoParaTurmaCancelada(turmaAlunoOrigem: any, turmaCancelada: any): Promise<string> {
+        const turmaOrigem = turmaAlunoOrigem.id_turma_fk;
+        if (!turmaOrigem) {
+            throw new NotFoundException('Turma de origem não encontrada');
+        }
+
+        const idTurmaOrigemHistorica = turmaAlunoOrigem.id_turma_transferencia_de ?? turmaOrigem.id;
+        const existenteNaCancelada = await this.uow.turmasAlunosRP.findOne({
+            where: {
+                id_turma: turmaCancelada.id,
+                id_aluno: turmaAlunoOrigem.id_aluno,
+                deletado_em: null,
+            },
+        });
+
+        let matriculaDestino = existenteNaCancelada;
+        if (!matriculaDestino) {
+            const numeroCracha = await this.generateUniqueCrachaNumber(turmaCancelada.id);
+            matriculaDestino = this.uow.turmasAlunosRP.create({
+                id_turma: turmaCancelada.id,
+                id_aluno: turmaAlunoOrigem.id_aluno,
+                id_aluno_bonus: turmaAlunoOrigem.id_aluno_bonus,
+                nome_cracha: turmaAlunoOrigem.nome_cracha,
+                numero_cracha: numeroCracha,
+                vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
+                origem_aluno: turmaAlunoOrigem.origem_aluno,
+                status_aluno_turma: EStatusAlunosTurmas.CANCELADO,
+                presenca_turma: null,
+                pendencia_pagamento: turmaAlunoOrigem.pendencia_pagamento,
+                contrato_duplo: turmaAlunoOrigem.contrato_duplo,
+                comprovante_pagamento_base64: turmaAlunoOrigem.comprovante_pagamento_base64,
+                url_comprovante_pgto: turmaAlunoOrigem.url_comprovante_pgto,
+                id_turma_transferencia_de: idTurmaOrigemHistorica,
+            });
+        } else {
+            matriculaDestino.status_aluno_turma = EStatusAlunosTurmas.CANCELADO;
+            matriculaDestino.presenca_turma = null;
+            matriculaDestino.id_turma_transferencia_de = matriculaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
+        }
+        matriculaDestino = await this.uow.turmasAlunosRP.save(matriculaDestino);
+
+        // Reaponta registros relacionados para a matrícula da turma CANCELADA,
+        // preservando contratos e vínculos de bônus.
+        const turmasAlunosTreinamentos = await this.uow.turmasAlunosTreinamentosRP.find({
+            where: {
+                id_turma_aluno: turmaAlunoOrigem.id,
+                deletado_em: null,
+            },
+        });
+        for (const item of turmasAlunosTreinamentos) {
+            item.id_turma_aluno = matriculaDestino.id;
+            await this.uow.turmasAlunosTreinamentosRP.save(item);
+        }
+
+        const produtos = await this.uow.turmasAlunosProdutosRP.find({
+            where: {
+                id_turma_aluno: turmaAlunoOrigem.id,
+                deletado_em: null,
+            },
+        });
+        for (const item of produtos) {
+            item.id_turma_aluno = matriculaDestino.id;
+            await this.uow.turmasAlunosProdutosRP.save(item);
+        }
+
+        const bonuses = await this.uow.turmasAlunosTreinamentosBonusRP.find({
+            where: {
+                id_turma_aluno: turmaAlunoOrigem.id,
+                deletado_em: null,
+            },
+        });
+        for (const item of bonuses) {
+            item.deletado_em = new Date();
+            await this.uow.turmasAlunosTreinamentosBonusRP.save(item);
+        }
+
+        const bonusesDestino = await this.uow.turmasAlunosTreinamentosBonusRP.find({
+            where: {
+                id_turma_aluno: matriculaDestino.id,
+                deletado_em: null,
+            },
+        });
+        for (const item of bonusesDestino) {
+            item.deletado_em = new Date();
+            await this.uow.turmasAlunosTreinamentosBonusRP.save(item);
+        }
+
+        const historico = this.uow.historicoTransferenciasRP.create({
+            id_aluno: Number(turmaAlunoOrigem.id_aluno),
+            id_turma_de: turmaOrigem.id,
+            id_turma_para: turmaCancelada.id,
+            id_turma_aluno_de: turmaAlunoOrigem.id,
+            id_turma_aluno_para: matriculaDestino.id,
+        });
+        await this.uow.historicoTransferenciasRP.save(historico);
+
+        turmaAlunoOrigem.id_turma_transferencia_para = turmaCancelada.id;
+        turmaAlunoOrigem.presenca_turma = null;
+        turmaAlunoOrigem.deletado_em = new Date();
+        await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
+        return String(matriculaDestino.id);
+    }
+
     async removeAlunoTurma(id_turma_aluno: string): Promise<void> {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id_turma_aluno },
+                relations: ['id_turma_fk'],
             });
 
             if (!turmaAluno) {
                 throw new NotFoundException('Aluno não encontrado na turma');
             }
 
-            // First, find all related turmas_alunos_treinamentos records
-            const turmasAlunosTreinamentos = await this.uow.turmasAlunosTreinamentosRP.find({
-                where: {
-                    id_turma_aluno: id_turma_aluno,
-                    deletado_em: null,
-                },
-            });
-
-            // Soft delete all related turmas_alunos_treinamentos_contratos records
-            for (const turmaAlunoTreinamento of turmasAlunosTreinamentos) {
-                const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
-                    where: {
-                        id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
-                        deletado_em: null,
-                    },
-                });
-
-                for (const contrato of contratos) {
-                    contrato.deletado_em = new Date();
-                    await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
-                }
-            }
-
-            // Soft delete all related turmas_alunos_treinamentos records
-            for (const turmaAlunoTreinamento of turmasAlunosTreinamentos) {
-                turmaAlunoTreinamento.deletado_em = new Date();
-                await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
-            }
-
-            // Soft delete all related turmas_alunos_produtos records
-            const produtos = await this.uow.turmasAlunosProdutosRP.find({
-                where: {
-                    id_turma_aluno: id_turma_aluno,
-                    deletado_em: null,
-                },
-            });
-
-            for (const produto of produtos) {
-                produto.deletado_em = new Date();
-                await this.uow.turmasAlunosProdutosRP.save(produto);
-            }
-
-            // Soft delete all related turmas_alunos_treinamentos_bonus records
-            const bonuses = await this.uow.turmasAlunosTreinamentosBonusRP.find({
-                where: {
-                    id_turma_aluno: id_turma_aluno,
-                    deletado_em: null,
-                },
-            });
-
-            for (const bonus of bonuses) {
-                bonus.deletado_em = new Date();
-                await this.uow.turmasAlunosTreinamentosBonusRP.save(bonus);
-            }
-
-            // Ao remover uma matrícula, manter o histórico de transferência para fins de auditoria.
-            // Apenas limpamos referências diretas em matrículas ativas relacionadas.
-            const historicosTransferencia = await this.uow.historicoTransferenciasRP.find({
-                where: [
-                    { id_turma_aluno_de: id_turma_aluno, deletado_em: null },
-                    { id_turma_aluno_para: id_turma_aluno, deletado_em: null },
-                ],
-            });
-
-            for (const historico of historicosTransferencia) {
-                // Limpa referência "transferência para" na matrícula de origem, se existir e estiver ativa.
-                if (historico.id_turma_aluno_de && historico.id_turma_aluno_de !== id_turma_aluno) {
-                    const matriculaOrigem = await this.uow.turmasAlunosRP.findOne({
-                        where: { id: historico.id_turma_aluno_de, deletado_em: null },
-                    });
-                    if (matriculaOrigem) {
-                        matriculaOrigem.id_turma_transferencia_para = null;
-                        await this.uow.turmasAlunosRP.save(matriculaOrigem);
-                    }
-                }
-
-                // Limpa referência "transferência de" na matrícula de destino, se existir e estiver ativa.
-                if (historico.id_turma_aluno_para && historico.id_turma_aluno_para !== id_turma_aluno) {
-                    const matriculaDestino = await this.uow.turmasAlunosRP.findOne({
-                        where: { id: historico.id_turma_aluno_para, deletado_em: null },
-                    });
-                    if (matriculaDestino) {
-                        matriculaDestino.id_turma_transferencia_de = null;
-                        await this.uow.turmasAlunosRP.save(matriculaDestino);
-                    }
-                }
-
-                // Mantém o histórico ativo (não remover da tabela de transferência).
-            }
-
-            // Finally, soft delete the turmas_alunos record
-            turmaAluno.deletado_em = new Date();
-            await this.uow.turmasAlunosRP.save(turmaAluno);
+            // Regra de remover: remove matrícula da turma e vínculos relacionados.
+            await this.softDeleteAlunoTurmaCascade(id_turma_aluno, turmaAluno);
         } catch (error) {
             console.error('Erro ao remover aluno da turma:', error);
-            if (error instanceof NotFoundException) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao remover aluno da turma');
@@ -2548,6 +2674,74 @@ export class TurmasService {
             }
             if (updateAlunoDto.atualizado_por !== undefined) {
                 turmaAluno.atualizado_por = updateAlunoDto.atualizado_por;
+            }
+
+            const solicitouCancelamento =
+                updateAlunoDto.status_aluno_turma === EStatusAlunosTurmas.CANCELADO &&
+                statusAnterior !== EStatusAlunosTurmas.CANCELADO;
+
+            if (solicitouCancelamento) {
+                const turmaOrigem = turmaAluno.id_turma_fk;
+                const edicaoOrigem = String(turmaOrigem?.edicao_turma ?? '')
+                    .trim()
+                    .toUpperCase();
+
+                if (turmaOrigem && edicaoOrigem !== 'CANCELADA') {
+                    const turmasMesmoTreinamento = await this.uow.turmasRP.find({
+                        where: {
+                            id_treinamento: turmaOrigem.id_treinamento,
+                            deletado_em: null,
+                        },
+                    });
+
+                    const turmaCancelada = turmasMesmoTreinamento.find(
+                        (turma) =>
+                            Number(turma.id) !== Number(turmaOrigem.id) &&
+                            String(turma.edicao_turma ?? '')
+                                .trim()
+                                .toUpperCase() === 'CANCELADA',
+                    );
+
+                    if (!turmaCancelada) {
+                        throw new BadRequestException(
+                            `Não foi encontrada turma com edição CANCELADA para o treinamento ${turmaOrigem.id_treinamento}. Crie essa turma antes de cancelar o aluno.`,
+                        );
+                    }
+
+                    const idMatriculaDestino = await this.transferirCancelamentoParaTurmaCancelada(
+                        turmaAluno,
+                        turmaCancelada,
+                    );
+                    const matriculaDestinoCompleta = await this.uow.turmasAlunosRP.findOne({
+                        where: { id: idMatriculaDestino },
+                        relations: ['id_aluno_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
+                    });
+
+                    return {
+                        id: matriculaDestinoCompleta.id,
+                        id_turma: matriculaDestinoCompleta.id_turma,
+                        id_aluno: matriculaDestinoCompleta.id_aluno,
+                        nome_cracha: matriculaDestinoCompleta.nome_cracha,
+                        numero_cracha: matriculaDestinoCompleta.numero_cracha,
+                        vaga_bonus: matriculaDestinoCompleta.vaga_bonus,
+                        status_aluno_turma: matriculaDestinoCompleta.status_aluno_turma,
+                        presenca_turma: matriculaDestinoCompleta.presenca_turma,
+                        url_comprovante_pgto: matriculaDestinoCompleta.url_comprovante_pgto,
+                        pendencia_pagamento: matriculaDestinoCompleta.pendencia_pagamento,
+                        contrato_duplo: matriculaDestinoCompleta.contrato_duplo,
+                        comprovante_pagamento_base64: matriculaDestinoCompleta.comprovante_pagamento_base64,
+                        created_at: matriculaDestinoCompleta.criado_em,
+                        transferencia_de_turma: this.mapTurmaToTransferenciaTag(matriculaDestinoCompleta.id_turma_transferencia_de_fk),
+                        aluno: matriculaDestinoCompleta.id_aluno_fk
+                            ? {
+                                  id: matriculaDestinoCompleta.id_aluno_fk.id,
+                                  nome: matriculaDestinoCompleta.id_aluno_fk.nome,
+                                  email: matriculaDestinoCompleta.id_aluno_fk.email,
+                                  nome_cracha: matriculaDestinoCompleta.id_aluno_fk.nome_cracha,
+                              }
+                            : undefined,
+                    };
+                }
             }
 
             console.log('Atualizando aluno turma com dados:', updateAlunoDto);

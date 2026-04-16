@@ -1,6 +1,6 @@
 import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { EStatusTurmas, EStatusAlunosTurmas } from '../../../config/entities/enum';
+import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos } from '../../../config/entities/enum';
 
 export class GetTurmasDto {
     @IsOptional()
@@ -462,6 +462,10 @@ export class UpdateAlunoTurmaDto {
     @IsOptional()
     @IsString()
     status_aluno_turma?: string;
+
+    @IsOptional()
+    @IsEnum(EOrigemAlunos)
+    origem_aluno?: EOrigemAlunos;
 
     @IsOptional()
     @IsString()

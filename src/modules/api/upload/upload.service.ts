@@ -868,11 +868,7 @@ export class UploadService {
             let turmaBonusCodigoFinal = row.turmaBonusCodigo || '';
 
             if (quantidadeBonusExtraPorPessoa > 0) {
-                if (isTurmaDestinoConfronto) {
-                    avisos.push(
-                        `Linha ${row.linha}: treinamento de destino é Confronto. Quantidade de bônus (${quantidadeBonusExtraPorPessoa}) será ignorada e as inscrições extras serão importadas como principais.`,
-                    );
-                } else if (!turmaBonusCodigoFinal) {
+                if (!turmaBonusCodigoFinal) {
                     avisos.push(
                         `Linha ${row.linha}: quantidade de bônus (${quantidadeBonusExtraPorPessoa}) informada sem "BÔNUS PARA QUAL TURMA?". Bônus extra ignorado.`,
                     );
@@ -934,7 +930,7 @@ export class UploadService {
             inscricoesGeradasPorPessoa.set(dedupeKey, inscricoesJaGeradas + quantidadeInscricoes);
 
             // Regra nova: bônus da planilha gera vagas na turma de bônus.
-            if (isTurmaDestinoConfronto || !turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
+            if (!turmaBonusId || quantidadeBonusExtraPorPessoa <= 0) {
                 continue;
             }
 

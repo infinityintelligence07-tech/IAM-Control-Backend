@@ -2768,6 +2768,10 @@ export class TurmasService {
             if (updateAlunoDto.status_aluno_turma !== undefined) {
                 turmaAluno.status_aluno_turma = updateAlunoDto.status_aluno_turma as EStatusAlunosTurmas;
             }
+            if (updateAlunoDto.origem_aluno !== undefined) {
+                turmaAluno.origem_aluno = updateAlunoDto.origem_aluno as EOrigemAlunos;
+                turmaAluno.vaga_bonus = updateAlunoDto.origem_aluno === EOrigemAlunos.ALUNO_BONUS;
+            }
             if (updateAlunoDto.presenca_turma !== undefined) {
                 const desmarcandoPresenca = turmaAluno.presenca_turma === EPresencaTurmas.PRESENTE && updateAlunoDto.presenca_turma === 'NO_SHOW';
                 if (desmarcandoPresenca) {
@@ -2827,6 +2831,7 @@ export class TurmasService {
                         nome_cracha: matriculaDestinoCompleta.nome_cracha,
                         numero_cracha: matriculaDestinoCompleta.numero_cracha,
                         vaga_bonus: matriculaDestinoCompleta.vaga_bonus,
+                        origem_aluno: matriculaDestinoCompleta.origem_aluno,
                         status_aluno_turma: matriculaDestinoCompleta.status_aluno_turma,
                         presenca_turma: matriculaDestinoCompleta.presenca_turma,
                         url_comprovante_pgto: matriculaDestinoCompleta.url_comprovante_pgto,
@@ -2870,6 +2875,9 @@ export class TurmasService {
                 nome_cracha: turmaAlunoAtualizada.nome_cracha,
                 numero_cracha: turmaAlunoAtualizada.numero_cracha,
                 vaga_bonus: turmaAlunoAtualizada.vaga_bonus,
+                origem_aluno: turmaAlunoAtualizada.origem_aluno,
+                status_aluno_turma: turmaAlunoAtualizada.status_aluno_turma,
+                presenca_turma: turmaAlunoAtualizada.presenca_turma,
                 pendencia_pagamento: turmaAlunoAtualizada.pendencia_pagamento,
                 contrato_duplo: turmaAlunoAtualizada.contrato_duplo,
                 comprovante_pagamento_base64: turmaAlunoAtualizada.comprovante_pagamento_base64,

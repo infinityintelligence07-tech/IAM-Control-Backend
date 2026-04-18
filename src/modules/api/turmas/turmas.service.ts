@@ -19,6 +19,8 @@ import {
     OpcoesTransferenciaResponseDto,
     HistoricoTransferenciaItemDto,
     HistoricoTransferenciasResponseDto,
+    UpdateTurmaTimesDto,
+    TurmaTimesResponseDto,
 } from './dto/turmas.dto';
 import { FindManyOptions, ILike, Not, In } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -292,6 +294,51 @@ export class TurmasService {
         }
     }
 
+    private async getTurmaPresencialParaTimes(id_turma: number): Promise<any> {
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        const treinamento = turma.id_treinamento_fk;
+        const isPalestra = treinamento?.tipo_palestra === true || treinamento?.tipo_treinamento === false;
+        const isOnline = treinamento?.tipo_online === true;
+
+        if (isPalestra || isOnline) {
+            throw new BadRequestException('Times só podem ser configurados para treinamentos presenciais');
+        }
+
+        return turma;
+    }
+
+    async getTimesTurma(id_turma: number): Promise<TurmaTimesResponseDto> {
+        const turma = await this.getTurmaPresencialParaTimes(id_turma);
+        return {
+            id_turma: turma.id,
+            times_equipes: turma.times_equipes || [],
+        };
+    }
+
+    async updateTimesTurma(id_turma: number, dto: UpdateTurmaTimesDto, atualizado_por?: number): Promise<TurmaTimesResponseDto> {
+        const turma = await this.getTurmaPresencialParaTimes(id_turma);
+        const payload = Array.isArray(dto?.times_equipes) ? dto.times_equipes : [];
+
+        turma.times_equipes = payload;
+        turma.atualizado_por = atualizado_por;
+        turma.atualizado_em = new Date();
+
+        await this.uow.turmasRP.save(turma);
+
+        return {
+            id_turma: turma.id,
+            times_equipes: turma.times_equipes || [],
+        };
+    }
+
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
         const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final } = filters;
 
@@ -478,6 +525,7 @@ export class TurmasService {
                     detalhamento_bonus: turma.detalhamento_bonus,
                     turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
                     turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+                    times_equipes: turma.times_equipes || [],
                     url_midia_kit: turma.url_midia_kit,
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
                     url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
@@ -500,6 +548,7 @@ export class TurmasService {
                               sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
                               treinamento: turma.id_treinamento_fk.treinamento,
                               url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
+                              tipo_online: turma.id_treinamento_fk.tipo_online,
                           }
                         : undefined,
                     lider: turma.lider_evento_fk
@@ -607,6 +656,7 @@ export class TurmasService {
                 detalhamento_bonus: turma.detalhamento_bonus,
                 turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
                 turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+                times_equipes: turma.times_equipes || [],
                 url_midia_kit: turma.url_midia_kit,
                 url_grupo_whatsapp: turma.url_grupo_whatsapp,
                 url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
@@ -629,6 +679,7 @@ export class TurmasService {
                           sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
                           treinamento: turma.id_treinamento_fk.treinamento,
                           url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
+                          tipo_online: turma.id_treinamento_fk.tipo_online,
                       }
                     : undefined,
                 lider: turma.lider_evento_fk
@@ -1328,6 +1379,7 @@ export class TurmasService {
                     detalhamento_bonus: turma.detalhamento_bonus,
                     turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
                     turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+                    times_equipes: turma.times_equipes || [],
                     url_midia_kit: turma.url_midia_kit,
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
                     url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
@@ -1347,6 +1399,7 @@ export class TurmasService {
                               id: turma.id_treinamento_fk.id,
                               nome: turma.id_treinamento_fk.treinamento,
                               tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
+                              tipo_online: turma.id_treinamento_fk.tipo_online,
                           }
                         : undefined,
                     lider: turma.lider_evento_fk
@@ -1669,7 +1722,9 @@ export class TurmasService {
                 presenca_turma: turmaAluno.presenca_turma,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 pendencia_pagamento: turmaAluno.pendencia_pagamento ?? undefined,
-                contrato_duplo: turmaAluno.contrato_duplo ?? undefined,
+                quantidade_inscricoes: turmaAluno.quantidade_inscricoes ?? 1,
+                outros_clientes: turmaAluno.outros_clientes ?? [],
+                contrato_duplo: (turmaAluno.quantidade_inscricoes ?? 1) > 1,
                 comprovante_pagamento_base64: turmaAluno.comprovante_pagamento_base64 ?? undefined,
                 created_at: turmaAluno.criado_em,
                 transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
@@ -1773,7 +1828,8 @@ export class TurmasService {
                 status_aluno_turma: (addAlunoDto.status_aluno_turma as EStatusAlunosTurmas) || EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                 ...(addAlunoDto.id_aluno_bonus && { id_aluno_bonus: addAlunoDto.id_aluno_bonus }),
                 ...(addAlunoDto.pendencia_pagamento !== undefined && { pendencia_pagamento: addAlunoDto.pendencia_pagamento }),
-                ...(addAlunoDto.contrato_duplo !== undefined && { contrato_duplo: addAlunoDto.contrato_duplo }),
+                ...(addAlunoDto.quantidade_inscricoes !== undefined && { quantidade_inscricoes: addAlunoDto.quantidade_inscricoes }),
+                ...(addAlunoDto.outros_clientes !== undefined && { outros_clientes: addAlunoDto.outros_clientes }),
                 ...(addAlunoDto.comprovante_pagamento_base64 !== undefined && {
                     comprovante_pagamento_base64: addAlunoDto.comprovante_pagamento_base64,
                 }),
@@ -1816,7 +1872,9 @@ export class TurmasService {
                 numero_cracha: turmaAlunoCompleta.numero_cracha,
                 vaga_bonus: turmaAlunoCompleta.vaga_bonus,
                 pendencia_pagamento: turmaAlunoCompleta.pendencia_pagamento,
-                contrato_duplo: turmaAlunoCompleta.contrato_duplo,
+                quantidade_inscricoes: turmaAlunoCompleta.quantidade_inscricoes ?? 1,
+                outros_clientes: turmaAlunoCompleta.outros_clientes ?? [],
+                contrato_duplo: (turmaAlunoCompleta.quantidade_inscricoes ?? 1) > 1,
                 comprovante_pagamento_base64: turmaAlunoCompleta.comprovante_pagamento_base64,
                 created_at: turmaAlunoCompleta.criado_em,
                 aluno: turmaAlunoCompleta.id_aluno_fk
@@ -2013,7 +2071,9 @@ export class TurmasService {
             presenca_turma: turmaAlunoCompleta.presenca_turma,
             url_comprovante_pgto: turmaAlunoCompleta.url_comprovante_pgto,
             pendencia_pagamento: turmaAlunoCompleta.pendencia_pagamento,
-            contrato_duplo: turmaAlunoCompleta.contrato_duplo,
+            quantidade_inscricoes: turmaAlunoCompleta.quantidade_inscricoes ?? 1,
+            outros_clientes: turmaAlunoCompleta.outros_clientes ?? [],
+            contrato_duplo: (turmaAlunoCompleta.quantidade_inscricoes ?? 1) > 1,
             comprovante_pagamento_base64: turmaAlunoCompleta.comprovante_pagamento_base64,
             created_at: turmaAlunoCompleta.criado_em,
             transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAlunoCompleta.id_turma_transferencia_de_fk),
@@ -2206,7 +2266,8 @@ export class TurmasService {
                 status_aluno_turma: EStatusAlunosTurmas.CANCELADO,
                 presenca_turma: null,
                 pendencia_pagamento: turmaAlunoOrigem.pendencia_pagamento,
-                contrato_duplo: turmaAlunoOrigem.contrato_duplo,
+                quantidade_inscricoes: turmaAlunoOrigem.quantidade_inscricoes ?? 1,
+                outros_clientes: turmaAlunoOrigem.outros_clientes ?? [],
                 comprovante_pagamento_base64: turmaAlunoOrigem.comprovante_pagamento_base64,
                 url_comprovante_pgto: turmaAlunoOrigem.url_comprovante_pgto,
                 id_turma_transferencia_de: idTurmaOrigemHistorica,
@@ -2333,39 +2394,87 @@ export class TurmasService {
             where: { id_turma, deletado_em: null },
         });
 
-        const alunosOrigemRaw = await this.uow.turmasAlunosRP
+        /**
+         * Canais de entrada (mutuamente exclusivos por prioridade):
+         * - Bônus
+         * - Cortesia e sorteio: origem_aluno CORTESIA ou SORTEIO
+         * - Time de vendas: histórico com turma de origem = esta turma
+         * - Masterclass: histórico vindo de outra turma palestra/MC (tipo_palestra OU tipo_treinamento = false)
+         * - Transferência: somente origem_aluno = TRANSFERENCIA (marcação na turma; movimentos só no histórico caem em “demais”)
+         * - Demais compras / importação: restante
+         *
+         * "Transferência > Para essa" (bloco abaixo) continua sendo contagem de linhas no histórico de movimentação.
+         */
+        const alunosOrigemEnriquecidos = await this.uow.turmasAlunosRP
             .createQueryBuilder('ta')
-            .leftJoin(
-                'historico_transferencias_alunos',
-                'hta',
-                'hta.id_turma_aluno_para = ta.id AND hta.id_turma_para = :id_turma AND hta.deletado_em IS NULL',
-                { id_turma },
-            )
             .select('ta.id', 'id_turma_aluno')
             .addSelect('ta.origem_aluno', 'origem_aluno')
             .addSelect('ta.vaga_bonus', 'vaga_bonus')
-            .addSelect('MAX(hta.id_turma_de)', 'id_turma_de_historico')
+            .addSelect(
+                `(EXISTS (
+                    SELECT 1
+                    FROM historico_transferencias_alunos h
+                    WHERE h.id_turma_aluno_para = ta.id
+                      AND h.id_turma_para = :id_turma
+                      AND h.id_turma_de = :id_turma
+                      AND h.deletado_em IS NULL
+                ))`,
+                'hist_time_vendas',
+            )
+            .addSelect(
+                `(
+                    SELECT (tr.tipo_palestra = true OR tr.tipo_treinamento = false)
+                    FROM historico_transferencias_alunos h
+                    INNER JOIN turmas t_de ON t_de.id = h.id_turma_de
+                    INNER JOIN treinamentos tr ON tr.id = t_de.id_treinamento
+                    WHERE h.id_turma_aluno_para = ta.id
+                      AND h.id_turma_para = :id_turma
+                      AND h.id_turma_de <> :id_turma
+                      AND h.deletado_em IS NULL
+                    ORDER BY h.id DESC
+                    LIMIT 1
+                )`,
+                'origem_turma_eh_palestra_ou_masterclass',
+            )
             .where('ta.id_turma = :id_turma', { id_turma })
             .andWhere('ta.deletado_em IS NULL')
-            .groupBy('ta.id')
-            .addGroupBy('ta.origem_aluno')
-            .addGroupBy('ta.vaga_bonus')
+            .setParameter('id_turma', id_turma)
             .getRawMany();
 
         let origemMasterclass = 0;
         let origemBonus = 0;
+        let origemCortesiaSorteio = 0;
         let origemTimeVendas = 0;
         let origemTransferencia = 0;
+        let origemImportacao = 0;
 
-        for (const alunoOrigem of alunosOrigemRaw) {
-            const origemAluno = String(alunoOrigem.origem_aluno || '').toUpperCase();
-            const vagaBonus = Boolean(alunoOrigem.vaga_bonus);
-            const idTurmaDeHistorico = alunoOrigem.id_turma_de_historico
-                ? Number(alunoOrigem.id_turma_de_historico)
-                : null;
+        const isTruthyPgBool = (v: unknown): boolean =>
+            v === true || v === 'true' || v === 't' || v === 1 || v === '1';
+
+        for (const row of alunosOrigemEnriquecidos) {
+            const origemAluno = String(row.origem_aluno || '').toUpperCase();
+            const vagaBonus = Boolean(row.vaga_bonus);
+            const histTimeVendas = isTruthyPgBool(row.hist_time_vendas);
+            /** Origem externa é MC/palestra: alinha a `isPalestra` usada em findById (tipo_palestra ou tipo_treinamento false) */
+            const origemEhPalestraMc = row.origem_turma_eh_palestra_ou_masterclass;
 
             if (vagaBonus || origemAluno === EOrigemAlunos.ALUNO_BONUS) {
                 origemBonus += 1;
+                continue;
+            }
+
+            if (origemAluno === EOrigemAlunos.CORTESIA || origemAluno === EOrigemAlunos.SORTEIO) {
+                origemCortesiaSorteio += 1;
+                continue;
+            }
+
+            if (histTimeVendas) {
+                origemTimeVendas += 1;
+                continue;
+            }
+
+            if (isTruthyPgBool(origemEhPalestraMc)) {
+                origemMasterclass += 1;
                 continue;
             }
 
@@ -2374,14 +2483,7 @@ export class TurmasService {
                 continue;
             }
 
-            if (idTurmaDeHistorico === id_turma) {
-                origemTimeVendas += 1;
-                continue;
-            }
-
-            if (idTurmaDeHistorico !== null && idTurmaDeHistorico !== id_turma) {
-                origemMasterclass += 1;
-            }
+            origemImportacao += 1;
         }
 
         const transferidosDessaTurmaParaOutra = await this.uow.historicoTransferenciasRP.count({
@@ -2413,6 +2515,8 @@ export class TurmasService {
             origem_bonus: origemBonus,
             origem_time_vendas: origemTimeVendas,
             origem_transferencia: origemTransferencia,
+            origem_cortesia_sorteio: origemCortesiaSorteio,
+            origem_importacao: origemImportacao,
             transferidos: transferidosDessaTurmaParaOutra + transferidosDeOutraTurmaParaEssa,
             transferidos_dessa_turma_para_outra: transferidosDessaTurmaParaOutra,
             transferidos_de_outra_turma_para_essa: transferidosDeOutraTurmaParaEssa,
@@ -2469,16 +2573,33 @@ export class TurmasService {
             case 'origem_masterclass':
                 titulo = 'Origem: Masterclass';
                 qb.andWhere('ta.vaga_bonus = false');
-                qb.andWhere('ta.origem_aluno <> :origemTransferencia', {
-                    origemTransferencia: EOrigemAlunos.TRANSFERENCIA,
-                });
                 qb.andWhere(
-                    `EXISTS (
+                    '(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclMc))',
+                    {
+                        origemExclMc: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
+                    },
+                );
+                qb.andWhere(
+                    `NOT EXISTS (
                         SELECT 1
                         FROM historico_transferencias_alunos hta
                         WHERE hta.id_turma_aluno_para = ta.id
                           AND hta.id_turma_para = :id_turma
+                          AND hta.id_turma_de = :id_turma
+                          AND hta.deletado_em IS NULL
+                    )`,
+                    { id_turma },
+                );
+                qb.andWhere(
+                    `EXISTS (
+                        SELECT 1
+                        FROM historico_transferencias_alunos hta
+                        INNER JOIN turmas t_de ON t_de.id = hta.id_turma_de
+                        INNER JOIN treinamentos tr_de ON tr_de.id = t_de.id_treinamento
+                        WHERE hta.id_turma_aluno_para = ta.id
+                          AND hta.id_turma_para = :id_turma
                           AND hta.id_turma_de <> :id_turma
+                          AND (tr_de.tipo_palestra = true OR tr_de.tipo_treinamento = false)
                           AND hta.deletado_em IS NULL
                     )`,
                     { id_turma },
@@ -2490,11 +2611,17 @@ export class TurmasService {
                     origemBonus: EOrigemAlunos.ALUNO_BONUS,
                 });
                 break;
+            case 'origem_cortesia_sorteio':
+                titulo = 'Origem: Cortesia e sorteio';
+                qb.andWhere('ta.origem_aluno IN (:...origensCs)', {
+                    origensCs: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
+                });
+                break;
             case 'origem_time_vendas':
                 titulo = 'Origem: Time de vendas';
                 qb.andWhere('ta.vaga_bonus = false');
-                qb.andWhere('ta.origem_aluno <> :origemTransferencia', {
-                    origemTransferencia: EOrigemAlunos.TRANSFERENCIA,
+                qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclTv))', {
+                    origemExclTv: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
                 });
                 qb.andWhere(
                     `EXISTS (
@@ -2510,9 +2637,49 @@ export class TurmasService {
                 break;
             case 'origem_transferencia':
                 titulo = 'Origem: Transferência';
+                qb.andWhere('ta.vaga_bonus = false');
                 qb.andWhere('ta.origem_aluno = :origemTransferencia', {
                     origemTransferencia: EOrigemAlunos.TRANSFERENCIA,
                 });
+                break;
+            case 'origem_importacao':
+                titulo = 'Origem: Demais compras / importação';
+                qb.andWhere('ta.vaga_bonus = false');
+                qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno <> :origemBonus)', {
+                    origemBonus: EOrigemAlunos.ALUNO_BONUS,
+                });
+                qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclDemais))', {
+                    origemExclDemais: [
+                        EOrigemAlunos.CORTESIA,
+                        EOrigemAlunos.SORTEIO,
+                        EOrigemAlunos.TRANSFERENCIA,
+                    ],
+                });
+                qb.andWhere(
+                    `NOT EXISTS (
+                        SELECT 1
+                        FROM historico_transferencias_alunos hta
+                        WHERE hta.id_turma_aluno_para = ta.id
+                          AND hta.id_turma_para = :id_turma
+                          AND hta.id_turma_de = :id_turma
+                          AND hta.deletado_em IS NULL
+                    )`,
+                    { id_turma },
+                );
+                qb.andWhere(
+                    `NOT EXISTS (
+                        SELECT 1
+                        FROM historico_transferencias_alunos hta
+                        INNER JOIN turmas t_de ON t_de.id = hta.id_turma_de
+                        INNER JOIN treinamentos tr_de ON tr_de.id = t_de.id_treinamento
+                        WHERE hta.id_turma_aluno_para = ta.id
+                          AND hta.id_turma_para = :id_turma
+                          AND hta.id_turma_de <> :id_turma
+                          AND (tr_de.tipo_palestra = true OR tr_de.tipo_treinamento = false)
+                          AND hta.deletado_em IS NULL
+                    )`,
+                    { id_turma },
+                );
                 break;
             case 'transferidos':
                 titulo = 'Transferidos';
@@ -2759,8 +2926,11 @@ export class TurmasService {
             if (updateAlunoDto.pendencia_pagamento !== undefined) {
                 turmaAluno.pendencia_pagamento = updateAlunoDto.pendencia_pagamento;
             }
-            if (updateAlunoDto.contrato_duplo !== undefined) {
-                turmaAluno.contrato_duplo = updateAlunoDto.contrato_duplo;
+            if (updateAlunoDto.quantidade_inscricoes !== undefined) {
+                turmaAluno.quantidade_inscricoes = updateAlunoDto.quantidade_inscricoes;
+            }
+            if (updateAlunoDto.outros_clientes !== undefined) {
+                turmaAluno.outros_clientes = updateAlunoDto.outros_clientes;
             }
             if (updateAlunoDto.comprovante_pagamento_base64 !== undefined) {
                 turmaAluno.comprovante_pagamento_base64 = updateAlunoDto.comprovante_pagamento_base64;
@@ -2836,7 +3006,9 @@ export class TurmasService {
                         presenca_turma: matriculaDestinoCompleta.presenca_turma,
                         url_comprovante_pgto: matriculaDestinoCompleta.url_comprovante_pgto,
                         pendencia_pagamento: matriculaDestinoCompleta.pendencia_pagamento,
-                        contrato_duplo: matriculaDestinoCompleta.contrato_duplo,
+                        quantidade_inscricoes: matriculaDestinoCompleta.quantidade_inscricoes ?? 1,
+                        outros_clientes: matriculaDestinoCompleta.outros_clientes ?? [],
+                        contrato_duplo: (matriculaDestinoCompleta.quantidade_inscricoes ?? 1) > 1,
                         comprovante_pagamento_base64: matriculaDestinoCompleta.comprovante_pagamento_base64,
                         created_at: matriculaDestinoCompleta.criado_em,
                         transferencia_de_turma: this.mapTurmaToTransferenciaTag(matriculaDestinoCompleta.id_turma_transferencia_de_fk),
@@ -2879,7 +3051,9 @@ export class TurmasService {
                 status_aluno_turma: turmaAlunoAtualizada.status_aluno_turma,
                 presenca_turma: turmaAlunoAtualizada.presenca_turma,
                 pendencia_pagamento: turmaAlunoAtualizada.pendencia_pagamento,
-                contrato_duplo: turmaAlunoAtualizada.contrato_duplo,
+                quantidade_inscricoes: turmaAlunoAtualizada.quantidade_inscricoes ?? 1,
+                outros_clientes: turmaAlunoAtualizada.outros_clientes ?? [],
+                contrato_duplo: (turmaAlunoAtualizada.quantidade_inscricoes ?? 1) > 1,
                 comprovante_pagamento_base64: turmaAlunoAtualizada.comprovante_pagamento_base64,
                 created_at: turmaAlunoAtualizada.criado_em,
                 aluno: turmaAlunoAtualizada.id_aluno_fk

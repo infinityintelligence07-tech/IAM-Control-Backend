@@ -8,6 +8,13 @@ import { TurmasAlunosProdutos } from './turmasAlunosProdutos.entity';
 import { Alunos } from './alunos.entity';
 import { TurmasAlunosTreinamentos } from './turmasAlunosTreinamentos.entity';
 
+export type TOutroClienteTurmaAluno = {
+    id?: string;
+    nome?: string;
+    email?: string;
+    telefone?: string;
+};
+
 @Entity('turmas_alunos', { schema: type_schema })
 export class TurmasAlunos extends BaseEntity {
     @PrimaryGeneratedColumn('increment', { type: 'bigint', name: 'id', primaryKeyConstraintName: 'pk_turmas_alunos' })
@@ -28,8 +35,11 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'boolean', name: 'pendencia_pagamento', nullable: true })
     pendencia_pagamento: boolean | null;
 
-    @Column({ type: 'boolean', name: 'contrato_duplo', nullable: true })
-    contrato_duplo: boolean | null;
+    @Column({ type: 'int', name: 'quantidade_inscricoes', nullable: false, default: 1 })
+    quantidade_inscricoes: number;
+
+    @Column({ type: 'jsonb', name: 'outros_clientes', nullable: false, default: () => "'[]'::jsonb" })
+    outros_clientes: TOutroClienteTurmaAluno[];
 
     @Column({ type: 'text', name: 'comprovante_pagamento_base64', nullable: true })
     comprovante_pagamento_base64: string | null;

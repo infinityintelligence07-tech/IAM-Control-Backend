@@ -11,6 +11,13 @@ import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.e
 import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 import { EnderecoEventos } from './enderecoEventos.entity';
 
+export interface TimeEquipeGrupo {
+    id: string;
+    nome: string;
+    liderId: string;
+    membrosIds: string[];
+}
+
 @Entity('turmas', { schema: type_schema })
 export class Turmas extends BaseEntity {
     @PrimaryGeneratedColumn('increment', { type: 'int', name: 'id', primaryKeyConstraintName: 'pk_turmas' })
@@ -84,6 +91,9 @@ export class Turmas extends BaseEntity {
 
     @Column({ type: 'jsonb', name: 'turmas_ipr_relacionadas', nullable: true })
     turmas_ipr_relacionadas: number[];
+
+    @Column({ type: 'jsonb', name: 'times_equipes', nullable: true })
+    times_equipes: TimeEquipeGrupo[];
 
     @Column({ type: 'varchar', name: 'url_midia_kit', nullable: true })
     url_midia_kit: string;

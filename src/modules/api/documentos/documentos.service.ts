@@ -27,6 +27,7 @@ import { TermTemplateService } from './term-template.service';
 import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
+import { Turmas } from '@/modules/config/entities/turmas.entity';
 
 @Injectable()
 export class DocumentosService {
@@ -1556,7 +1557,7 @@ export class DocumentosService {
                 if (idsTurmasBonusRelacionadas.size > 0) {
                     const matriculasBonus = await this.uow.turmasAlunosRP.find({
                         where: {
-                            id_aluno_bonus: idAlunoComprador as any,
+                            id_aluno_bonus: idAlunoComprador,
                             origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                             deletado_em: null,
                             id_turma: In(Array.from(idsTurmasBonusRelacionadas)),
@@ -1737,7 +1738,7 @@ export class DocumentosService {
                 if (idsTurmasBonusRelacionadas.size > 0) {
                     const matriculasBonus = await this.uow.turmasAlunosRP.find({
                         where: {
-                            id_aluno_bonus: idAlunoComprador as any,
+                            id_aluno_bonus: idAlunoComprador,
                             origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                             deletado_em: null,
                             id_turma: In(Array.from(idsTurmasBonusRelacionadas)),
@@ -2187,7 +2188,7 @@ export class DocumentosService {
                         .orderBy(
                             `CASE
                                 WHEN turma_aluno.pendencia_pagamento IS TRUE
-                                  OR turma_aluno.contrato_duplo IS TRUE
+                                  OR COALESCE(turma_aluno.quantidade_inscricoes, 1) > 1
                                   OR turma_aluno.comprovante_pagamento_base64 IS NOT NULL
                                 THEN 0
                                 ELSE 1
@@ -2209,7 +2210,9 @@ export class DocumentosService {
             const treinamento = dadosContrato.treinamento || turmaAlunoTreinamento?.id_treinamento_fk || null;
             const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
             const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
-            const contratoDuplo = turmaAluno?.contrato_duplo ?? turmaAlunoDadosContrato.contrato_duplo ?? false;
+            const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
+            const contratoDuplo = quantidadeInscricoes > 1;
+            const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
             const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
 
             // Log para debug do treinamento
@@ -2240,6 +2243,8 @@ export class DocumentosService {
                 treinamento_nome: treinamento?.treinamento,
                 turma_aluno: {
                     pendencia_pagamento: pendenciaPagamento,
+                    quantidade_inscricoes: quantidadeInscricoes,
+                    outros_clientes: outrosClientes,
                     contrato_duplo: contratoDuplo,
                     comprovante_pagamento_base64: comprovantePagamentoBase64,
                 },
@@ -2302,6 +2307,8 @@ export class DocumentosService {
                     cidade_treinamento: dadosContrato.cidade_treinamento,
                     turma_aluno: {
                         pendencia_pagamento: pendenciaPagamento,
+                        quantidade_inscricoes: quantidadeInscricoes,
+                        outros_clientes: outrosClientes,
                         contrato_duplo: contratoDuplo,
                         comprovante_pagamento_base64: comprovantePagamentoBase64,
                     },
@@ -2369,7 +2376,9 @@ export class DocumentosService {
             });
 
             // Mapear dados para o formato esperado pelo frontend
-            const cacheTurmaPorId = new Map<number, any | null>();
+            const cacheTurmaPorId = new Map<number, Turmas | null>();
+            const cacheTurmaOrigemPorTurmaAluno = new Map<string, Turmas | null>();
+            const cacheTurmaOrigemIprPorAluno = new Map<number, Turmas | null>();
             const contratosMapeados = await Promise.all(
                 contratos.map(async (contrato) => {
                     const dadosContrato = contrato.dados_contrato || {};
@@ -2412,7 +2421,7 @@ export class DocumentosService {
                                 .orderBy(
                                     `CASE
                                     WHEN turma_aluno.pendencia_pagamento IS TRUE
-                                      OR turma_aluno.contrato_duplo IS TRUE
+                                      OR COALESCE(turma_aluno.quantidade_inscricoes, 1) > 1
                                       OR turma_aluno.comprovante_pagamento_base64 IS NOT NULL
                                     THEN 0
                                     ELSE 1
@@ -2435,13 +2444,90 @@ export class DocumentosService {
                     const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
                     const turmaDestinoEvento = turmaAluno?.id_turma_fk || null;
                     let turmaOrigemEvento = turmaAluno?.id_turma_transferencia_de_fk || null;
+                    const idAlunoContrato = Number(turmaAluno?.id_aluno || dadosContrato?.aluno?.id || 0);
+                    const idTurmaAlunoContrato = turmaAluno?.id ? String(turmaAluno.id) : null;
+
+                    // Prioridade 1: histórico de transferência da própria matrícula
+                    // (garante origem real da venda quando o relacionamento direto não estiver preenchido).
+                    if (!turmaOrigemEvento && idTurmaAlunoContrato) {
+                        if (!cacheTurmaOrigemPorTurmaAluno.has(idTurmaAlunoContrato)) {
+                            const historicoOrigem = await this.uow.historicoTransferenciasRP
+                                .createQueryBuilder('historico')
+                                .leftJoinAndSelect('historico.id_turma_de_fk', 'turma_origem')
+                                .leftJoinAndSelect('turma_origem.id_treinamento_fk', 'treinamento_origem')
+                                .where('historico.id_turma_aluno_para = :idTurmaAluno', { idTurmaAluno: idTurmaAlunoContrato })
+                                .andWhere('historico.deletado_em IS NULL')
+                                .andWhere('historico.id_turma_de <> historico.id_turma_para')
+                                .orderBy('historico.criado_em', 'DESC')
+                                .addOrderBy('historico.id', 'DESC')
+                                .getOne();
+
+                            cacheTurmaOrigemPorTurmaAluno.set(idTurmaAlunoContrato, historicoOrigem?.id_turma_de_fk || null);
+                        }
+
+                        turmaOrigemEvento = cacheTurmaOrigemPorTurmaAluno.get(idTurmaAlunoContrato) || null;
+                    }
+
+                    // Para vendas de Confronto com bônus de IPR, a origem deve refletir
+                    // a turma IPR de compra (não a turma bônus ofertada).
+                    if (!turmaOrigemEvento && idAlunoContrato > 0) {
+                        if (!cacheTurmaOrigemIprPorAluno.has(idAlunoContrato)) {
+                            let matriculaIprOrigem = await this.uow.turmasAlunosRP
+                                .createQueryBuilder('turma_aluno')
+                                .leftJoinAndSelect('turma_aluno.id_turma_fk', 'turma')
+                                .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+                                .where('turma_aluno.id_aluno = :idAluno', { idAluno: idAlunoContrato })
+                                .andWhere('turma_aluno.deletado_em IS NULL')
+                                .andWhere('(turma_aluno.vaga_bonus = false OR turma_aluno.vaga_bonus IS NULL)')
+                                .andWhere('(turma_aluno.origem_aluno IS NULL OR turma_aluno.origem_aluno <> :origemBonus)', {
+                                    origemBonus: EOrigemAlunos.ALUNO_BONUS,
+                                })
+                                .andWhere('turma.deletado_em IS NULL')
+                                .andWhere(
+                                    "(LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersao OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersaoAcento OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :ipr)",
+                                    {
+                                        imersao: '%imersao prosperar%',
+                                        imersaoAcento: '%imersão prosperar%',
+                                        ipr: '%ipr%',
+                                    },
+                                )
+                                .orderBy('turma_aluno.atualizado_em', 'DESC')
+                                .addOrderBy('turma_aluno.id', 'DESC')
+                                .getOne();
+
+                            // Fallback: quando o aluno só possui IPR como vaga bônus,
+                            // ainda assim essa turma deve ser a origem do Confronto.
+                            if (!matriculaIprOrigem) {
+                                matriculaIprOrigem = await this.uow.turmasAlunosRP
+                                    .createQueryBuilder('turma_aluno')
+                                    .leftJoinAndSelect('turma_aluno.id_turma_fk', 'turma')
+                                    .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+                                    .where('turma_aluno.id_aluno = :idAluno', { idAluno: idAlunoContrato })
+                                    .andWhere('turma_aluno.deletado_em IS NULL')
+                                    .andWhere('turma.deletado_em IS NULL')
+                                    .andWhere(
+                                        "(LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersao OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersaoAcento OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :ipr)",
+                                        {
+                                            imersao: '%imersao prosperar%',
+                                            imersaoAcento: '%imersão prosperar%',
+                                            ipr: '%ipr%',
+                                        },
+                                    )
+                                    .orderBy('turma_aluno.atualizado_em', 'DESC')
+                                    .addOrderBy('turma_aluno.id', 'DESC')
+                                    .getOne();
+                            }
+
+                            cacheTurmaOrigemIprPorAluno.set(idAlunoContrato, matriculaIprOrigem?.id_turma_fk || null);
+                        }
+
+                        turmaOrigemEvento = cacheTurmaOrigemIprPorAluno.get(idAlunoContrato) || null;
+                    }
 
                     // Fallback relacional: quando a transferência de origem não está gravada,
                     // usar a relação de turmas IPR vinculadas à turma de destino.
                     if (!turmaOrigemEvento && turmaDestinoEvento?.id) {
-                        const turmasIprRelacionadas = Array.isArray(turmaDestinoEvento?.turmas_ipr_relacionadas)
-                            ? (turmaDestinoEvento.turmas_ipr_relacionadas as number[])
-                            : [];
+                        const turmasIprRelacionadas = Array.isArray(turmaDestinoEvento?.turmas_ipr_relacionadas) ? turmaDestinoEvento.turmas_ipr_relacionadas : [];
 
                         if (turmasIprRelacionadas.length > 0) {
                             const idsTurmasOrigem = turmasIprRelacionadas.map((id) => Number(id)).filter((id) => Number.isFinite(id));
@@ -2471,14 +2557,15 @@ export class DocumentosService {
                                 .map((id) => cacheTurmaPorId.get(id))
                                 .filter((turma): turma is NonNullable<typeof turma> => Boolean(turma));
 
-                            const turmaIpr = turmasCandidatas.find((turma) => {
+                            const turmasCandidatasSemDestino = turmasCandidatas.filter((turma) => turma.id !== turmaDestinoEvento.id);
+                            const turmaIpr = turmasCandidatasSemDestino.find((turma) => {
                                 const nomeTreinamento = (turma.id_treinamento_fk?.treinamento || '').toLowerCase();
                                 return (
                                     nomeTreinamento.includes('imersão prosperar') || nomeTreinamento.includes('imersao prosperar') || nomeTreinamento.includes('ipr')
                                 );
                             });
 
-                            turmaOrigemEvento = turmaIpr || turmasCandidatas[0] || null;
+                            turmaOrigemEvento = turmaIpr || turmasCandidatasSemDestino[0] || turmasCandidatas[0] || null;
                         }
                     }
                     const formatarTurmaEvento = (
@@ -2502,7 +2589,9 @@ export class DocumentosService {
                     const fluxoEventoDestinoTurma = formatarTurmaEvento(turmaDestinoEvento);
                     const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
                     const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
-                    const contratoDuplo = turmaAluno?.contrato_duplo ?? turmaAlunoDadosContrato.contrato_duplo ?? false;
+                    const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
+                    const contratoDuplo = quantidadeInscricoes > 1;
+                    const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
                     const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
                     const criadoPorContrato = contrato?.criado_por ?? null;
                     const criadoPorTurmaAlunoTreinamento = turmaAlunoTreinamento?.criado_por ?? null;
@@ -2559,6 +2648,8 @@ export class DocumentosService {
                         treinamento_nome: treinamento?.treinamento,
                         turma_aluno: {
                             pendencia_pagamento: pendenciaPagamento,
+                            quantidade_inscricoes: quantidadeInscricoes,
+                            outros_clientes: outrosClientes,
                             contrato_duplo: contratoDuplo,
                             comprovante_pagamento_base64: comprovantePagamentoBase64,
                         },
@@ -2619,6 +2710,8 @@ export class DocumentosService {
                             cidade_treinamento: dadosContrato.cidade_treinamento,
                             turma_aluno: {
                                 pendencia_pagamento: pendenciaPagamento,
+                                quantidade_inscricoes: quantidadeInscricoes,
+                                outros_clientes: outrosClientes,
                                 contrato_duplo: contratoDuplo,
                                 comprovante_pagamento_base64: comprovantePagamentoBase64,
                             },
@@ -3087,15 +3180,41 @@ export class DocumentosService {
             // Buscar o status atual do documento no ZapSign
             const zapSignDocument = await this.zapSignService.getDocument(contrato.zapsign_document_id);
 
-            // Atualizar os dados dos signatários
-            const signersData = zapSignDocument.signers.map((signer) => ({
-                name: signer.name,
-                email: signer.email || '',
-                telefone: '',
-                cpf: '',
-                status: signer.status,
-                signing_url: signer.sign_url || '',
-            }));
+            const normalizeCpf = (value?: string): string => (value || '').replace(/\D/g, '');
+
+            const alunoCpf = normalizeCpf(contrato.dados_contrato?.aluno?.cpf);
+            const testemunhaUmCpf = normalizeCpf(contrato.dados_contrato?.testemunhas?.testemunha_um?.cpf);
+            const testemunhaDoisCpf = normalizeCpf(contrato.dados_contrato?.testemunhas?.testemunha_dois?.cpf);
+
+            const signersDataExistentes = Array.isArray(contrato.zapsign_signers_data) ? contrato.zapsign_signers_data : [];
+
+            // Atualizar os dados dos signatários preservando CPF/telefone quando ZapSign não retornar esses dados
+            const signersData = zapSignDocument.signers.map((signer: any, index: number) => {
+                const signerEmail = (signer.email || '').toLowerCase().trim();
+                const signerName = (signer.name || '').toLowerCase().trim();
+
+                const signerExistente = signersDataExistentes.find((item: any) => {
+                    const itemEmail = (item?.email || '').toLowerCase().trim();
+                    const itemName = (item?.name || '').toLowerCase().trim();
+                    return (signerEmail && itemEmail && signerEmail === itemEmail) || (signerName && itemName && signerName === itemName);
+                });
+
+                const cpfDoZapSign = normalizeCpf(
+                    signer?.cpf || signer?.document || signer?.document_number || signer?.tax_id || signer?.cpf_cnpj || signer?.cpfCnpj || signer?.identifier,
+                );
+                const cpfExistente = normalizeCpf(signerExistente?.cpf);
+                const cpfPorOrdem = index === 0 ? alunoCpf : index === 1 ? testemunhaUmCpf : index === 2 ? testemunhaDoisCpf : '';
+                const cpfFinal = cpfDoZapSign || cpfExistente || cpfPorOrdem;
+
+                return {
+                    name: signer.name || signerExistente?.name || '',
+                    email: signer.email || signerExistente?.email || '',
+                    telefone: signer?.phone || signerExistente?.telefone || '',
+                    cpf: cpfFinal,
+                    status: signer.status,
+                    signing_url: signer.sign_url || signerExistente?.signing_url || '',
+                };
+            });
 
             // Atualizar o status do documento
             const documentStatus = {

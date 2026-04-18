@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos } from '../../../config/entities/enum';
 
@@ -361,6 +361,12 @@ export class UpdateTurmaDto {
     turmas_ipr_relacionadas?: number[];
 
     @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => TimeEquipeGrupoDto)
+    times_equipes?: TimeEquipeGrupoDto[];
+
+    @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
     url_midia_kit?: string;
@@ -392,6 +398,28 @@ export class UpdateTurmaDto {
     @IsOptional()
     @IsString()
     atualizado_em?: string;
+}
+
+export class OutroClienteTurmaAlunoDto {
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    id?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    nome?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    telefone?: string;
 }
 
 export class AddAlunoTurmaDto {
@@ -429,8 +457,24 @@ export class AddAlunoTurmaDto {
     pendencia_pagamento?: boolean;
 
     @IsOptional()
-    @IsBoolean()
-    contrato_duplo?: boolean;
+    @IsInt()
+    @Min(1)
+    @Transform(({ value, obj }) => {
+        if (value === '' || value === null || value === undefined) {
+            if (obj?.contrato_duplo === true) return 2;
+            if (obj?.contrato_duplo === false) return 1;
+            return undefined;
+        }
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+    })
+    quantidade_inscricoes?: number;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => OutroClienteTurmaAlunoDto)
+    outros_clientes?: OutroClienteTurmaAlunoDto[];
 
     @IsOptional()
     @IsString()
@@ -452,8 +496,24 @@ export class UpdateAlunoTurmaDto {
     pendencia_pagamento?: boolean;
 
     @IsOptional()
-    @IsBoolean()
-    contrato_duplo?: boolean;
+    @IsInt()
+    @Min(1)
+    @Transform(({ value, obj }) => {
+        if (value === '' || value === null || value === undefined) {
+            if (obj?.contrato_duplo === true) return 2;
+            if (obj?.contrato_duplo === false) return 1;
+            return undefined;
+        }
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+    })
+    quantidade_inscricoes?: number;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => OutroClienteTurmaAlunoDto)
+    outros_clientes?: OutroClienteTurmaAlunoDto[];
 
     @IsOptional()
     @IsString()
@@ -511,6 +571,7 @@ export class TurmaResponseDto {
     detalhamento_bonus?: { id_treinamento_db: number }[];
     turmas_imersao_ofertadas?: number[];
     turmas_ipr_relacionadas?: number[];
+    times_equipes?: TimeEquipeGrupoDto[];
     url_midia_kit?: string;
     url_grupo_whatsapp?: string;
     url_grupo_whatsapp_2?: string;
@@ -530,6 +591,7 @@ export class TurmaResponseDto {
         sigla_treinamento?: string;
         treinamento?: string;
         url_logo_treinamento?: string;
+        tipo_online?: boolean;
     };
     lider?: {
         id: number;
@@ -569,6 +631,9 @@ export class AlunoTurmaResponseDto {
     ficha_preenchida?: boolean;
     url_comprovante_pgto?: string;
     pendencia_pagamento?: boolean;
+    quantidade_inscricoes?: number;
+    outros_clientes?: OutroClienteTurmaAlunoDto[];
+    // Compatibilidade temporária com front legado
     contrato_duplo?: boolean;
     comprovante_pagamento_base64?: string;
     created_at: Date;
@@ -700,6 +765,12 @@ export class TurmaStatusResumoResponseDto {
     origem_bonus: number;
     origem_time_vendas: number;
     origem_transferencia: number;
+    /** Cortesia + sorteio (origem_aluno) */
+    origem_cortesia_sorteio: number;
+    /**
+     * Demais compras / importação: tudo que não entrou nos outros canais (inclui COMPROU_INGRESSO com ou sem histórico de transferência).
+     */
+    origem_importacao: number;
     transferidos: number;
     transferidos_dessa_turma_para_outra: number;
     transferidos_de_outra_turma_para_essa: number;
@@ -730,6 +801,37 @@ export class TurmaStatusAlunosResponseDto {
     titulo: string;
     total: number;
     alunos: TurmaStatusAlunosItemDto[];
+}
+
+export class TimeEquipeGrupoDto {
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    id: string;
+
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    nome: string;
+
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    liderId: string;
+
+    @IsArray()
+    @IsString({ each: true })
+    @Transform(({ value }) => (Array.isArray(value) ? value.map((item) => item?.toString().trim()).filter(Boolean) : []))
+    membrosIds: string[];
+}
+
+export class UpdateTurmaTimesDto {
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => TimeEquipeGrupoDto)
+    times_equipes: TimeEquipeGrupoDto[];
+}
+
+export class TurmaTimesResponseDto {
+    id_turma: number;
+    times_equipes: TimeEquipeGrupoDto[];
 }
 
 export class SoftDeleteTurmaDto {

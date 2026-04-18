@@ -17,6 +17,8 @@ import {
     HistoricoTransferenciasResponseDto,
     TurmaStatusResumoResponseDto,
     TurmaStatusAlunosResponseDto,
+    UpdateTurmaTimesDto,
+    TurmaTimesResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
@@ -166,6 +168,23 @@ export class TurmasController {
     @UseGuards(JwtAuthGuard)
     async getTurmaStatusAlunos(@Param('id', ParseIntPipe) id: number, @Query('tipo') tipo: string): Promise<TurmaStatusAlunosResponseDto> {
         return this.turmasService.getTurmaStatusAlunos(id, tipo);
+    }
+
+    @Get(':id/times')
+    @UseGuards(JwtAuthGuard)
+    async getTimesTurma(@Param('id', ParseIntPipe) id: number): Promise<TurmaTimesResponseDto> {
+        return this.turmasService.getTimesTurma(id);
+    }
+
+    @Put(':id/times')
+    @UseGuards(JwtAuthGuard)
+    async updateTimesTurma(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() updateTurmaTimesDto: UpdateTurmaTimesDto,
+        @Req() req: any,
+    ): Promise<TurmaTimesResponseDto> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.updateTimesTurma(id, updateTurmaTimesDto, userId);
     }
 
     @Post()

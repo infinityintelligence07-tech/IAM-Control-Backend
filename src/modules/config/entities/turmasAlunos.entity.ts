@@ -76,6 +76,10 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'int', name: 'id_turma_transferencia_de', nullable: true })
     id_turma_transferencia_de: number | null;
 
+    /** Texto da coluna "TURMA ORIGEM" na importação (ex.: MC_AM_SANTOS) quando não há turma resolvida no banco. */
+    @Column({ type: 'varchar', name: 'codigo_turma_origem_planilha', length: 255, nullable: true })
+    codigo_turma_origem_planilha: string | null;
+
     @ManyToOne(() => Turmas, { nullable: true })
     @JoinColumn([{ name: 'id_turma_transferencia_para', referencedColumnName: 'id' }])
     id_turma_transferencia_para_fk: Turmas | null;

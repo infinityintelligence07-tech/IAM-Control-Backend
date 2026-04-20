@@ -768,7 +768,7 @@ export class TurmaStatusResumoResponseDto {
     /** Cortesia + sorteio (origem_aluno) */
     origem_cortesia_sorteio: number;
     /**
-     * Demais compras / importação: tudo que não entrou nos outros canais (inclui COMPROU_INGRESSO com ou sem histórico de transferência).
+     * Demais vendas / importação: tudo que não entrou nos outros canais (inclui COMPROU_INGRESSO com ou sem histórico de transferência).
      */
     origem_importacao: number;
     transferidos: number;

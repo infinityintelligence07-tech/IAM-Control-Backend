@@ -811,6 +811,8 @@ export class UploadService {
             statusFinal: EStatusAlunosTurmas;
             origemFinal: EOrigemAlunos;
             idTurmaTransferenciaDe: number | null;
+            /** Coluna TURMA ORIGEM na planilha (persistido para MC sem turma cadastrada). */
+            codigoTurmaOrigemPlanilha: string | null;
         }> = [];
 
         for (const row of parsedRows) {
@@ -853,9 +855,29 @@ export class UploadService {
 
             const codigoOrigem = this.normalizeCodeKey(row.turmaOrigemCodigo);
             const origemVenda = codigoOrigem.includes('TIME_DE_VENDAS') || codigoOrigem.includes('TIMEDEVENDAS');
-            const idTurmaTransferenciaDe = origemVenda ? null : turmaCodigoMap.get(codigoOrigem) || null;
-            if (!origemVenda && !idTurmaTransferenciaDe && codigoOrigem) {
-                avisos.push(`Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" não encontrada; será importado sem vínculo de transferência.`);
+
+            /** Mesma resolução que o destino: código completo no mapa ou match por edição (único). */
+            let idTurmaTransferenciaDe: number | null = null;
+            if (!origemVenda && String(row.turmaOrigemCodigo || '').trim()) {
+                const origemLookup = await this.resolveTurmaIdByCodigo({
+                    codigoRaw: row.turmaOrigemCodigo,
+                    turmaCodigoMap,
+                });
+                if (origemLookup.matchType === 'ambigua') {
+                    erros.push(
+                        `Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" é ambígua (mais de uma turma com essa edição). Informe o código completo da turma (SIGLA_CURSO_SIGLA_POLO_EDICAO).`,
+                    );
+                    continue;
+                }
+                if (origemLookup.matchType === 'edicao') {
+                    avisos.push(`Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" encontrada por edição.`);
+                }
+                idTurmaTransferenciaDe = origemLookup.turmaId;
+                if (!idTurmaTransferenciaDe && codigoOrigem) {
+                    avisos.push(
+                        `Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" não encontrada no cadastro; importação sem vínculo de turma. Origens MC_* continuam contando como Masterclass no resumo da turma.`,
+                    );
+                }
             }
 
             const codigoDestino = this.normalizeCodeKey(row.turmaDestinoCodigo);
@@ -891,6 +913,11 @@ export class UploadService {
 
             const statusImportacao = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
+            const codigoTurmaOrigemPlanilha = origemVenda
+                ? null
+                : String(row.turmaOrigemCodigo || '')
+                      .trim()
+                      .slice(0, 255) || null;
 
             // Regra nova: todas as inscrições vão para a turma de destino.
             for (let i = 0; i < quantidadeInscricoes; i++) {
@@ -924,6 +951,7 @@ export class UploadService {
                     statusFinal: statusImportacao,
                     origemFinal: EOrigemAlunos.COMPROU_INGRESSO,
                     idTurmaTransferenciaDe,
+                    codigoTurmaOrigemPlanilha,
                 });
             }
 
@@ -964,6 +992,7 @@ export class UploadService {
                     statusFinal: statusImportacao,
                     origemFinal: EOrigemAlunos.ALUNO_BONUS,
                     idTurmaTransferenciaDe: null,
+                    codigoTurmaOrigemPlanilha,
                 });
             }
         }
@@ -1082,6 +1111,7 @@ export class UploadService {
             vaga_bonus: boolean;
             id_aluno_bonus: string | null;
             id_turma_transferencia_de: number | null;
+            codigo_turma_origem_planilha: string | null;
         }> = [];
 
         const firstAlunoIdByLinha = new Map<number, string>();
@@ -1104,6 +1134,7 @@ export class UploadService {
                         vinculoPersistido.origem_aluno = item.origemFinal;
                         vinculoPersistido.id_aluno_bonus = idAlunoBonus;
                         vinculoPersistido.id_turma_transferencia_de = item.idTurmaTransferenciaDe;
+                        vinculoPersistido.codigo_turma_origem_planilha = item.codigoTurmaOrigemPlanilha;
                         updatesToSave.push(vinculoPersistido);
                     }
                     totalAtualizadas++;
@@ -1188,6 +1219,7 @@ export class UploadService {
                         vaga_bonus: isBonus,
                         id_aluno_bonus: idAlunoBonus,
                         id_turma_transferencia_de: item.idTurmaTransferenciaDe,
+                        codigo_turma_origem_planilha: item.codigoTurmaOrigemPlanilha,
                     });
                 }
 

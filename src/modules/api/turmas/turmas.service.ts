@@ -2399,9 +2399,9 @@ export class TurmasService {
          * - Bônus
          * - Cortesia e sorteio: origem_aluno CORTESIA ou SORTEIO
          * - Time de vendas: histórico com turma de origem = esta turma
-         * - Masterclass: histórico vindo de outra turma palestra/MC (tipo_palestra OU tipo_treinamento = false)
+         * - Masterclass: último histórico externo qualificando OU id_turma_transferencia_de OU codigo_turma_origem_planilha começando com MC_
          * - Transferência: somente origem_aluno = TRANSFERENCIA (marcação na turma; movimentos só no histórico caem em “demais”)
-         * - Demais compras / importação: restante
+         * - Demais vendas / importação: restante
          *
          * "Transferência > Para essa" (bloco abaixo) continua sendo contagem de linhas no histórico de movimentação.
          */
@@ -2423,16 +2423,46 @@ export class TurmasService {
             )
             .addSelect(
                 `(
-                    SELECT (tr.tipo_palestra = true OR tr.tipo_treinamento = false)
-                    FROM historico_transferencias_alunos h
-                    INNER JOIN turmas t_de ON t_de.id = h.id_turma_de
-                    INNER JOIN treinamentos tr ON tr.id = t_de.id_treinamento
-                    WHERE h.id_turma_aluno_para = ta.id
-                      AND h.id_turma_para = :id_turma
-                      AND h.id_turma_de <> :id_turma
-                      AND h.deletado_em IS NULL
-                    ORDER BY h.id DESC
-                    LIMIT 1
+                    COALESCE((
+                        SELECT (
+                            (tr.tipo_palestra = true OR tr.tipo_treinamento = false)
+                            OR (
+                                t_de.edicao_turma IS NOT NULL
+                                AND LEFT(UPPER(TRIM(t_de.edicao_turma)), 3) = 'MC_'
+                            )
+                        )
+                        FROM historico_transferencias_alunos h
+                        INNER JOIN turmas t_de ON t_de.id = h.id_turma_de
+                        INNER JOIN treinamentos tr ON tr.id = t_de.id_treinamento
+                        WHERE h.id_turma_aluno_para = ta.id
+                          AND h.id_turma_para = :id_turma
+                          AND h.id_turma_de <> :id_turma
+                          AND h.deletado_em IS NULL
+                        ORDER BY h.id DESC
+                        LIMIT 1
+                    ), false)
+                    OR (
+                        ta.id_turma_transferencia_de IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM turmas t_td
+                            INNER JOIN treinamentos tr_td ON tr_td.id = t_td.id_treinamento
+                            WHERE t_td.id = ta.id_turma_transferencia_de
+                              AND t_td.deletado_em IS NULL
+                              AND (
+                                  tr_td.tipo_palestra = true
+                                  OR tr_td.tipo_treinamento = false
+                                  OR (
+                                      t_td.edicao_turma IS NOT NULL
+                                      AND LEFT(UPPER(TRIM(t_td.edicao_turma)), 3) = 'MC_'
+                                  )
+                              )
+                        )
+                    )
+                    OR (
+                        ta.codigo_turma_origem_planilha IS NOT NULL
+                        AND LEFT(UPPER(TRIM(ta.codigo_turma_origem_planilha)), 3) = 'MC_'
+                    )
                 )`,
                 'origem_turma_eh_palestra_ou_masterclass',
             )
@@ -2591,16 +2621,56 @@ export class TurmasService {
                     { id_turma },
                 );
                 qb.andWhere(
-                    `EXISTS (
-                        SELECT 1
-                        FROM historico_transferencias_alunos hta
-                        INNER JOIN turmas t_de ON t_de.id = hta.id_turma_de
-                        INNER JOIN treinamentos tr_de ON tr_de.id = t_de.id_treinamento
-                        WHERE hta.id_turma_aluno_para = ta.id
-                          AND hta.id_turma_para = :id_turma
-                          AND hta.id_turma_de <> :id_turma
-                          AND (tr_de.tipo_palestra = true OR tr_de.tipo_treinamento = false)
-                          AND hta.deletado_em IS NULL
+                    `(
+                        EXISTS (
+                            SELECT 1
+                            FROM historico_transferencias_alunos hta
+                            INNER JOIN turmas t_de ON t_de.id = hta.id_turma_de
+                            INNER JOIN treinamentos tr_de ON tr_de.id = t_de.id_treinamento
+                            WHERE hta.id_turma_aluno_para = ta.id
+                              AND hta.id_turma_para = :id_turma
+                              AND hta.id_turma_de <> :id_turma
+                              AND hta.deletado_em IS NULL
+                              AND hta.id = (
+                                  SELECT h2.id
+                                  FROM historico_transferencias_alunos h2
+                                  WHERE h2.id_turma_aluno_para = ta.id
+                                    AND h2.id_turma_para = :id_turma
+                                    AND h2.id_turma_de <> :id_turma
+                                    AND h2.deletado_em IS NULL
+                                  ORDER BY h2.id DESC
+                                  LIMIT 1
+                              )
+                              AND (
+                                  (tr_de.tipo_palestra = true OR tr_de.tipo_treinamento = false)
+                                  OR (
+                                      t_de.edicao_turma IS NOT NULL
+                                      AND LEFT(UPPER(TRIM(t_de.edicao_turma)), 3) = 'MC_'
+                                  )
+                              )
+                        )
+                        OR (
+                            ta.id_turma_transferencia_de IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1
+                                FROM turmas t_td
+                                INNER JOIN treinamentos tr_td ON tr_td.id = t_td.id_treinamento
+                                WHERE t_td.id = ta.id_turma_transferencia_de
+                                  AND t_td.deletado_em IS NULL
+                                  AND (
+                                      tr_td.tipo_palestra = true
+                                      OR tr_td.tipo_treinamento = false
+                                      OR (
+                                          t_td.edicao_turma IS NOT NULL
+                                          AND LEFT(UPPER(TRIM(t_td.edicao_turma)), 3) = 'MC_'
+                                      )
+                                      )
+                            )
+                        )
+                        OR (
+                            ta.codigo_turma_origem_planilha IS NOT NULL
+                            AND LEFT(UPPER(TRIM(ta.codigo_turma_origem_planilha)), 3) = 'MC_'
+                        )
                     )`,
                     { id_turma },
                 );
@@ -2643,7 +2713,7 @@ export class TurmasService {
                 });
                 break;
             case 'origem_importacao':
-                titulo = 'Origem: Demais compras / importação';
+                titulo = 'Origem: Demais vendas / importação';
                 qb.andWhere('ta.vaga_bonus = false');
                 qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno <> :origemBonus)', {
                     origemBonus: EOrigemAlunos.ALUNO_BONUS,
@@ -2667,16 +2737,56 @@ export class TurmasService {
                     { id_turma },
                 );
                 qb.andWhere(
-                    `NOT EXISTS (
-                        SELECT 1
-                        FROM historico_transferencias_alunos hta
-                        INNER JOIN turmas t_de ON t_de.id = hta.id_turma_de
-                        INNER JOIN treinamentos tr_de ON tr_de.id = t_de.id_treinamento
-                        WHERE hta.id_turma_aluno_para = ta.id
-                          AND hta.id_turma_para = :id_turma
-                          AND hta.id_turma_de <> :id_turma
-                          AND (tr_de.tipo_palestra = true OR tr_de.tipo_treinamento = false)
-                          AND hta.deletado_em IS NULL
+                    `NOT (
+                        EXISTS (
+                            SELECT 1
+                            FROM historico_transferencias_alunos hta
+                            INNER JOIN turmas t_de ON t_de.id = hta.id_turma_de
+                            INNER JOIN treinamentos tr_de ON tr_de.id = t_de.id_treinamento
+                            WHERE hta.id_turma_aluno_para = ta.id
+                              AND hta.id_turma_para = :id_turma
+                              AND hta.id_turma_de <> :id_turma
+                              AND hta.deletado_em IS NULL
+                              AND hta.id = (
+                                  SELECT h2.id
+                                  FROM historico_transferencias_alunos h2
+                                  WHERE h2.id_turma_aluno_para = ta.id
+                                    AND h2.id_turma_para = :id_turma
+                                    AND h2.id_turma_de <> :id_turma
+                                    AND h2.deletado_em IS NULL
+                                  ORDER BY h2.id DESC
+                                  LIMIT 1
+                              )
+                              AND (
+                                  (tr_de.tipo_palestra = true OR tr_de.tipo_treinamento = false)
+                                  OR (
+                                      t_de.edicao_turma IS NOT NULL
+                                      AND LEFT(UPPER(TRIM(t_de.edicao_turma)), 3) = 'MC_'
+                                  )
+                              )
+                        )
+                        OR (
+                            ta.id_turma_transferencia_de IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1
+                                FROM turmas t_td
+                                INNER JOIN treinamentos tr_td ON tr_td.id = t_td.id_treinamento
+                                WHERE t_td.id = ta.id_turma_transferencia_de
+                                  AND t_td.deletado_em IS NULL
+                                  AND (
+                                      tr_td.tipo_palestra = true
+                                      OR tr_td.tipo_treinamento = false
+                                      OR (
+                                          t_td.edicao_turma IS NOT NULL
+                                          AND LEFT(UPPER(TRIM(t_td.edicao_turma)), 3) = 'MC_'
+                                      )
+                                  )
+                            )
+                        )
+                        OR (
+                            ta.codigo_turma_origem_planilha IS NOT NULL
+                            AND LEFT(UPPER(TRIM(ta.codigo_turma_origem_planilha)), 3) = 'MC_'
+                        )
                     )`,
                     { id_turma },
                 );

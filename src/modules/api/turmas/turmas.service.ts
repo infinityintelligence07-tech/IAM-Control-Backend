@@ -131,6 +131,79 @@ export class TurmasService {
     }
 
     /**
+     * Contadores para listagem de turmas sem carregar turmas_alunos (evita N×M linhas no findAll).
+     */
+    private async getContadoresListagemPorTurmas(turmaIds: number[]): Promise<
+        Record<
+            number,
+            {
+                alunos_total: number;
+                alunos_confirmados: number;
+                vindos_transferencia: number;
+                presentes: number;
+                inadimplentes: number;
+            }
+        >
+    > {
+        if (!turmaIds.length) return {};
+
+        const empty = () => ({
+            alunos_total: 0,
+            alunos_confirmados: 0,
+            vindos_transferencia: 0,
+            presentes: 0,
+            inadimplentes: 0,
+        });
+        const result: Record<number, ReturnType<typeof empty>> = {};
+        for (const id of turmaIds) {
+            result[id] = empty();
+        }
+
+        const stConfirm = [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN];
+
+        const raw = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .where('ta.deletado_em IS NULL')
+            .andWhere('ta.id_turma IN (:...ids)', { ids: turmaIds })
+            .select('ta.id_turma', 'id_turma')
+            .addSelect('COUNT(*)::int', 'total')
+            .addSelect(
+                `SUM(CASE WHEN ta.id_turma_transferencia_para IS NULL AND ta.status_aluno_turma IN (:...stConfirm) THEN 1 ELSE 0 END)::int`,
+                'confirmados',
+            )
+            .addSelect(
+                `SUM(CASE WHEN ta.origem_aluno = :origemTr AND ta.id_turma_transferencia_de IS NOT NULL THEN 1 ELSE 0 END)::int`,
+                'vindos_transferencia',
+            )
+            .addSelect(
+                `SUM(CASE WHEN ta.presenca_turma = :pres AND (aluno.status_aluno_geral IS NULL OR aluno.status_aluno_geral <> :inad) THEN 1 ELSE 0 END)::int`,
+                'presentes',
+            )
+            .addSelect(`SUM(CASE WHEN aluno.status_aluno_geral = :inad2 THEN 1 ELSE 0 END)::int`, 'inadimplentes')
+            .setParameter('stConfirm', stConfirm)
+            .setParameter('origemTr', EOrigemAlunos.TRANSFERENCIA)
+            .setParameter('pres', EPresencaTurmas.PRESENTE)
+            .setParameter('inad', EStatusAlunosGeral.INADIMPLENTE)
+            .setParameter('inad2', EStatusAlunosGeral.INADIMPLENTE)
+            .groupBy('ta.id_turma')
+            .getRawMany();
+
+        for (const row of raw) {
+            const id = Number(row.id_turma);
+            result[id] = {
+                alunos_total: Number(row.total ?? 0),
+                alunos_confirmados: Number(row.confirmados ?? 0),
+                vindos_transferencia: Number(row.vindos_transferencia ?? 0),
+                presentes: Number(row.presentes ?? 0),
+                inadimplentes: Number(row.inadimplentes ?? 0),
+            };
+        }
+
+        return result;
+    }
+
+    /**
      * Formatar data para o formato YYYY-MM-DD (apenas data, sem hora)
      */
     private formatDateToDateOnly(dateString: string): string {
@@ -161,7 +234,7 @@ export class TurmasService {
      * Verificar e atualizar automaticamente o status da turma para ENCERRADA
      * quando necessário (data atual > data_final OU (data atual >= data_inicio E expectativa_real >= capacidade_sala))
      */
-    private async verificarEAtualizarStatusTurma(turma: any): Promise<void> {
+    private async verificarEAtualizarStatusTurma(turma: any, opts?: { inscritosParaExpectativa?: number }): Promise<void> {
         try {
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
@@ -196,7 +269,7 @@ export class TurmasService {
             }
 
             // Calcular expectativa real
-            const inscritos = turma.turmasAlunos?.length || 0;
+            const inscritos = opts?.inscritosParaExpectativa ?? turma.turmasAlunos?.length ?? 0;
             const alunosBonus = turma.detalhamento_bonus?.length || 0;
             const isIPR = turma.id_treinamento_fk?.sigla_treinamento === 'IPR';
             const expectativaReal = isIPR ? Math.round(inscritos + (alunosBonus - alunosBonus * 0.5) - inscritos * 0.1) : inscritos;
@@ -342,8 +415,6 @@ export class TurmasService {
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
         const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final } = filters;
 
-        console.log('Filtros recebidos:', filters);
-
         try {
             let turmas: any[];
             let total: number;
@@ -355,8 +426,6 @@ export class TurmasService {
                     .leftJoinAndSelect('turma.id_polo_fk', 'polo', 'polo.deletado_em IS NULL')
                     .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento', 'treinamento.deletado_em IS NULL')
                     .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
-                    .leftJoinAndSelect('turma.turmasAlunos', 'turmasAlunos', 'turmasAlunos.deletado_em IS NULL')
-                    .leftJoinAndSelect('turmasAlunos.id_aluno_fk', 'aluno', 'aluno.deletado_em IS NULL')
                     .where('turma.deletado_em IS NULL');
 
                 // Aplicar filtros básicos
@@ -419,7 +488,7 @@ export class TurmasService {
 
                 const findOptions: FindManyOptions = {
                     where: whereConditions,
-                    relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos', 'turmasAlunos.id_aluno_fk'],
+                    relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk'],
                     order: {
                         criado_em: 'DESC',
                     },
@@ -427,18 +496,7 @@ export class TurmasService {
                     take: limit,
                 };
 
-                console.log('Opções de busca:', JSON.stringify(findOptions, null, 2));
-
                 [turmas, total] = await this.uow.turmasRP.findAndCount(findOptions);
-            }
-
-            console.log(`Encontradas ${turmas.length} turmas de um total de ${total}`);
-
-            // Segurança: garante que vínculos soft-deletados não entrem em listas/métricas.
-            for (const turma of turmas) {
-                if (Array.isArray(turma?.turmasAlunos)) {
-                    turma.turmasAlunos = turma.turmasAlunos.filter((ta: any) => !ta?.deletado_em);
-                }
             }
 
             // Filtrar por tipo de treinamento se especificado
@@ -456,49 +514,33 @@ export class TurmasService {
                 });
             }
 
-            // Verificar e atualizar status das turmas automaticamente
+            const idsListagem = turmasFiltradas.map((t) => t.id);
+
+            const turmasPalestrasIds = turmasFiltradas
+                .filter((t) => t.id_treinamento_fk?.tipo_palestra === true || t.id_treinamento_fk?.tipo_treinamento === false)
+                .map((t) => t.id);
+
+            const [preCadastrosCount, contadoresListagem, transferidosCountByTurma] = await Promise.all([
+                this.getPreCadastrosCountByTurmas(turmasPalestrasIds),
+                this.getContadoresListagemPorTurmas(idsListagem),
+                this.getTransferidosCountByTurmas(idsListagem),
+            ]);
+
+            // Verificar e atualizar status das turmas automaticamente (usa contagens agregadas, sem carregar alunos)
             for (const turma of turmasFiltradas) {
-                await this.verificarEAtualizarStatusTurma(turma);
+                const isPalestra =
+                    turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
+                const inscritosParaExpectativa = isPalestra
+                    ? preCadastrosCount[turma.id]?.total ?? 0
+                    : contadoresListagem[turma.id]?.alunos_total ?? 0;
+                await this.verificarEAtualizarStatusTurma(turma, { inscritosParaExpectativa });
             }
-
-            // Debug: verificar turma 23
-            const turma23 = turmasFiltradas.find((t) => t.id === 23);
-            if (turma23) {
-                console.log(`🎯 [DEBUG] Turma 23 encontrada:`);
-                console.log(`  - id_treinamento: ${turma23.id_treinamento}`);
-                console.log(`  - id_treinamento_fk: ${turma23.id_treinamento_fk ? 'EXISTS' : 'NULL'}`);
-                if (turma23.id_treinamento_fk) {
-                    console.log(`  - tipo_palestra: ${turma23.id_treinamento_fk.tipo_palestra}`);
-                    console.log(`  - tipo_treinamento: ${turma23.id_treinamento_fk.tipo_treinamento}`);
-                }
-            } else {
-                console.log(`⚠️ [DEBUG] Turma 23 NÃO encontrada nas turmas filtradas`);
-            }
-
-            // Buscar contadores de pré-cadastrados apenas para turmas de palestra/masterclass
-            const turmasPalestras = turmasFiltradas.filter((t) => {
-                const isPalestra = t.id_treinamento_fk?.tipo_palestra === true || t.id_treinamento_fk?.tipo_treinamento === false;
-                if (t.id === 23) {
-                    console.log(
-                        `🎯 [DEBUG] Turma 23 - tipo_palestra: ${t.id_treinamento_fk?.tipo_palestra}, tipo_treinamento: ${t.id_treinamento_fk?.tipo_treinamento}, isPalestra: ${isPalestra}`,
-                    );
-                }
-                return isPalestra;
-            });
-            const turmasPalestrasIds = turmasPalestras.map((t) => t.id);
-            console.log(`🎯 [DEBUG] Turmas identificadas como palestras: ${turmasPalestrasIds.join(', ')}`);
-            const preCadastrosCount = await this.getPreCadastrosCountByTurmas(turmasPalestrasIds);
-            const transferidosCountByTurma = await this.getTransferidosCountByTurmas(turmasFiltradas.map((t) => t.id));
 
             // Transformar dados para o formato de resposta
             const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => {
-                // Debug: verificar dados dos alunos
-                console.log(`🔍 [DEBUG] Turma ${turma.id} - Total de alunos: ${turma.turmasAlunos?.length || 0}`);
-                if (turma.turmasAlunos) {
-                    turma.turmasAlunos.forEach((ta, index) => {
-                        console.log(`  Aluno ${index + 1}: ID=${ta.id_aluno}, Status=${ta.id_aluno_fk?.status_aluno_geral}, Nome=${ta.id_aluno_fk?.nome}`);
-                    });
-                }
+                const m = contadoresListagem[turma.id];
+                const isPalestra =
+                    turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
 
                 return {
                     id: turma.id,
@@ -557,44 +599,14 @@ export class TurmasService {
                               nome: turma.lider_evento_fk.nome,
                           }
                         : undefined,
-                    // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
-                    alunos_count: (() => {
-                        const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
-                        if (turma.id === 23) {
-                            console.log(`🎯 [DEBUG] Turma 23 - Calculando alunos_count:`);
-                            console.log(`  - isPalestra: ${isPalestra}`);
-                            console.log(`  - preCadastrosCount[23]: ${JSON.stringify(preCadastrosCount[turma.id])}`);
-                            console.log(`  - alunos_count será: ${isPalestra ? preCadastrosCount[turma.id]?.total || 0 : turma.turmasAlunos?.length || 0}`);
-                        }
-                        if (isPalestra) {
-                            return preCadastrosCount[turma.id]?.total || 0;
-                        }
-                        return turma.turmasAlunos?.length || 0;
-                    })(),
-                    alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
+                    // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, contagens agregadas
+                    alunos_count: isPalestra ? preCadastrosCount[turma.id]?.total || 0 : m?.alunos_total || 0,
+                    alunos_confirmados_count: m?.alunos_confirmados || 0,
                     transferidos_count: transferidosCountByTurma[turma.id] || 0,
-                    vindos_transferencia_count:
-                        turma.turmasAlunos?.filter(
-                            (ta) =>
-                                ta.origem_aluno === EOrigemAlunos.TRANSFERENCIA &&
-                                ta.id_turma_transferencia_de !== null &&
-                                ta.id_turma_transferencia_de !== undefined,
-                        ).length || 0,
+                    vindos_transferencia_count: m?.vindos_transferencia || 0,
                     pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
-                    presentes_count:
-                        turma.turmasAlunos?.filter(
-                            (ta) => ta.presenca_turma === EPresencaTurmas.PRESENTE && ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
-                        ).length || 0,
-                    inadimplentes_count: (() => {
-                        const inadimplentes = turma.turmasAlunos?.filter((ta) => ta.id_aluno_fk?.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE) || [];
-                        console.log(`🔍 [DEBUG] Turma ${turma.id} - Inadimplentes encontrados: ${inadimplentes.length}`);
-                        inadimplentes.forEach((ta, index) => {
-                            console.log(
-                                `  Inadimplente ${index + 1}: ID=${ta.id_aluno}, Status=${ta.id_aluno_fk?.status_aluno_geral}, Nome=${ta.id_aluno_fk?.nome}`,
-                            );
-                        });
-                        return inadimplentes.length;
-                    })(),
+                    presentes_count: m?.presentes || 0,
+                    inadimplentes_count: m?.inadimplentes || 0,
                 };
             });
 

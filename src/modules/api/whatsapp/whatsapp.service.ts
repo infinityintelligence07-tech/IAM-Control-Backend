@@ -591,7 +591,12 @@ Vamos Prosperar! 🙌`;
 
                 const polo = turma?.id_polo_fk;
                 const enderecoEvento = turma?.id_endereco_evento_fk;
-                const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
+                const isEnderecoManual = !enderecoEvento?.id;
+                const localEventoPredefinido = enderecoEvento?.local_evento?.trim();
+                const complementoManual = turma?.complemento?.trim();
+                // Regra: se o endereço foi preenchido manualmente (sem endereço predefinido)
+                // e não houver nome do local, usar o "complemento" como nome do local na mensagem.
+                const localStr = localEventoPredefinido || (isEnderecoManual && complementoManual ? complementoManual : null) || polo?.polo || 'A confirmar';
                 const buildEndereco = (
                     e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null,
                 ): string => {

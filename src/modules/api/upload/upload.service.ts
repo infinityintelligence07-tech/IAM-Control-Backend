@@ -1413,7 +1413,7 @@ export class UploadService {
         }
 
         const worksheet = workbook.Sheets[abaSubirAluno];
-        return XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        return this.sheetToRowsWithColumnCap(worksheet, 32);
     }
 
     private parseMasterclassXlsxRows(buffer: Buffer): any[][] {
@@ -1440,7 +1440,7 @@ export class UploadService {
 
         const getRowsFromSheet = (sheetName: string): any[][] => {
             const sheet = workbook.Sheets[sheetName];
-            return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+            return this.sheetToRowsWithColumnCap(sheet, 16);
         };
 
         // Seleção por estrutura (modelo de colunas), sem priorizar data/aba específica:
@@ -1477,6 +1477,46 @@ export class UploadService {
 
         // Último fallback: mantém comportamento legado.
         return this.parseXlsxRows(buffer);
+    }
+
+    /**
+     * Evita estouro de memória em planilhas com range muito largo (milhares de colunas vazias "formatadas").
+     * Lê apenas as primeiras colunas relevantes para os importadores.
+     */
+    private sheetToRowsWithColumnCap(sheet: XLSX.WorkSheet, maxColumns: number): any[][] {
+        if (!sheet) return [];
+        const ref = sheet['!ref'];
+        if (!ref) return [];
+
+        const range = XLSX.utils.decode_range(ref);
+        const cappedEndCol = Math.min(range.e.c, Math.max(0, maxColumns - 1));
+        const rows: any[][] = [];
+
+        for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex++) {
+            const row: any[] = [];
+
+            for (let colIndex = range.s.c; colIndex <= cappedEndCol; colIndex++) {
+                const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+                const cell = sheet[address];
+
+                if (!cell) {
+                    row.push('');
+                    continue;
+                }
+
+                const formatted = XLSX.utils.format_cell(cell);
+                row.push(typeof formatted === 'string' ? formatted : String(formatted ?? cell.v ?? ''));
+            }
+
+            // Reduz payload removendo cauda vazia sem afetar busca por cabeçalho.
+            while (row.length > 0 && (row[row.length - 1] === '' || row[row.length - 1] === null || row[row.length - 1] === undefined)) {
+                row.pop();
+            }
+
+            rows.push(row);
+        }
+
+        return rows;
     }
 
     private parseMasterclassSpreadsheetRows(rows: any[][]): Array<{

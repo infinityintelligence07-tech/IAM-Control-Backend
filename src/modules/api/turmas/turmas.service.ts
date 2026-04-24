@@ -168,14 +168,8 @@ export class TurmasService {
             .andWhere('ta.id_turma IN (:...ids)', { ids: turmaIds })
             .select('ta.id_turma', 'id_turma')
             .addSelect('COUNT(*)::int', 'total')
-            .addSelect(
-                `SUM(CASE WHEN ta.id_turma_transferencia_para IS NULL AND ta.status_aluno_turma IN (:...stConfirm) THEN 1 ELSE 0 END)::int`,
-                'confirmados',
-            )
-            .addSelect(
-                `SUM(CASE WHEN ta.origem_aluno = :origemTr AND ta.id_turma_transferencia_de IS NOT NULL THEN 1 ELSE 0 END)::int`,
-                'vindos_transferencia',
-            )
+            .addSelect(`SUM(CASE WHEN ta.id_turma_transferencia_para IS NULL AND ta.status_aluno_turma IN (:...stConfirm) THEN 1 ELSE 0 END)::int`, 'confirmados')
+            .addSelect(`SUM(CASE WHEN ta.origem_aluno = :origemTr AND ta.id_turma_transferencia_de IS NOT NULL THEN 1 ELSE 0 END)::int`, 'vindos_transferencia')
             .addSelect(
                 `SUM(CASE WHEN ta.presenca_turma = :pres AND (aluno.status_aluno_geral IS NULL OR aluno.status_aluno_geral <> :inad) THEN 1 ELSE 0 END)::int`,
                 'presentes',
@@ -528,19 +522,15 @@ export class TurmasService {
 
             // Verificar e atualizar status das turmas automaticamente (usa contagens agregadas, sem carregar alunos)
             for (const turma of turmasFiltradas) {
-                const isPalestra =
-                    turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
-                const inscritosParaExpectativa = isPalestra
-                    ? preCadastrosCount[turma.id]?.total ?? 0
-                    : contadoresListagem[turma.id]?.alunos_total ?? 0;
+                const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
+                const inscritosParaExpectativa = isPalestra ? (preCadastrosCount[turma.id]?.total ?? 0) : (contadoresListagem[turma.id]?.alunos_total ?? 0);
                 await this.verificarEAtualizarStatusTurma(turma, { inscritosParaExpectativa });
             }
 
             // Transformar dados para o formato de resposta
             const turmasResponse: TurmaResponseDto[] = turmasFiltradas.map((turma) => {
                 const m = contadoresListagem[turma.id];
-                const isPalestra =
-                    turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
+                const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
 
                 return {
                     id: turma.id,
@@ -1937,9 +1927,7 @@ export class TurmasService {
             relations: ['id_treinamento_fk', 'id_polo_fk'],
             order: { data_inicio: 'ASC' },
         });
-        const turmasTreinamento = outrasTurmas.filter(
-            (t) => t.id_treinamento_fk?.tipo_palestra !== true && !this.isTurmaBloqueadaParaTransferencia(t),
-        );
+        const turmasTreinamento = outrasTurmas.filter((t) => t.id_treinamento_fk?.tipo_palestra !== true && !this.isTurmaBloqueadaParaTransferencia(t));
 
         const comDataFutura = turmasTreinamento.filter((t) => (t.data_inicio ?? '') >= hoje);
         const edicaoMaisProximaData = comDataFutura[0] ?? null;
@@ -2493,8 +2481,7 @@ export class TurmasService {
         let origemTransferencia = 0;
         let origemImportacao = 0;
 
-        const isTruthyPgBool = (v: unknown): boolean =>
-            v === true || v === 'true' || v === 't' || v === 1 || v === '1';
+        const isTruthyPgBool = (v: unknown): boolean => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
 
         for (const row of alunosOrigemEnriquecidos) {
             const origemAluno = String(row.origem_aluno || '').toUpperCase();
@@ -2635,12 +2622,9 @@ export class TurmasService {
             case 'origem_masterclass':
                 titulo = 'Origem: Masterclass';
                 qb.andWhere('ta.vaga_bonus = false');
-                qb.andWhere(
-                    '(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclMc))',
-                    {
-                        origemExclMc: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
-                    },
-                );
+                qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclMc))', {
+                    origemExclMc: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
+                });
                 qb.andWhere(
                     `NOT EXISTS (
                         SELECT 1
@@ -2739,13 +2723,13 @@ export class TurmasService {
                 break;
             case 'origem_transbordo':
                 titulo = 'Origem: Transbordo';
-                qb.andWhere('UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, \'\'))) = :origemTransbordo', {
+                qb.andWhere("UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) = :origemTransbordo", {
                     origemTransbordo: 'TRANSBORDO',
                 });
                 break;
             case 'origem_liberty':
                 titulo = 'Origem: Liberty';
-                qb.andWhere('UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, \'\'))) = :origemLiberty', {
+                qb.andWhere("UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) = :origemLiberty", {
                     origemLiberty: 'LIBERTY',
                 });
                 break;
@@ -2763,18 +2747,11 @@ export class TurmasService {
                     origemBonus: EOrigemAlunos.ALUNO_BONUS,
                 });
                 qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclDemais))', {
-                    origemExclDemais: [
-                        EOrigemAlunos.CORTESIA,
-                        EOrigemAlunos.SORTEIO,
-                        EOrigemAlunos.TRANSFERENCIA,
-                    ],
+                    origemExclDemais: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.TRANSFERENCIA],
                 });
-                qb.andWhere(
-                    'UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, \'\'))) NOT IN (:...origensPlanilhaExclDemais)',
-                    {
-                        origensPlanilhaExclDemais: ['TRANSBORDO', 'LIBERTY'],
-                    },
-                );
+                qb.andWhere("UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) NOT IN (:...origensPlanilhaExclDemais)", {
+                    origensPlanilhaExclDemais: ['TRANSBORDO', 'LIBERTY'],
+                });
                 qb.andWhere(
                     `NOT EXISTS (
                         SELECT 1
@@ -3113,9 +3090,7 @@ export class TurmasService {
                 turmaAluno.atualizado_por = updateAlunoDto.atualizado_por;
             }
 
-            const solicitouCancelamento =
-                updateAlunoDto.status_aluno_turma === EStatusAlunosTurmas.CANCELADO &&
-                statusAnterior !== EStatusAlunosTurmas.CANCELADO;
+            const solicitouCancelamento = updateAlunoDto.status_aluno_turma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
 
             if (solicitouCancelamento) {
                 const turmaOrigem = turmaAluno.id_turma_fk;
@@ -3145,13 +3120,15 @@ export class TurmasService {
                         );
                     }
 
-                    const idMatriculaDestino = await this.transferirCancelamentoParaTurmaCancelada(
-                        turmaAluno,
-                        turmaCancelada,
-                    );
+                    const idMatriculaDestino = await this.transferirCancelamentoParaTurmaCancelada(turmaAluno, turmaCancelada);
                     const matriculaDestinoCompleta = await this.uow.turmasAlunosRP.findOne({
                         where: { id: idMatriculaDestino },
-                        relations: ['id_aluno_fk', 'id_turma_transferencia_de_fk', 'id_turma_transferencia_de_fk.id_treinamento_fk', 'id_turma_transferencia_de_fk.id_polo_fk'],
+                        relations: [
+                            'id_aluno_fk',
+                            'id_turma_transferencia_de_fk',
+                            'id_turma_transferencia_de_fk.id_treinamento_fk',
+                            'id_turma_transferencia_de_fk.id_polo_fk',
+                        ],
                     });
 
                     return {

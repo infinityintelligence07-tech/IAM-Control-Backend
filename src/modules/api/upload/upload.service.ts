@@ -432,7 +432,7 @@ export class UploadService {
             const codigoTurmaOrigem = this.extractCodigoTurmaOrigem(row.obs);
             // A 1a ocorrência do titular deve permanecer como ingresso.
             // "BONUS" em observação só reforça vínculo em repetições.
-            const isBonusFromObs = isBonusByDuplicate && obsNormalizada.includes('BONUS');
+            const isBonusFromObs = obsNormalizada.includes('BONUS');
             const isBonus = isBonusByDuplicate || row.isBonus || isBonusFromObs;
 
             // Se houver linha de bônus/convidado sem e-mail do bônus, replicar e-mail do titular com +bonusN.
@@ -447,7 +447,6 @@ export class UploadService {
             let origemAluno = this.mapOrigemAluno({
                 isBonus,
                 codigoTurmaOrigem,
-                occurrence: nextOccurrence,
             });
             if (isTransferenciaPorStatus) {
                 origemAluno = EOrigemAlunos.TRANSFERENCIA;
@@ -777,6 +776,14 @@ export class UploadService {
         const parsedRows = this.parseMasterclassSpreadsheetRows(rows);
         const turmaCodigoMap = await this.buildTurmaCodigoMap();
         const turmaConfrontoMap = await this.buildTurmaConfrontoMap();
+        const turmaLookupCache = new Map<
+            string,
+            {
+                turmaId: number | null;
+                matchType: 'codigo' | 'edicao' | 'ambigua' | 'nao_encontrada';
+                turmaCodigoNormalizado: string;
+            }
+        >();
 
         const erros: string[] = [];
         const avisos: string[] = [];
@@ -835,6 +842,7 @@ export class UploadService {
             const destinoLookup = await this.resolveTurmaIdByCodigo({
                 codigoRaw: row.turmaDestinoCodigo,
                 turmaCodigoMap,
+                cache: turmaLookupCache,
             });
             if (destinoLookup.matchType === 'edicao') {
                 avisos.push(`Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" encontrada por edição.`);
@@ -854,6 +862,7 @@ export class UploadService {
             const isTurmaDestinoConfronto = turmaConfrontoMap.get(turmaDestinoId) === true;
 
             const origemMasterclass = this.normalizeMasterclassTurmaOrigem(row.turmaOrigemCodigo);
+            const isBonusOrigemMasterclass = origemMasterclass.isBonusOrigem;
             const codigoOrigem = this.normalizeCodeKey(origemMasterclass.codigoParaLookup || row.turmaOrigemCodigo);
             const origemVenda = origemMasterclass.isTimeDeVendas;
             const origemRaw = String(row.turmaOrigemCodigo || '').trim();
@@ -867,6 +876,7 @@ export class UploadService {
                 const origemLookup = await this.resolveTurmaIdByCodigo({
                     codigoRaw: origemMasterclass.codigoParaLookup,
                     turmaCodigoMap,
+                    cache: turmaLookupCache,
                 });
                 if (origemLookup.matchType === 'ambigua') {
                     erros.push(
@@ -905,6 +915,7 @@ export class UploadService {
                     const bonusLookup = await this.resolveTurmaIdByCodigo({
                         codigoRaw: turmaBonusCodigoFinal,
                         turmaCodigoMap,
+                        cache: turmaLookupCache,
                     });
                     if (bonusLookup.matchType === 'edicao') {
                         avisos.push(`Linha ${row.linha}: turma de bônus "${turmaBonusCodigoFinal}" encontrada por edição.`);
@@ -947,12 +958,12 @@ export class UploadService {
                     quantidadeBonusExtraPorPessoa,
                     turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
                     isTimeDeVendas: origemVenda,
-                    isBonusEntry: false,
+                    isBonusEntry: isBonusOrigemMasterclass,
                     isBonusExtraEntry: false,
                     modoConfronto: isTurmaDestinoConfronto,
                     statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
                     statusFinal: statusImportacao,
-                    origemFinal: EOrigemAlunos.COMPROU_INGRESSO,
+                    origemFinal: isBonusOrigemMasterclass ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO,
                     idTurmaTransferenciaDe,
                     codigoTurmaOrigemPlanilha,
                 });
@@ -1001,6 +1012,12 @@ export class UploadService {
         }
 
         const emailsUnicos = Array.from(new Set(candidates.map((c) => c.email)));
+        const firstCandidateByEmail = new Map<string, (typeof candidates)[number]>();
+        for (const candidate of candidates) {
+            if (!firstCandidateByEmail.has(candidate.email)) {
+                firstCandidateByEmail.set(candidate.email, candidate);
+            }
+        }
         const alunosExistentes = emailsUnicos.length
             ? await this.uow.alunosRP.find({
                   where: { email: In(emailsUnicos) },
@@ -1012,7 +1029,7 @@ export class UploadService {
             const emailsFaltantes = emailsUnicos.filter((email) => !alunoByEmail.has(email));
             const novosAlunos = emailsFaltantes
                 .map((email) => {
-                    const base = candidates.find((c) => c.email === email);
+                    const base = firstCandidateByEmail.get(email);
                     if (!base) return null;
                     return this.uow.alunosRP.create({
                         nome: base.nomeOriginal || 'Aluno',
@@ -1269,31 +1286,47 @@ export class UploadService {
                 lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
             }
 
-            // Para cada candidato, buscar o vínculo salvo e criar histórico + vínculo de bônus
+            const vinculosSalvos =
+                idsAlunosExistentes.length > 0 && turmaIdsDestino.length > 0
+                    ? await this.uow.turmasAlunosRP.find({
+                          where: {
+                              id_turma: In(turmaIdsDestino),
+                              id_aluno: In(idsAlunosExistentes),
+                              deletado_em: null,
+                          },
+                      })
+                    : [];
+            const vinculoSalvoByKey = new Map(vinculosSalvos.map((vinculo) => [`${vinculo.id_turma}|${vinculo.id_aluno}|${vinculo.nome_cracha}`, vinculo]));
+
+            const idsAlunosNumericos = Array.from(new Set(Array.from(alunoByEmail.values()).map((aluno) => aluno.id)));
+            const historicosExistentes =
+                idsAlunosNumericos.length > 0 && turmaIdsDestino.length > 0
+                    ? await this.uow.historicoTransferenciasRP.find({
+                          where: {
+                              id_aluno: In(idsAlunosNumericos),
+                              id_turma_para: In(turmaIdsDestino),
+                          },
+                          select: ['id_aluno', 'id_turma_para', 'id_turma_aluno_para'],
+                      })
+                    : [];
+            const historicoExistenteKeys = new Set(
+                historicosExistentes.map((historico) => `${historico.id_aluno}|${historico.id_turma_para}|${historico.id_turma_aluno_para}`),
+            );
+            const historicosParaCriar: Array<ReturnType<typeof this.uow.historicoTransferenciasRP.create>> = [];
+
+            // Para cada candidato, usar vínculo já carregado e criar histórico + vínculo de bônus
             for (const cand of candidates) {
                 const aluno = alunoByEmail.get(cand.email);
                 if (!aluno) continue;
 
-                const vinculoSalvo = await this.uow.turmasAlunosRP.findOne({
-                    where: {
-                        id_turma: cand.turmaDestinoId,
-                        id_aluno: String(aluno.id),
-                        nome_cracha: cand.nomeCracha,
-                        deletado_em: null,
-                    },
-                });
+                const vinculoKey = `${cand.turmaDestinoId}|${String(aluno.id)}|${cand.nomeCracha}`;
+                const vinculoSalvo = vinculoSalvoByKey.get(vinculoKey);
                 if (!vinculoSalvo) continue;
 
                 // Criar histórico para Time de Vendas ou transferência de masterclass
                 if (cand.isTimeDeVendas || cand.idTurmaTransferenciaDe) {
-                    const existsHistorico = await this.uow.historicoTransferenciasRP.findOne({
-                        where: {
-                            id_aluno: aluno.id,
-                            id_turma_para: cand.turmaDestinoId,
-                            id_turma_aluno_para: vinculoSalvo.id,
-                        },
-                    });
-                    if (!existsHistorico) {
+                    const historicoKey = `${aluno.id}|${cand.turmaDestinoId}|${vinculoSalvo.id}`;
+                    if (!historicoExistenteKeys.has(historicoKey)) {
                         const historico = this.uow.historicoTransferenciasRP.create({
                             id_aluno: aluno.id,
                             id_turma_de: cand.idTurmaTransferenciaDe || cand.turmaDestinoId,
@@ -1306,7 +1339,8 @@ export class UploadService {
                             historico.criado_em = dataInclusaoDate;
                             historico.atualizado_em = dataInclusaoDate;
                         }
-                        await this.uow.historicoTransferenciasRP.save(historico);
+                        historicosParaCriar.push(historico);
+                        historicoExistenteKeys.add(historicoKey);
                     }
                 }
 
@@ -1322,6 +1356,12 @@ export class UploadService {
                         });
                     }
                 }
+            }
+
+            if (historicosParaCriar.length > 0) {
+                await this.uow.historicoTransferenciasRP.save(historicosParaCriar, {
+                    chunk: vinculosChunkSize,
+                });
             }
         }
 
@@ -1981,6 +2021,7 @@ export class UploadService {
         descricao: string;
         codigoTurmaOrigemPlanilha: string | null;
         isTimeDeVendas: boolean;
+        isBonusOrigem: boolean;
     } {
         const original = String(origemRaw || '').trim();
         const normalizedCode = this.normalizeCodeKey(original);
@@ -1992,6 +2033,7 @@ export class UploadService {
                 descricao: 'Time de Vendas IAM',
                 codigoTurmaOrigemPlanilha: null,
                 isTimeDeVendas: true,
+                isBonusOrigem: false,
             };
         }
 
@@ -2002,6 +2044,7 @@ export class UploadService {
                 descricao: this.formatBonusTurmaOrigemDescricao(bonusTurmaCodigo),
                 codigoTurmaOrigemPlanilha: bonusTurmaCodigo.slice(0, 255),
                 isTimeDeVendas: false,
+                isBonusOrigem: true,
             };
         }
 
@@ -2010,6 +2053,7 @@ export class UploadService {
             descricao: original,
             codigoTurmaOrigemPlanilha: original.slice(0, 255) || null,
             isTimeDeVendas: false,
+            isBonusOrigem: false,
         };
     }
 
@@ -2060,20 +2104,38 @@ export class UploadService {
         return `${local}+insc${numeroInscricao}@${domain}`;
     }
 
-    private async resolveTurmaIdByCodigo(params: { codigoRaw: string; turmaCodigoMap: Map<string, number> }): Promise<{
+    private async resolveTurmaIdByCodigo(params: {
+        codigoRaw: string;
+        turmaCodigoMap: Map<string, number>;
+        cache?: Map<
+            string,
+            {
+                turmaId: number | null;
+                matchType: 'codigo' | 'edicao' | 'ambigua' | 'nao_encontrada';
+                turmaCodigoNormalizado: string;
+            }
+        >;
+    }): Promise<{
         turmaId: number | null;
         matchType: 'codigo' | 'edicao' | 'ambigua' | 'nao_encontrada';
         turmaCodigoNormalizado: string;
     }> {
         const codigoRaw = (params.codigoRaw || '').trim();
         const codigoNormalizado = this.normalizeCodeKey(codigoRaw);
+        const cacheKey = this.normalizeText(codigoRaw);
         if (!codigoRaw) {
             return { turmaId: null, matchType: 'nao_encontrada', turmaCodigoNormalizado: codigoNormalizado };
+        }
+        const resultadoCache = params.cache?.get(cacheKey);
+        if (resultadoCache) {
+            return resultadoCache;
         }
 
         const turmaByCodigo = params.turmaCodigoMap.get(codigoNormalizado) || null;
         if (turmaByCodigo) {
-            return { turmaId: turmaByCodigo, matchType: 'codigo', turmaCodigoNormalizado: codigoNormalizado };
+            const result = { turmaId: turmaByCodigo, matchType: 'codigo' as const, turmaCodigoNormalizado: codigoNormalizado };
+            params.cache?.set(cacheKey, result);
+            return result;
         }
 
         const turmasPorEdicao = await this.uow.turmasRP.find({
@@ -2083,17 +2145,23 @@ export class UploadService {
             },
         });
         if (turmasPorEdicao.length === 1) {
-            return {
+            const result = {
                 turmaId: turmasPorEdicao[0].id,
                 matchType: 'edicao',
                 turmaCodigoNormalizado: codigoNormalizado,
-            };
+            } as const;
+            params.cache?.set(cacheKey, result);
+            return result;
         }
         if (turmasPorEdicao.length > 1) {
-            return { turmaId: null, matchType: 'ambigua', turmaCodigoNormalizado: codigoNormalizado };
+            const result = { turmaId: null, matchType: 'ambigua' as const, turmaCodigoNormalizado: codigoNormalizado };
+            params.cache?.set(cacheKey, result);
+            return result;
         }
 
-        return { turmaId: null, matchType: 'nao_encontrada', turmaCodigoNormalizado: codigoNormalizado };
+        const result = { turmaId: null, matchType: 'nao_encontrada' as const, turmaCodigoNormalizado: codigoNormalizado };
+        params.cache?.set(cacheKey, result);
+        return result;
     }
 
     private normalizeEmail(value: string): string {
@@ -2167,13 +2235,13 @@ export class UploadService {
         return match ? match[1] : null;
     }
 
-    private mapOrigemAluno(params: { isBonus: boolean; codigoTurmaOrigem: string | null; occurrence: number }): EOrigemAlunos {
-        if (params.codigoTurmaOrigem) {
-            return EOrigemAlunos.TRANSFERENCIA;
+    private mapOrigemAluno(params: { isBonus: boolean; codigoTurmaOrigem: string | null }): EOrigemAlunos {
+        if (params.isBonus) {
+            return EOrigemAlunos.ALUNO_BONUS;
         }
 
-        if (params.isBonus) {
-            return params.occurrence === 1 ? EOrigemAlunos.COMPROU_INGRESSO : EOrigemAlunos.ALUNO_BONUS;
+        if (params.codigoTurmaOrigem) {
+            return EOrigemAlunos.TRANSFERENCIA;
         }
 
         return EOrigemAlunos.COMPROU_INGRESSO;

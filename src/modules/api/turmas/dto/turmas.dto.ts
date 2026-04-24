@@ -764,6 +764,8 @@ export class TurmaStatusResumoResponseDto {
     origem_masterclass: number;
     origem_bonus: number;
     origem_time_vendas: number;
+    origem_transbordo: number;
+    origem_liberty: number;
     origem_transferencia: number;
     /** Cortesia + sorteio (origem_aluno) */
     origem_cortesia_sorteio: number;

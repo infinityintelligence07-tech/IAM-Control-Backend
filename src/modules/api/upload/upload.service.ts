@@ -853,29 +853,36 @@ export class UploadService {
             }
             const isTurmaDestinoConfronto = turmaConfrontoMap.get(turmaDestinoId) === true;
 
-            const codigoOrigem = this.normalizeCodeKey(row.turmaOrigemCodigo);
-            const origemVenda = codigoOrigem.includes('TIME_DE_VENDAS') || codigoOrigem.includes('TIMEDEVENDAS');
+            const origemMasterclass = this.normalizeMasterclassTurmaOrigem(row.turmaOrigemCodigo);
+            const codigoOrigem = this.normalizeCodeKey(origemMasterclass.codigoParaLookup || row.turmaOrigemCodigo);
+            const origemVenda = origemMasterclass.isTimeDeVendas;
+            const origemRaw = String(row.turmaOrigemCodigo || '').trim();
+            const exibirCodigoExtraido =
+                Boolean(origemMasterclass.codigoParaLookup) && this.normalizeCodeKey(origemRaw) !== this.normalizeCodeKey(origemMasterclass.codigoParaLookup);
+            const origemAvisoLabel = exibirCodigoExtraido ? `"${origemRaw}" (código extraído: "${origemMasterclass.codigoParaLookup}")` : `"${origemRaw}"`;
 
             /** Mesma resolução que o destino: código completo no mapa ou match por edição (único). */
             let idTurmaTransferenciaDe: number | null = null;
-            if (!origemVenda && String(row.turmaOrigemCodigo || '').trim()) {
+            if (!origemVenda && String(origemMasterclass.codigoParaLookup || '').trim()) {
                 const origemLookup = await this.resolveTurmaIdByCodigo({
-                    codigoRaw: row.turmaOrigemCodigo,
+                    codigoRaw: origemMasterclass.codigoParaLookup,
                     turmaCodigoMap,
                 });
                 if (origemLookup.matchType === 'ambigua') {
                     erros.push(
-                        `Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" é ambígua (mais de uma turma com essa edição). Informe o código completo da turma (SIGLA_CURSO_SIGLA_POLO_EDICAO).`,
+                        `Linha ${row.linha}: turma de origem ${origemAvisoLabel} é ambígua (mais de uma turma com essa edição). Informe o código completo da turma (SIGLA_CURSO_SIGLA_POLO_EDICAO).`,
                     );
                     continue;
                 }
                 if (origemLookup.matchType === 'edicao') {
-                    avisos.push(`Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" encontrada por edição.`);
+                    avisos.push(`Linha ${row.linha}: turma de origem ${origemAvisoLabel} encontrada por edição.`);
                 }
                 idTurmaTransferenciaDe = origemLookup.turmaId;
                 if (!idTurmaTransferenciaDe && codigoOrigem) {
+                    const origemEhMc = codigoOrigem.startsWith('MC_');
+                    const sufixoMasterclass = origemEhMc ? ' Origens MC_* continuam contando como Masterclass no resumo da turma.' : '';
                     avisos.push(
-                        `Linha ${row.linha}: turma de origem "${row.turmaOrigemCodigo}" não encontrada no cadastro; importação sem vínculo de turma. Origens MC_* continuam contando como Masterclass no resumo da turma.`,
+                        `Linha ${row.linha}: turma de origem ${origemAvisoLabel} não encontrada no cadastro; importação sem vínculo de turma.${sufixoMasterclass}`,
                     );
                 }
             }
@@ -913,11 +920,7 @@ export class UploadService {
 
             const statusImportacao = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
-            const codigoTurmaOrigemPlanilha = origemVenda
-                ? null
-                : String(row.turmaOrigemCodigo || '')
-                      .trim()
-                      .slice(0, 255) || null;
+            const codigoTurmaOrigemPlanilha = origemVenda ? null : origemMasterclass.codigoTurmaOrigemPlanilha;
 
             // Regra nova: todas as inscrições vão para a turma de destino.
             for (let i = 0; i < quantidadeInscricoes; i++) {
@@ -937,8 +940,8 @@ export class UploadService {
                     telefone: telefoneNormalizado,
                     turmaDestinoId,
                     turmaDestinoCodigo: row.turmaDestinoCodigo,
-                    turmaOrigemCodigo: row.turmaOrigemCodigo,
-                    turmaOrigemDescricao: origemVenda ? 'Time de Vendas IAM' : row.turmaOrigemCodigo,
+                    turmaOrigemCodigo: origemMasterclass.codigoParaLookup || row.turmaOrigemCodigo,
+                    turmaOrigemDescricao: origemMasterclass.descricao || row.turmaOrigemCodigo,
                     dataInclusao: row.dataInclusao,
                     quantidadeBonus: quantidadeBonusExtraPorPessoa,
                     quantidadeBonusExtraPorPessoa,
@@ -978,8 +981,8 @@ export class UploadService {
                     telefone: telefoneNormalizado,
                     turmaDestinoId: turmaBonusId,
                     turmaDestinoCodigo: turmaBonusCodigoFinal,
-                    turmaOrigemCodigo: row.turmaOrigemCodigo,
-                    turmaOrigemDescricao: `Bônus de ${row.turmaDestinoCodigo}`,
+                    turmaOrigemCodigo: origemMasterclass.codigoParaLookup || row.turmaOrigemCodigo,
+                    turmaOrigemDescricao: origemMasterclass.descricao || row.turmaOrigemCodigo,
                     dataInclusao: row.dataInclusao,
                     quantidadeBonus: 0,
                     quantidadeBonusExtraPorPessoa,
@@ -1971,6 +1974,67 @@ export class UploadService {
 
     private normalizeCodeKey(value: string): string {
         return this.normalizeText(value).replace(/\s+/g, '_');
+    }
+
+    private normalizeMasterclassTurmaOrigem(origemRaw: string): {
+        codigoParaLookup: string;
+        descricao: string;
+        codigoTurmaOrigemPlanilha: string | null;
+        isTimeDeVendas: boolean;
+    } {
+        const original = String(origemRaw || '').trim();
+        const normalizedCode = this.normalizeCodeKey(original);
+        const isTimeDeVendas = normalizedCode.includes('TIME_DE_VENDAS') || normalizedCode.includes('TIMEDEVENDAS');
+
+        if (isTimeDeVendas) {
+            return {
+                codigoParaLookup: '',
+                descricao: 'Time de Vendas IAM',
+                codigoTurmaOrigemPlanilha: null,
+                isTimeDeVendas: true,
+            };
+        }
+
+        const bonusTurmaCodigo = this.extractBonusTurmaOrigemCodigo(original);
+        if (bonusTurmaCodigo) {
+            return {
+                codigoParaLookup: bonusTurmaCodigo,
+                descricao: this.formatBonusTurmaOrigemDescricao(bonusTurmaCodigo),
+                codigoTurmaOrigemPlanilha: bonusTurmaCodigo.slice(0, 255),
+                isTimeDeVendas: false,
+            };
+        }
+
+        return {
+            codigoParaLookup: original,
+            descricao: original,
+            codigoTurmaOrigemPlanilha: original.slice(0, 255) || null,
+            isTimeDeVendas: false,
+        };
+    }
+
+    private extractBonusTurmaOrigemCodigo(origemRaw: string): string | null {
+        const normalized = this.normalizeText(origemRaw || '');
+        if (!normalized.includes('BONUS')) return null;
+
+        const codeMatch = normalized.match(/\b([A-Z0-9]+(?:_[A-Z0-9]+)*_[A-Z0-9]{2,}_[0-9]{1,4})\b/);
+        if (!codeMatch?.[1]) return null;
+
+        return this.normalizeCodeKey(codeMatch[1]);
+    }
+
+    private formatBonusTurmaOrigemDescricao(turmaCodigo: string): string {
+        const codigo = this.normalizeCodeKey(turmaCodigo);
+        const partes = codigo.split('_').filter(Boolean);
+        if (partes.length < 3) {
+            return `Origem de BÔNUS - turma de origem ${codigo}`;
+        }
+
+        const edicao = partes[partes.length - 1];
+        const polo = partes[partes.length - 2];
+        const treinamento = partes.slice(0, -2).join(' ');
+
+        return `Origem de BÔNUS - turma de origem ${treinamento} - ${edicao} (${polo})`;
     }
 
     private buildBonusEmailFromBaseWithEvent(email: string, bonusIndex: number, eventoSlug: string): string {

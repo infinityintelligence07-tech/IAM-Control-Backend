@@ -2422,6 +2422,7 @@ export class TurmasService {
             .select('ta.id', 'id_turma_aluno')
             .addSelect('ta.origem_aluno', 'origem_aluno')
             .addSelect('ta.vaga_bonus', 'vaga_bonus')
+            .addSelect('ta.codigo_turma_origem_planilha', 'codigo_turma_origem_planilha')
             .addSelect(
                 `(EXISTS (
                     SELECT 1
@@ -2487,6 +2488,8 @@ export class TurmasService {
         let origemBonus = 0;
         let origemCortesiaSorteio = 0;
         let origemTimeVendas = 0;
+        let origemTransbordo = 0;
+        let origemLiberty = 0;
         let origemTransferencia = 0;
         let origemImportacao = 0;
 
@@ -2497,6 +2500,11 @@ export class TurmasService {
             const origemAluno = String(row.origem_aluno || '').toUpperCase();
             const vagaBonus = Boolean(row.vaga_bonus);
             const histTimeVendas = isTruthyPgBool(row.hist_time_vendas);
+            const codigoTurmaOrigemPlanilha = String(row.codigo_turma_origem_planilha || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim()
+                .toUpperCase();
             /** Origem externa é MC/palestra: alinha a `isPalestra` usada em findById (tipo_palestra ou tipo_treinamento false) */
             const origemEhPalestraMc = row.origem_turma_eh_palestra_ou_masterclass;
 
@@ -2512,6 +2520,16 @@ export class TurmasService {
 
             if (histTimeVendas) {
                 origemTimeVendas += 1;
+                continue;
+            }
+
+            if (codigoTurmaOrigemPlanilha === 'TRANSBORDO') {
+                origemTransbordo += 1;
+                continue;
+            }
+
+            if (codigoTurmaOrigemPlanilha === 'LIBERTY') {
+                origemLiberty += 1;
                 continue;
             }
 
@@ -2556,6 +2574,8 @@ export class TurmasService {
             origem_masterclass: origemMasterclass,
             origem_bonus: origemBonus,
             origem_time_vendas: origemTimeVendas,
+            origem_transbordo: origemTransbordo,
+            origem_liberty: origemLiberty,
             origem_transferencia: origemTransferencia,
             origem_cortesia_sorteio: origemCortesiaSorteio,
             origem_importacao: origemImportacao,
@@ -2717,6 +2737,18 @@ export class TurmasService {
                     { id_turma },
                 );
                 break;
+            case 'origem_transbordo':
+                titulo = 'Origem: Transbordo';
+                qb.andWhere('UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, \'\'))) = :origemTransbordo', {
+                    origemTransbordo: 'TRANSBORDO',
+                });
+                break;
+            case 'origem_liberty':
+                titulo = 'Origem: Liberty';
+                qb.andWhere('UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, \'\'))) = :origemLiberty', {
+                    origemLiberty: 'LIBERTY',
+                });
+                break;
             case 'origem_transferencia':
                 titulo = 'Origem: Transferência';
                 qb.andWhere('ta.vaga_bonus = false');
@@ -2737,6 +2769,12 @@ export class TurmasService {
                         EOrigemAlunos.TRANSFERENCIA,
                     ],
                 });
+                qb.andWhere(
+                    'UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, \'\'))) NOT IN (:...origensPlanilhaExclDemais)',
+                    {
+                        origensPlanilhaExclDemais: ['TRANSBORDO', 'LIBERTY'],
+                    },
+                );
                 qb.andWhere(
                     `NOT EXISTS (
                         SELECT 1

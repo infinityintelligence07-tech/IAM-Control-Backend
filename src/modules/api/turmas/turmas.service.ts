@@ -62,11 +62,12 @@ export class TurmasService {
         return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas);
     }
 
+    /** Edições que não entram nas sugestões automáticas (mas podem ser destino explícito no modal). */
     private isTurmaBloqueadaParaTransferencia(turma: any): boolean {
         const edicao = String(turma?.edicao_turma ?? '')
             .trim()
             .toUpperCase();
-        return ['SEM_TURMA', 'INADIMPLENTE', 'JURIDICA', 'CANCELADA'].includes(edicao);
+        return ['SEM_TURMA', 'SEM_TURMAS', 'INADIMPLENTE', 'JURIDICA', 'JURIDICO', 'CANCELADA'].includes(edicao);
     }
 
     private hasValue(value: unknown): boolean {
@@ -2000,8 +2001,53 @@ export class TurmasService {
         if (turmaDestino.id_treinamento_fk?.tipo_palestra === true) {
             throw new BadRequestException('Turma de destino não pode ser palestra');
         }
-        if (this.isTurmaBloqueadaParaTransferencia(turmaDestino)) {
-            throw new BadRequestException('Não é possível transferir para turmas SEM_TURMA, INADIMPLENTE, JURIDICA ou CANCELADA');
+        const edicaoDestinoNorm = String(turmaDestino.edicao_turma ?? '')
+            .trim()
+            .toUpperCase();
+        if (edicaoDestinoNorm === 'CANCELADA') {
+            if (turmaDestino.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
+                throw new BadRequestException('Não é possível transferir para turma com inscrições pausadas');
+            }
+            const idMatriculaDestino = await this.transferirCancelamentoParaTurmaCancelada(turmaAlunoOrigem, turmaDestino);
+            const matriculaDestinoCompleta = await this.uow.turmasAlunosRP.findOne({
+                where: { id: idMatriculaDestino },
+                relations: [
+                    'id_aluno_fk',
+                    'id_turma_transferencia_de_fk',
+                    'id_turma_transferencia_de_fk.id_treinamento_fk',
+                    'id_turma_transferencia_de_fk.id_polo_fk',
+                ],
+            });
+            if (!matriculaDestinoCompleta) {
+                throw new NotFoundException('Matrícula de destino após transferência para turma CANCELADA não encontrada');
+            }
+            return {
+                id: matriculaDestinoCompleta.id,
+                id_turma: matriculaDestinoCompleta.id_turma,
+                id_aluno: matriculaDestinoCompleta.id_aluno,
+                nome_cracha: matriculaDestinoCompleta.nome_cracha,
+                numero_cracha: matriculaDestinoCompleta.numero_cracha,
+                vaga_bonus: matriculaDestinoCompleta.vaga_bonus,
+                origem_aluno: matriculaDestinoCompleta.origem_aluno,
+                status_aluno_turma: matriculaDestinoCompleta.status_aluno_turma,
+                presenca_turma: matriculaDestinoCompleta.presenca_turma,
+                url_comprovante_pgto: matriculaDestinoCompleta.url_comprovante_pgto,
+                pendencia_pagamento: matriculaDestinoCompleta.pendencia_pagamento,
+                quantidade_inscricoes: matriculaDestinoCompleta.quantidade_inscricoes ?? 1,
+                outros_clientes: matriculaDestinoCompleta.outros_clientes ?? [],
+                contrato_duplo: (matriculaDestinoCompleta.quantidade_inscricoes ?? 1) > 1,
+                comprovante_pagamento_base64: matriculaDestinoCompleta.comprovante_pagamento_base64,
+                created_at: matriculaDestinoCompleta.criado_em,
+                transferencia_de_turma: this.mapTurmaToTransferenciaTag(matriculaDestinoCompleta.id_turma_transferencia_de_fk),
+                aluno: matriculaDestinoCompleta.id_aluno_fk
+                    ? {
+                          id: matriculaDestinoCompleta.id_aluno_fk.id,
+                          nome: matriculaDestinoCompleta.id_aluno_fk.nome,
+                          email: matriculaDestinoCompleta.id_aluno_fk.email,
+                          nome_cracha: matriculaDestinoCompleta.id_aluno_fk.nome_cracha,
+                      }
+                    : undefined,
+            };
         }
         if (turmaDestino.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
             throw new BadRequestException('Não é possível transferir para turma com inscrições pausadas');

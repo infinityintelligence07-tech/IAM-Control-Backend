@@ -164,7 +164,7 @@ export class CreateTurmaDto {
     @IsNumber({}, { each: true })
     @Transform(({ value }) => {
         if (!Array.isArray(value)) return value;
-        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+        return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     bonus_treinamentos?: number[];
 
@@ -173,7 +173,7 @@ export class CreateTurmaDto {
     @IsNumber({}, { each: true })
     @Transform(({ value }) => {
         if (!Array.isArray(value)) return value;
-        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+        return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     turmas_imersao_ofertadas?: number[];
 
@@ -182,7 +182,7 @@ export class CreateTurmaDto {
     @IsNumber({}, { each: true })
     @Transform(({ value }) => {
         if (!Array.isArray(value)) return value;
-        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+        return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     turmas_ipr_relacionadas?: number[];
 
@@ -338,7 +338,7 @@ export class UpdateTurmaDto {
     @IsNumber({}, { each: true })
     @Transform(({ value }) => {
         if (!Array.isArray(value)) return value;
-        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+        return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     bonus_treinamentos?: number[];
 
@@ -347,7 +347,7 @@ export class UpdateTurmaDto {
     @IsNumber({}, { each: true })
     @Transform(({ value }) => {
         if (!Array.isArray(value)) return value;
-        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+        return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     turmas_imersao_ofertadas?: number[];
 
@@ -356,7 +356,7 @@ export class UpdateTurmaDto {
     @IsNumber({}, { each: true })
     @Transform(({ value }) => {
         if (!Array.isArray(value)) return value;
-        return value.map((v: any) => typeof v === 'string' ? parseInt(v, 10) : v);
+        return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     turmas_ipr_relacionadas?: number[];
 
@@ -441,8 +441,8 @@ export class AddAlunoTurmaDto {
     origem_aluno?: 'COMPROU_INGRESSO' | 'ALUNO_BONUS' | 'ALUNO_CONVIDADO' | 'CORTESIA' | 'SORTEIO' | 'TRANSFERENCIA';
 
     @IsOptional()
-    @IsString()
-    status_aluno_turma?: string;
+    @IsEnum(EStatusAlunosTurmas)
+    status_aluno_turma?: EStatusAlunosTurmas;
 
     @IsOptional()
     @IsBoolean()
@@ -520,8 +520,8 @@ export class UpdateAlunoTurmaDto {
     comprovante_pagamento_base64?: string;
 
     @IsOptional()
-    @IsString()
-    status_aluno_turma?: string;
+    @IsEnum(EStatusAlunosTurmas)
+    status_aluno_turma?: EStatusAlunosTurmas;
 
     @IsOptional()
     @IsEnum(EOrigemAlunos)

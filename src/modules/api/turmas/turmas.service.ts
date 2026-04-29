@@ -1828,7 +1828,7 @@ export class TurmasService {
                 numero_cracha: numeroCracha,
                 vaga_bonus: addAlunoDto.vaga_bonus || false,
                 origem_aluno: (addAlunoDto.origem_aluno as EOrigemAlunos) || EOrigemAlunos.COMPROU_INGRESSO,
-                status_aluno_turma: (addAlunoDto.status_aluno_turma as EStatusAlunosTurmas) || EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
+                status_aluno_turma: addAlunoDto.status_aluno_turma || EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                 ...(addAlunoDto.id_aluno_bonus && { id_aluno_bonus: addAlunoDto.id_aluno_bonus }),
                 ...(addAlunoDto.pendencia_pagamento !== undefined && { pendencia_pagamento: addAlunoDto.pendencia_pagamento }),
                 ...(addAlunoDto.quantidade_inscricoes !== undefined && { quantidade_inscricoes: addAlunoDto.quantidade_inscricoes }),
@@ -2530,7 +2530,8 @@ export class TurmasService {
         const isTruthyPgBool = (v: unknown): boolean => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
 
         for (const row of alunosOrigemEnriquecidos) {
-            const origemAluno = String(row.origem_aluno || '').toUpperCase();
+            const origemAlunoBruta = row.origem_aluno;
+            const origemAluno = Object.values(EOrigemAlunos).includes(origemAlunoBruta as EOrigemAlunos) ? (origemAlunoBruta as EOrigemAlunos) : null;
             const vagaBonus = Boolean(row.vaga_bonus);
             const histTimeVendas = isTruthyPgBool(row.hist_time_vendas);
             const codigoTurmaOrigemPlanilha = String(row.codigo_turma_origem_planilha || '')
@@ -3118,11 +3119,12 @@ export class TurmasService {
             if (updateAlunoDto.comprovante_pagamento_base64 !== undefined) {
                 turmaAluno.comprovante_pagamento_base64 = updateAlunoDto.comprovante_pagamento_base64;
             }
-            if (updateAlunoDto.status_aluno_turma !== undefined) {
-                turmaAluno.status_aluno_turma = updateAlunoDto.status_aluno_turma as EStatusAlunosTurmas;
+            const novoStatusAlunoTurma = updateAlunoDto.status_aluno_turma;
+            if (novoStatusAlunoTurma !== undefined) {
+                turmaAluno.status_aluno_turma = novoStatusAlunoTurma;
             }
             if (updateAlunoDto.origem_aluno !== undefined) {
-                turmaAluno.origem_aluno = updateAlunoDto.origem_aluno as EOrigemAlunos;
+                turmaAluno.origem_aluno = updateAlunoDto.origem_aluno;
                 turmaAluno.vaga_bonus = updateAlunoDto.origem_aluno === EOrigemAlunos.ALUNO_BONUS;
             }
             if (updateAlunoDto.presenca_turma !== undefined) {
@@ -3136,7 +3138,7 @@ export class TurmasService {
                 turmaAluno.atualizado_por = updateAlunoDto.atualizado_por;
             }
 
-            const solicitouCancelamento = updateAlunoDto.status_aluno_turma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
+            const solicitouCancelamento = novoStatusAlunoTurma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
 
             if (solicitouCancelamento) {
                 const turmaOrigem = turmaAluno.id_turma_fk;
@@ -3330,8 +3332,8 @@ export class TurmasService {
                 }
             }
 
-            // LOCAL: nome do local do evento ou do polo
-            const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
+            // LOCAL: nome do local do evento ou do polo (se não houver, mantém vazio)
+            const localStr = enderecoEvento?.local_evento?.trim() || '';
 
             // ENDEREÇO: logradouro, numero - bairro - cep, cidade - estado
             const buildEndereco = (e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null): string => {
@@ -3392,13 +3394,13 @@ export class TurmasService {
             const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
             // Mensagem no formato do novo template Gupshup
+            const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
             const message = `Olá *${aluno.nome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
 Você garantiu a sua vaga no _*${checkInData.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
 
 📌*DATA*: ${dataStr}
-📌*LOCAL*: ${localStr}
-📌*ENDEREÇO*: ${enderecoStr}
+${localLine}📌*ENDEREÇO*: ${enderecoStr}
 
 Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
 Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.

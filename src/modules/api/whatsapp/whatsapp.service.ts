@@ -351,8 +351,8 @@ export class WhatsAppService {
                     }
                 }
 
-                // LOCAL: nome do local do evento ou do polo
-                const localStr = enderecoEvento?.local_evento || polo?.polo || 'A confirmar';
+                // LOCAL: nome do local do evento ou do polo (se não houver, mantém vazio)
+                const localStr = enderecoEvento?.local_evento?.trim() || '';
 
                 // ENDEREÇO: logradouro, numero - bairro - cep, cidade - estado
                 const buildEndereco = (
@@ -428,13 +428,13 @@ export class WhatsAppService {
 
                 if (sendResult.success) {
                     // Monta a mensagem de texto (redundância) no formato do novo template
+                    const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
                     const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
 Você garantiu a sua vaga no _*${student.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
 
 📌*DATA*: ${dataStr}
-📌*LOCAL*: ${localStr}
-📌*ENDEREÇO*: ${enderecoStr}
+${localLine}📌*ENDEREÇO*: ${enderecoStr}
 
 Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
 Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.

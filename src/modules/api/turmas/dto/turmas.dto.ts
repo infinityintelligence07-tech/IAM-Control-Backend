@@ -598,6 +598,7 @@ export class TurmaResponseDto {
         nome: string;
     };
     alunos_count?: number;
+    alunos_inscricoes_extras_count?: number;
     alunos_confirmados_count?: number;
     transferidos_count?: number;
     vindos_transferencia_count?: number;

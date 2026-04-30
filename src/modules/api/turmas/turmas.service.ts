@@ -62,6 +62,25 @@ export class TurmasService {
         return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas);
     }
 
+    private isInscricaoExtraNaTurma(turmaAluno: any): boolean {
+        if (!turmaAluno) return false;
+
+        const origemAluno = turmaAluno?.origem_aluno as EOrigemAlunos | undefined;
+        const codigoTurmaOrigemPlanilha = String(turmaAluno?.codigo_turma_origem_planilha || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim()
+            .toUpperCase();
+
+        return (
+            turmaAluno?.vaga_bonus === true ||
+            origemAluno === EOrigemAlunos.ALUNO_BONUS ||
+            origemAluno === EOrigemAlunos.TRANSFERENCIA ||
+            origemAluno === EOrigemAlunos.SORTEIO ||
+            codigoTurmaOrigemPlanilha === 'TRANSBORDO'
+        );
+    }
+
     /** Edições que não entram nas sugestões automáticas (mas podem ser destino explícito no modal). */
     private isTurmaBloqueadaParaTransferencia(turma: any): boolean {
         const edicao = String(turma?.edicao_turma ?? '')
@@ -139,6 +158,7 @@ export class TurmasService {
             number,
             {
                 alunos_total: number;
+                alunos_inscricoes_extras: number;
                 alunos_confirmados: number;
                 vindos_transferencia: number;
                 presentes: number;
@@ -150,6 +170,7 @@ export class TurmasService {
 
         const empty = () => ({
             alunos_total: 0,
+            alunos_inscricoes_extras: 0,
             alunos_confirmados: 0,
             vindos_transferencia: 0,
             presentes: 0,
@@ -169,6 +190,10 @@ export class TurmasService {
             .andWhere('ta.id_turma IN (:...ids)', { ids: turmaIds })
             .select('ta.id_turma', 'id_turma')
             .addSelect('COUNT(*)::int', 'total')
+            .addSelect(
+                `SUM(CASE WHEN ta.vaga_bonus = true OR ta.origem_aluno IN (:...origensExtras) OR UPPER(COALESCE(ta.codigo_turma_origem_planilha, '')) = :origemTransbordo THEN 1 ELSE 0 END)::int`,
+                'inscricoes_extras',
+            )
             .addSelect(`SUM(CASE WHEN ta.id_turma_transferencia_para IS NULL AND ta.status_aluno_turma IN (:...stConfirm) THEN 1 ELSE 0 END)::int`, 'confirmados')
             .addSelect(`SUM(CASE WHEN ta.origem_aluno = :origemTr AND ta.id_turma_transferencia_de IS NOT NULL THEN 1 ELSE 0 END)::int`, 'vindos_transferencia')
             .addSelect(
@@ -177,6 +202,8 @@ export class TurmasService {
             )
             .addSelect(`SUM(CASE WHEN aluno.status_aluno_geral = :inad2 THEN 1 ELSE 0 END)::int`, 'inadimplentes')
             .setParameter('stConfirm', stConfirm)
+            .setParameter('origensExtras', [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO])
+            .setParameter('origemTransbordo', 'TRANSBORDO')
             .setParameter('origemTr', EOrigemAlunos.TRANSFERENCIA)
             .setParameter('pres', EPresencaTurmas.PRESENTE)
             .setParameter('inad', EStatusAlunosGeral.INADIMPLENTE)
@@ -188,6 +215,7 @@ export class TurmasService {
             const id = Number(row.id_turma);
             result[id] = {
                 alunos_total: Number(row.total ?? 0),
+                alunos_inscricoes_extras: Number(row.inscricoes_extras ?? 0),
                 alunos_confirmados: Number(row.confirmados ?? 0),
                 vindos_transferencia: Number(row.vindos_transferencia ?? 0),
                 presentes: Number(row.presentes ?? 0),
@@ -592,6 +620,7 @@ export class TurmasService {
                         : undefined,
                     // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, contagens agregadas
                     alunos_count: isPalestra ? preCadastrosCount[turma.id]?.total || 0 : m?.alunos_total || 0,
+                    alunos_inscricoes_extras_count: m?.alunos_inscricoes_extras || 0,
                     alunos_confirmados_count: m?.alunos_confirmados || 0,
                     transferidos_count: transferidosCountByTurma[turma.id] || 0,
                     vindos_transferencia_count: m?.vindos_transferencia || 0,
@@ -698,6 +727,7 @@ export class TurmasService {
                     }
                     return turma.turmasAlunos?.length || 0;
                 })(),
+                alunos_inscricoes_extras_count: turma.turmasAlunos?.filter((ta) => this.isInscricaoExtraNaTurma(ta)).length || 0,
                 alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
                 transferidos_count: transferidosCountByTurma[turma.id] || 0,
                 vindos_transferencia_count:

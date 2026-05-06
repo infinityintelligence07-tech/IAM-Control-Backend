@@ -89,6 +89,13 @@ export class TurmasService {
         return ['SEM_TURMA', 'SEM_TURMAS', 'INADIMPLENTE', 'JURIDICA', 'JURIDICO', 'CANCELADA'].includes(edicao);
     }
 
+    private isTurmaInadimplente(turma: any): boolean {
+        const edicao = String(turma?.edicao_turma ?? '')
+            .trim()
+            .toUpperCase();
+        return edicao === 'INADIMPLENTE';
+    }
+
     private hasValue(value: unknown): boolean {
         if (value === null || value === undefined) return false;
         if (typeof value !== 'string') return true;
@@ -2000,6 +2007,11 @@ export class TurmasService {
         if (!turmaAlunoOrigem.id_aluno_fk) throw new NotFoundException('Aluno vinculado não encontrado');
         const turmaOrigem = turmaAlunoOrigem.id_turma_fk;
         if (!turmaOrigem) throw new NotFoundException('Turma de origem não encontrada');
+        const origemEhTurmaInadimplente = this.isTurmaInadimplente(turmaOrigem);
+        if (origemEhTurmaInadimplente && turmaAlunoOrigem.id_aluno_fk.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE) {
+            await this.uow.alunosRP.update({ id: Number(turmaAlunoOrigem.id_aluno) }, { status_aluno_geral: EStatusAlunosGeral.INADIMPLENTE });
+            turmaAlunoOrigem.id_aluno_fk.status_aluno_geral = EStatusAlunosGeral.INADIMPLENTE;
+        }
         if (turmaOrigem.id_treinamento_fk?.tipo_palestra === true) {
             throw new BadRequestException('Transferência só é permitida para treinamentos, não para palestras');
         }

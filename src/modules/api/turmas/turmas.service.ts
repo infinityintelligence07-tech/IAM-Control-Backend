@@ -3302,32 +3302,34 @@ export class TurmasService {
     }
 
     // Método para gerar número de crachá único dentro da turma
+    // Regra: sequência fixa de 5 dígitos iniciando em 01100.
     async generateUniqueCrachaNumber(id_turma: number): Promise<string> {
-        const maxTentativas = 100;
-        let tentativas = 0;
+        const numeroInicial = 1100;
+        const numeroMaximo = 99999;
 
-        while (tentativas < maxTentativas) {
-            // Gerar número aleatório entre 0 e 99999
-            const numeroAleatorio = Math.floor(Math.random() * 100000);
-            const numeroCracha = numeroAleatorio.toString().padStart(5, '0');
+        const matriculasAtivas = await this.uow.turmasAlunosRP.find({
+            where: {
+                id_turma,
+                deletado_em: null,
+            },
+            select: {
+                numero_cracha: true,
+            },
+        });
 
-            // Verificar se já existe na turma
-            const existeNaTurma = await this.uow.turmasAlunosRP.findOne({
-                where: {
-                    id_turma,
-                    numero_cracha: numeroCracha,
-                    deletado_em: null,
-                },
-            });
+        const numerosUsados = new Set<number>(
+            matriculasAtivas
+                .map((matricula) => matricula.numero_cracha)
+                .filter((numero): numero is string => !!numero && /^\d+$/.test(numero))
+                .map((numero) => Number.parseInt(numero, 10)),
+        );
 
-            if (!existeNaTurma) {
-                return numeroCracha;
+        for (let numero = numeroInicial; numero <= numeroMaximo; numero++) {
+            if (!numerosUsados.has(numero)) {
+                return numero.toString().padStart(5, '0');
             }
-
-            tentativas++;
         }
 
-        // Se não conseguir gerar um número único após muitas tentativas
         throw new Error('Não foi possível gerar um número de crachá único para esta turma');
     }
 

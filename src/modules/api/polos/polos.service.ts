@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetPolosDto, PolosListResponseDto, PoloResponseDto, CreatePoloDto, UpdatePoloDto, SoftDeletePoloDto } from './dto/polos.dto';
 import { Like, FindManyOptions, ILike, In } from 'typeorm';
@@ -11,6 +11,8 @@ export class PolosService {
 
     async findAll(filters: GetPolosDto): Promise<PolosListResponseDto> {
         const { page = 1, limit = 10, polo, cidade, estado } = filters;
+        const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+        const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 10;
 
         // Construir condições de busca
         const whereConditions: any = {};
@@ -37,8 +39,8 @@ export class PolosService {
                 polo: 'ASC',
                 criado_em: 'DESC',
             },
-            skip: (page - 1) * limit,
-            take: limit,
+            skip: (safePage - 1) * safeLimit,
+            take: safeLimit,
         };
 
         try {
@@ -65,18 +67,20 @@ export class PolosService {
                 }),
             );
 
-            const totalPages = Math.ceil(total / limit);
+            const totalPages = Math.ceil(total / safeLimit);
 
             return {
                 data: polosWithCount,
                 total,
-                page,
-                limit,
+                page: safePage,
+                limit: safeLimit,
                 totalPages,
             };
         } catch (error) {
             console.error('Erro ao buscar polos:', error);
-            throw new Error('Erro interno do servidor ao buscar polos');
+            throw new InternalServerErrorException(
+                'Erro interno do servidor ao buscar polos',
+            );
         }
     }
 

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
 import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/turmasAlunosTreinamentosContratos.entity';
@@ -31,6 +31,8 @@ import { Turmas } from '@/modules/config/entities/turmas.entity';
 
 @Injectable()
 export class DocumentosService {
+    private readonly logger = new Logger(DocumentosService.name);
+
     constructor(
         private readonly uow: UnitOfWorkService,
         private readonly zapSignService: ZapSignService,
@@ -42,7 +44,7 @@ export class DocumentosService {
 
     async createDocumento(createDocumentoDto: CreateDocumentoDto, userId?: number): Promise<DocumentoResponseDto> {
         try {
-            console.log('📄 [BACKEND] Criando documento com treinamentos relacionados:', createDocumentoDto.treinamentos_relacionados);
+            this.logger.debug('doc.repo.create | Criando documento');
 
             const documento = this.uow.documentosRP.create({
                 documento: createDocumentoDto.documento,
@@ -55,10 +57,9 @@ export class DocumentosService {
             });
 
             const savedDocumento = await this.uow.documentosRP.save(documento);
-            console.log('✅ [BACKEND] Documento criado com treinamentos:', savedDocumento.treinamentos_relacionados);
             return this.mapToResponseDto(savedDocumento);
         } catch (error) {
-            console.error('Erro ao criar documento:', error);
+            this.logger.error('doc.repo.create | Erro ao criar documento', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao criar documento');
         }
     }
@@ -89,7 +90,7 @@ export class DocumentosService {
                 totalPages,
             };
         } catch (error) {
-            console.error('Erro ao buscar documentos:', error);
+            this.logger.error('doc.repo.list | Erro ao buscar documentos', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao buscar documentos');
         }
     }
@@ -109,7 +110,7 @@ export class DocumentosService {
             if (error instanceof NotFoundException) {
                 throw error;
             }
-            console.error('Erro ao buscar documento:', error);
+            this.logger.error('doc.repo.get | Erro ao buscar documento', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao buscar documento');
         }
     }
@@ -134,7 +135,7 @@ export class DocumentosService {
             if (error instanceof NotFoundException) {
                 throw error;
             }
-            console.error('Erro ao atualizar documento:', error);
+            this.logger.error('doc.repo.update | Erro ao atualizar documento', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao atualizar documento');
         }
     }
@@ -157,22 +158,20 @@ export class DocumentosService {
             if (error instanceof NotFoundException) {
                 throw error;
             }
-            console.error('Erro ao deletar documento:', error);
+            this.logger.error('doc.repo.delete | Erro ao deletar documento', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao deletar documento');
         }
     }
 
     async buscarTemplatesZapSign() {
         try {
-            console.log('=== BUSCANDO TEMPLATES ZAPSIGN ===');
+            this.logger.debug('zapsign.template.list | Buscando templates ZapSign');
 
             // Buscar documentos do banco de dados local
             const documentos = await this.uow.documentosRP.find({
                 where: { deletado_em: null },
                 order: { documento: 'ASC' },
             });
-
-            console.log(`Encontrados ${documentos.length} documentos no banco local`);
 
             // Mapear para o formato esperado pelo frontend
             const templates = documentos.map((doc) => ({
@@ -184,18 +183,17 @@ export class DocumentosService {
                 treinamentos_relacionados: doc.treinamentos_relacionados || [],
             }));
 
-            console.log('Templates mapeados:', templates.length);
+            this.logger.log(`zapsign.template.list | Templates mapeados=${templates.length}`);
             return templates;
         } catch (error) {
-            console.error('Erro ao buscar templates:', error);
+            this.logger.error('zapsign.template.list | Erro ao buscar templates', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao buscar templates');
         }
     }
 
     async criarContratoZapSign(criarContratoDto: CriarContratoZapSignDto, userId?: number): Promise<RespostaContratoZapSignDto> {
         try {
-            console.log('=== CRIAR CONTRATO ZAPSIGN - INÍCIO ===');
-            console.log('criarContratoDto:', JSON.stringify(criarContratoDto, null, 2));
+            this.logger.debug('zapsign.create.contract | Iniciando criação de contrato ZapSign');
 
             // Buscar dados do aluno
             const aluno = await this.uow.alunosRP.findOne({
@@ -301,7 +299,7 @@ export class DocumentosService {
 
                             // Se for erro de sequência desincronizada (primary key)
                             if (constraint === 'pk_turmas_alunos_trn') {
-                                console.warn('Sequência de IDs desincronizada detectada em turmas_alunos_treinamentos. Corrigindo...');
+                                this.logger.warn('db.sequence.turmas_alunos_treinamentos | Sequência desincronizada detectada; corrigindo');
 
                                 // Corrigir a sequência
                                 await this.fixTurmasAlunosTreinamentosSequence();
@@ -317,7 +315,7 @@ export class DocumentosService {
 
                                 // Tentar novamente
                                 turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(novoRegistro);
-                                console.log('Registro criado com sucesso após correção da sequência');
+                                this.logger.log('db.sequence.turmas_alunos_treinamentos | Registro criado após correção de sequência');
                             } else {
                                 // Se for outro tipo de constraint única, tentar reativar registro deletado
                                 const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
@@ -413,9 +411,7 @@ export class DocumentosService {
                 };
             });
 
-            console.log('=== SIGNERS DATA PREPARADO ===');
-            console.log('Total de signers:', signersData.length);
-            console.log('Signers data:', JSON.stringify(signersData, null, 2));
+            this.logger.debug(`zapsign.create.contract | Signers preparados total=${signersData.length}`);
 
             // Preparar status do documento para o campo zapsign_document_status
             const documentStatus = {
@@ -472,8 +468,7 @@ export class DocumentosService {
                     },
                     pagamento: (() => {
                         const formasProcessadas = this.processPaymentMethods(criarContratoDto);
-                        console.log('=== FORMAS DE PAGAMENTO PROCESSADAS PARA SALVAR ===');
-                        console.log('Formas processadas:', JSON.stringify(formasProcessadas, null, 2));
+                        this.logger.debug(`contract.payment.process | Formas processadas para salvar=${formasProcessadas.length}`);
                         return {
                             forma_pagamento: criarContratoDto.forma_pagamento,
                             formas_pagamento: formasProcessadas,
@@ -505,8 +500,7 @@ export class DocumentosService {
                                     id: criarContratoDto.testemunha_dois_id || null,
                                 },
                             };
-                            console.log('=== TESTEMUNHAS PARA SALVAR ===');
-                            console.log('Testemunhas data:', JSON.stringify(testemunhasData, null, 2));
+                            this.logger.debug('zapsign.create.contract | Testemunhas processadas para salvar no contrato');
                             return testemunhasData;
                         }
                         return undefined;
@@ -542,7 +536,7 @@ export class DocumentosService {
                 file_url: zapSignResponse.original_file,
             };
         } catch (error: any) {
-            console.error('Erro ao criar contrato no ZapSign:', error);
+            this.logger.error('zapsign.create.contract | Erro ao criar contrato no ZapSign', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao criar contrato: ${error.message}`);
         }
     }
@@ -573,8 +567,7 @@ export class DocumentosService {
      * Prepara os dados para o template do contrato usando dados do DTO
      */
     private async prepareTemplateDataFromDto(aluno: any, treinamento: any, turma: any, criarContratoDto: CriarContratoZapSignDto) {
-        console.log('=== PREPARANDO DADOS DO DTO PARA TEMPLATE ===');
-        console.log('criarContratoDto:', JSON.stringify(criarContratoDto, null, 2));
+        this.logger.debug('contract.template.prepare | Preparando dados do DTO para template de contrato');
 
         // Buscar documento para obter as cláusulas
         let clausulas = '';
@@ -674,20 +667,18 @@ export class DocumentosService {
                         groupedPayments[key] = 0;
                     }
                     groupedPayments[key] += forma.valor;
-                    console.log(`Adicionando ${forma.valor} (${forma.forma} - ${forma.tipo}). Total grupo: ${groupedPayments[key]}`);
                 }
             });
 
             // Somar todos os grupos
             Object.values(groupedPayments).forEach((valorGrupo) => {
                 total += valorGrupo;
-                console.log(`Adicionando grupo ${valorGrupo} ao total. Total atual: ${total}`);
             });
         }
         // Fallback: usar valores_formas_pagamento
         else if (criarContratoDto.valores_formas_pagamento) {
             const valoresFormas = criarContratoDto.valores_formas_pagamento;
-            console.log('Usando valores_formas_pagamento para calcular total');
+            this.logger.debug('contract.payment.calculate | Calculando preço por valores_formas_pagamento');
 
             // Processar pagamentos à vista
             const formasAVista = ['À Vista - Cartão de Crédito', 'À Vista - Cartão de Débito', 'À Vista - PIX/Transferência', 'À Vista - Espécie'];
@@ -696,7 +687,6 @@ export class DocumentosService {
                 if (valoresFormas[chave] && valoresFormas[chave].valor) {
                     const valor = parseInt(valoresFormas[chave].valor) / 100;
                     total += valor;
-                    console.log(`Adicionando ${valor} (${chave}). Total: ${total}`);
                 }
             });
 
@@ -704,7 +694,6 @@ export class DocumentosService {
             if (valoresFormas['Parcelado - Cartão de Crédito'] && valoresFormas['Parcelado - Cartão de Crédito'].valor) {
                 const valor = parseInt(valoresFormas['Parcelado - Cartão de Crédito'].valor) / 100;
                 total += valor;
-                console.log(`Adicionando ${valor} (Parcelado - Cartão de Crédito). Total: ${total}`);
             }
 
             // Processar boleto parcelado
@@ -716,14 +705,13 @@ export class DocumentosService {
                     const valorTotal = parseInt(dadosBoleto.valor_parcelas || dadosBoleto.valor || '0') / 100;
                     if (valorTotal > 0) {
                         total += valorTotal;
-                        console.log(`Adicionando ${valorTotal} (${chave}). Total: ${total}`);
                         break; // Só processar uma vez
                     }
                 }
             }
         }
 
-        console.log('Total final calculado:', total);
+        this.logger.debug(`contract.payment.calculate | Preço total calculado=${total}`);
         return this.contractTemplateService.formatPrice(total);
     }
 
@@ -732,7 +720,6 @@ export class DocumentosService {
      */
     private isPaymentMethodSelected(criarContratoDto: CriarContratoZapSignDto, methodName: string): boolean {
         if (!criarContratoDto.valores_formas_pagamento) {
-            console.log('valores_formas_pagamento é null/undefined');
             return false;
         }
 
@@ -741,7 +728,6 @@ export class DocumentosService {
         // Verificar se existe a chave exata (formato objeto)
         if (typeof valoresFormas === 'object' && !Array.isArray(valoresFormas)) {
             const hasExactKey = !!valoresFormas[methodName];
-            console.log('Chave exata encontrada:', hasExactKey);
             if (hasExactKey) {
                 return true;
             }
@@ -749,8 +735,6 @@ export class DocumentosService {
 
         // Verificar no formato array
         if (Array.isArray(valoresFormas)) {
-            console.log('Verificando array de formas de pagamento...');
-
             // Mapear nomes para códigos
             const methodMapping: Record<string, { forma: string; tipo: string }> = {
                 'À Vista - Cartão de Crédito': { forma: 'CARTAO_CREDITO', tipo: 'A_VISTA' },
@@ -764,7 +748,6 @@ export class DocumentosService {
             const methodConfig = methodMapping[methodName];
             if (methodConfig) {
                 const found = valoresFormas.some((forma: any) => forma.forma === methodConfig.forma && forma.tipo === methodConfig.tipo);
-                console.log('Forma encontrada no array:', found);
                 return found;
             }
         }
@@ -785,10 +768,8 @@ export class DocumentosService {
                 // Para pagamentos parcelados, verifica se existe pelo menos uma parcela
                 const found = criarContratoDto.formas_pagamento.some((forma: any) => {
                     const matchesFormaAndTipo = forma.forma === methodConfig.forma && forma.tipo === methodConfig.tipo;
-                    console.log(`Verificando forma: ${forma.forma} (${forma.tipo}) vs ${methodConfig.forma} (${methodConfig.tipo}) = ${matchesFormaAndTipo}`);
                     return matchesFormaAndTipo;
                 });
-                console.log('Forma encontrada nas formas_pagamento:', found);
                 return found;
             }
         }
@@ -880,40 +861,28 @@ export class DocumentosService {
         const valoresBonus: any = {};
         const camposVariaveis: any = { ...criarContratoDto.campos_variaveis };
 
-        console.log('=== PROCESSANDO DADOS DE BÔNUS ===');
-        console.log('Tipos bônus:', criarContratoDto.tipos_bonus);
-        console.log('Valores bônus:', criarContratoDto.valores_bonus);
-        console.log('Campos variáveis:', camposVariaveis);
-
         // Processar bônus dos 100 dias
         if (this.isBonusSelected(criarContratoDto, ['100_dias', 'cem_dias'])) {
             valoresBonus['Bônus-100 Dias'] = true;
-            console.log('Bônus 100 dias selecionado');
         }
 
         // Processar bônus do IPR (Imersão Prosperar)
         if (this.isBonusSelected(criarContratoDto, ['ipr'])) {
             valoresBonus['Bônus-IPR'] = true;
-            console.log('Bônus IPR selecionado');
 
             // Adicionar quantidade de inscrições do Prosperar
             const quantidadeInscricoes = camposVariaveis['Quantidade de Inscrições'] || '1';
             valoresBonus[`Bônus-${quantidadeInscricoes} Inscrições do Imersão Prosperar`] = true;
-            console.log(`Quantidade de inscrições: ${quantidadeInscricoes}`);
 
             // Adicionar data da turma de IPR - usar a data dos campos variáveis se disponível
-            if (camposVariaveis['Data do Imersão Prosperar']) {
-                console.log('Data do IPR dos campos variáveis:', camposVariaveis['Data do Imersão Prosperar']);
-            } else if (turma && turma.data_inicio) {
+            if (!camposVariaveis['Data do Imersão Prosperar'] && turma && turma.data_inicio) {
                 camposVariaveis['Data do Imersão Prosperar'] = this.contractTemplateService.formatDate(turma.data_inicio);
-                console.log('Data do IPR adicionada:', camposVariaveis['Data do Imersão Prosperar']);
             }
 
             // Adicionar sigla e edição do IPR
             const siglaEdicao = camposVariaveis['IPR - Sigla e Edição'] || camposVariaveis['Turma IPR'];
             if (siglaEdicao) {
                 camposVariaveis['Sigla e Edição IPR'] = siglaEdicao;
-                console.log('Sigla e edição IPR:', siglaEdicao);
             }
         }
 
@@ -922,7 +891,6 @@ export class DocumentosService {
             const descricaoOutros = this.getOutrosDescricao(criarContratoDto);
             if (descricaoOutros) {
                 valoresBonus[`Bônus-Outros: ${descricaoOutros}`] = true;
-                console.log('Bônus outros selecionado:', descricaoOutros);
 
                 // Adicionar valor do bônus outros se disponível
                 const valorOutros = camposVariaveis['Valor do Bônus (R$)'] || camposVariaveis['Valor do Outro Bônus'];
@@ -938,8 +906,7 @@ export class DocumentosService {
             camposVariaveis['Local de Assinatura do Contrato'] = camposVariaveis['Cidade do Treinamento'] || 'Americana/SP';
         }
 
-        console.log('Valores bônus processados:', valoresBonus);
-        console.log('Campos variáveis processados:', camposVariaveis);
+        this.logger.debug(`contract.bonus.process | Bônus processados=${Object.keys(valoresBonus).length}`);
 
         return {
             valores_bonus: valoresBonus,
@@ -952,11 +919,6 @@ export class DocumentosService {
      */
     private processBoletoParcelado(valoresFormas: any): any[] {
         const formasPagamento: any[] = [];
-
-        console.log('=== INICIANDO PROCESSAMENTO DE BOLETO ===');
-        console.log('Valores formas recebidos:', JSON.stringify(valoresFormas, null, 2));
-        console.log('Tipo dos valores formas:', typeof valoresFormas);
-        console.log('É array?', Array.isArray(valoresFormas));
 
         // Tentar diferentes chaves possíveis para o boleto
         const chavesBoleto = [
@@ -973,34 +935,26 @@ export class DocumentosService {
             'Parcelas - Boleto',
         ];
 
-        console.log('Chaves que serão testadas:', chavesBoleto);
-        console.log('Chaves disponíveis no objeto:', Object.keys(valoresFormas));
-
         let dadosBoleto = null;
         let chaveEncontrada = null;
 
         for (const chave of chavesBoleto) {
-            console.log(`Testando chave: "${chave}"`);
             if (valoresFormas[chave]) {
                 dadosBoleto = valoresFormas[chave];
                 chaveEncontrada = chave;
-                console.log(`Chave encontrada: "${chave}"`);
                 break;
             }
         }
 
         // Se não encontrou diretamente, tentar buscar em estruturas aninhadas
         if (!dadosBoleto) {
-            console.log('Buscando em estruturas aninhadas...');
             for (const chave of Object.keys(valoresFormas)) {
                 const valor = valoresFormas[chave];
                 if (valor && typeof valor === 'object' && !Array.isArray(valor)) {
-                    console.log(`Verificando objeto aninhado: "${chave}"`);
                     // Buscar por campos que indiquem boleto
                     if (valor.dia || valor.data_primeiro_boleto || valor.data_1_boleto || valor.valor_parcelas) {
                         dadosBoleto = valor;
                         chaveEncontrada = chave;
-                        console.log(`Boleto encontrado em estrutura aninhada: "${chave}"`);
                         break;
                     }
                 }
@@ -1008,14 +962,9 @@ export class DocumentosService {
         }
 
         if (!dadosBoleto) {
-            console.log('Nenhum boleto parcelado encontrado nas chaves:', chavesBoleto);
-            console.log('Todas as chaves disponíveis:', Object.keys(valoresFormas));
+            this.logger.debug('contract.payment.boleto | Nenhum boleto parcelado encontrado');
             return formasPagamento;
         }
-
-        console.log('=== PROCESSANDO BOLETO PARCELADO ===');
-        console.log('Chave encontrada:', chaveEncontrada);
-        console.log('Dados do boleto:', dadosBoleto);
 
         // Tentar diferentes campos para o valor
         const valorTotal =
@@ -1032,12 +981,7 @@ export class DocumentosService {
         const dataPrimeiroBoleto = dadosBoleto.data_primeiro_boleto || dadosBoleto.data_1_boleto || dadosBoleto.data_inicio_boleto;
 
         const valorParcela = valorTotal / numeroParcelas;
-
-        console.log('Valor total:', valorTotal);
-        console.log('Número de parcelas:', numeroParcelas);
-        console.log('Valor da parcela:', valorParcela);
-        console.log('Dia de vencimento:', diaVencimento);
-        console.log('Data do primeiro boleto:', dataPrimeiroBoleto);
+        this.logger.debug(`contract.payment.boleto | Processado chave=${String(chaveEncontrada)} parcelas=${numeroParcelas} valorTotal=${valorTotal}`);
 
         for (let i = 0; i < numeroParcelas; i++) {
             formasPagamento.push({
@@ -1056,14 +1000,8 @@ export class DocumentosService {
     private processPaymentMethods(criarContratoDto: CriarContratoZapSignDto): any[] {
         const formasPagamento: any[] = [];
 
-        console.log('=== PROCESSANDO FORMAS DE PAGAMENTO ===');
-        console.log('Valores formas pagamento:', JSON.stringify(criarContratoDto.valores_formas_pagamento, null, 2));
-        console.log('Formas pagamento:', JSON.stringify(criarContratoDto.formas_pagamento, null, 2));
-
         // Primeiro, verificar se há dados diretamente no campo formas_pagamento
         if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento) && criarContratoDto.formas_pagamento.length > 0) {
-            console.log('Usando formas_pagamento diretas');
-
             criarContratoDto.formas_pagamento.forEach((forma: any) => {
                 if (forma.valor && typeof forma.valor === 'number' && forma.valor > 0) {
                     // Determinar tipo e forma baseado no nome da forma
@@ -1110,12 +1048,10 @@ export class DocumentosService {
                             parcelas: tipo === 'PARCELADO' ? parcelas : undefined,
                             descricao: forma.descricao || formaNome,
                         });
-                        console.log(`Adicionado: ${formaPagamento} ${tipo} - R$ ${forma.valor}${tipo === 'PARCELADO' ? ` em ${parcelas}x` : ''}`);
                     }
                 }
             });
 
-            console.log('Formas processadas:', formasPagamento);
             if (formasPagamento.length > 0) {
                 return formasPagamento;
             }
@@ -1124,7 +1060,7 @@ export class DocumentosService {
         // Processar formas de pagamento baseado nos valores_formas_pagamento
         if (criarContratoDto.valores_formas_pagamento) {
             const valoresFormas = criarContratoDto.valores_formas_pagamento;
-            console.log('Processando valores_formas_pagamento');
+            this.logger.debug('contract.payment.process | Processando valores_formas_pagamento');
 
             // Processar pagamentos à vista
             const formasAVista = [
@@ -1143,7 +1079,6 @@ export class DocumentosService {
                             forma: forma,
                             valor: valor,
                         });
-                        console.log(`Adicionado: ${forma} à vista - R$ ${valor}`);
                     }
                 }
             });
@@ -1161,7 +1096,6 @@ export class DocumentosService {
                         valor: valorParcela,
                     });
                 }
-                console.log(`Adicionado: Cartão de Crédito parcelado - ${numeroParcelas}x de R$ ${valorParcela}`);
             }
 
             // Processar boleto parcelado usando a função específica
@@ -1169,8 +1103,7 @@ export class DocumentosService {
             formasPagamento.push(...boletoParcelado);
         }
 
-        console.log('=== RESULTADO FINAL PROCESSAMENTO ===');
-        console.log('Formas pagamento finais:', formasPagamento);
+        this.logger.debug(`contract.payment.process | Formas processadas=${formasPagamento.length}`);
         return formasPagamento;
     }
 
@@ -1308,13 +1241,10 @@ export class DocumentosService {
      * Gera os detalhes das formas de pagamento no formato de lista
      */
     private generatePaymentDetails(criarContratoDto: CriarContratoZapSignDto): string {
-        console.log('=== GERANDO DETALHES DE PAGAMENTO ===');
-        console.log('Formas pagamento:', JSON.stringify(criarContratoDto.formas_pagamento, null, 2));
-        console.log('Valores formas pagamento:', JSON.stringify(criarContratoDto.valores_formas_pagamento, null, 2));
+        this.logger.debug('contract.payment.details | Gerando detalhes de pagamento');
 
         // Primeiro, tentar usar formas_pagamento se disponível
         if (criarContratoDto.formas_pagamento && Array.isArray(criarContratoDto.formas_pagamento) && criarContratoDto.formas_pagamento.length > 0) {
-            console.log('Usando formas_pagamento para gerar detalhes');
             const formasPagamento = criarContratoDto.formas_pagamento;
 
             // Agrupar formas de pagamento por tipo e forma
@@ -1349,17 +1279,17 @@ export class DocumentosService {
                 }
             });
 
-            console.log('Detalhes gerados:', details);
+            this.logger.debug(`contract.payment.details | Detalhes gerados por formas_pagamento=${details.length}`);
             return details.join('<br>');
         }
 
         // Fallback: usar valores_formas_pagamento
         if (criarContratoDto.valores_formas_pagamento) {
-            console.log('Usando valores_formas_pagamento para gerar detalhes');
+            this.logger.debug('contract.payment.details | Gerando detalhes por valores_formas_pagamento');
             return this.generatePaymentDetailsFromValoresFormas(criarContratoDto.valores_formas_pagamento, criarContratoDto.campos_variaveis || {});
         }
 
-        console.log('Nenhuma forma de pagamento encontrada');
+        this.logger.warn('contract.payment.details | Nenhuma forma de pagamento encontrada para gerar detalhes');
         return '• Não informado';
     }
 
@@ -1394,8 +1324,7 @@ export class DocumentosService {
      */
     async gerarContratoPDF(contratoId: string): Promise<Buffer> {
         try {
-            console.log('=== GERANDO CONTRATO PDF ===');
-            console.log('ID do contrato:', contratoId);
+            this.logger.log(`zapsign.pdf.generate | Gerando contrato PDF contratoId=${contratoId}`);
 
             // Buscar contrato completo do banco
             const contrato = await this.buscarContratoCompleto(contratoId);
@@ -1410,10 +1339,10 @@ export class DocumentosService {
             // Gerar PDF usando o template
             const pdfBuffer = await this.contractTemplateService.generateContractPDF(templateData);
 
-            console.log('PDF gerado com sucesso. Tamanho:', pdfBuffer.length, 'bytes');
+            this.logger.log(`zapsign.pdf.generate | PDF gerado com sucesso bytes=${pdfBuffer.length}`);
             return pdfBuffer;
         } catch (error) {
-            console.error('Erro ao gerar contrato PDF:', error);
+            this.logger.error('zapsign.pdf.generate | Erro ao gerar contrato PDF', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao gerar contrato PDF: ${(error as Error).message}`);
         }
     }
@@ -1423,8 +1352,7 @@ export class DocumentosService {
      */
     async cancelarDocumentoZapSign(documentoId: string, userId?: number): Promise<{ message: string }> {
         try {
-            console.log('=== CANCELANDO DOCUMENTO ZAPSIGN ===');
-            console.log('ID do documento:', documentoId);
+            this.logger.log(`zapsign.cancel | Cancelando documento ZapSign documentoId=${documentoId}`);
 
             // Primeiro, vamos listar todos os contratos para debug
             const todosContratos = await this.uow.turmasAlunosTreinamentosContratosRP
@@ -1433,17 +1361,7 @@ export class DocumentosService {
                 .select(['contrato.id', 'contrato.dados_contrato'])
                 .getMany();
 
-            console.log('=== DEBUG: TODOS OS CONTRATOS ===');
-            console.log('Total de contratos encontrados:', todosContratos.length);
-
-            todosContratos.forEach((c, index) => {
-                const dadosContrato = c.dados_contrato;
-                console.log(`Contrato ${index + 1}:`, {
-                    id: c.id,
-                    dados_contrato: dadosContrato,
-                    zapsign_document_id: dadosContrato?.zapsign_document_id || 'N/A',
-                });
-            });
+            this.logger.debug(`contract.repo.cancel | Contratos ativos para validação=${todosContratos.length}`);
 
             // Buscar contrato pelo zapsign_document_id ou por ID numérico com relacionamentos
             let contrato = await this.uow.turmasAlunosTreinamentosContratosRP
@@ -1456,8 +1374,7 @@ export class DocumentosService {
                 .getOne();
 
             if (!contrato) {
-                console.log('Contrato não encontrado para o document_id:', documentoId);
-                console.log('Tentando buscar por ID numérico...');
+                this.logger.warn(`contract.repo.cancel | Contrato não encontrado por document_id=${documentoId}; tentando ID numérico`);
 
                 // Tentar buscar por ID numérico também
                 contrato = await this.uow.turmasAlunosTreinamentosContratosRP
@@ -1474,18 +1391,14 @@ export class DocumentosService {
                 }
             }
 
-            console.log('Contrato encontrado no banco:', contrato.id);
+            this.logger.log(`contract.repo.cancel | Contrato encontrado id=${contrato.id}`);
 
             const dadosContrato = contrato.dados_contrato || {};
             const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
             const idTurmaAlunoComprador = turmaAlunoComprador?.id || null;
             const idAlunoComprador = turmaAlunoComprador?.id_aluno || dadosContrato?.aluno?.id || dadosContrato?.aluno?.id_aluno || null;
 
-            console.log('📋 Cancelamento por IDs:', {
-                idContrato: contrato.id,
-                idTurmaAlunoComprador,
-                idAlunoComprador,
-            });
+            this.logger.debug('contract.repo.cancel | Cancelamento por IDs mapeado');
 
             const idsTurmasAlunosParaRemover = new Set<string>();
             const adicionarTurmaAlunoParaRemocao = (idTurmaAluno?: string | null) => {
@@ -1568,12 +1481,9 @@ export class DocumentosService {
                         adicionarTurmaAlunoParaRemocao(turmaAlunoBonus.id);
                     }
 
-                    console.log(
-                        '✅ Matrículas bônus identificadas por IDs:',
-                        matriculasBonus.map((item) => item.id),
-                    );
+                    this.logger.debug(`contract.repo.cancel | Matrículas bônus identificadas=${matriculasBonus.length}`);
                 } else {
-                    console.log('ℹ️ Nenhuma turma bônus vinculada por ID encontrada para este contrato; bônus não será removido por segurança.');
+                    this.logger.debug('contract.repo.cancel | Nenhuma turma bônus vinculada por ID encontrada para este contrato');
                 }
             }
 
@@ -1584,17 +1494,17 @@ export class DocumentosService {
                 if (podeRemover) {
                     idsTurmasAlunosElegiveisParaRemocao.add(idTurmaAluno);
                 } else {
-                    console.log(`🛡️ Matrícula ${idTurmaAluno} preservada: existem outros contratos ativos vinculados ao mesmo registro.`);
+                    this.logger.debug(`contract.repo.cancel | Matrícula preservada por contrato ativo idTurmaAluno=${idTurmaAluno}`);
                 }
             }
 
-            console.log(`🗑️ Removendo ${idsTurmasAlunosElegiveisParaRemocao.size} matrícula(s) de turma por ID sem impactar outros contratos...`);
+            this.logger.log(`contract.repo.cancel | Removendo matrículas elegíveis=${idsTurmasAlunosElegiveisParaRemocao.size}`);
             for (const idTurmaAluno of idsTurmasAlunosElegiveisParaRemocao) {
                 try {
                     await this.turmasService.removeAlunoTurma(idTurmaAluno);
-                    console.log(`✅ Aluno removido da turma: ${idTurmaAluno}`);
+                    this.logger.debug(`contract.repo.cancel | Aluno removido da turma idTurmaAluno=${idTurmaAluno}`);
                 } catch (error) {
-                    console.error(`⚠️ Erro ao remover aluno ${idTurmaAluno} da turma:`, error);
+                    this.logger.warn(`contract.repo.cancel | Erro ao remover aluno da turma idTurmaAluno=${idTurmaAluno}`);
                     // Continuar removendo os outros mesmo se um falhar
                 }
             }
@@ -1604,9 +1514,9 @@ export class DocumentosService {
             if (documentIdZapSign) {
                 try {
                     await this.zapSignService.cancelDocument(documentIdZapSign);
-                    console.log('Documento cancelado no ZapSign com sucesso');
+                    this.logger.debug('zapsign.cancel | Documento cancelado no ZapSign');
                 } catch (zapSignError) {
-                    console.error('Erro ao cancelar no ZapSign:', zapSignError);
+                    this.logger.warn('zapsign.cancel | Erro ao cancelar documento no ZapSign');
                     // Continuar mesmo se falhar na Zapsign
                 }
             }
@@ -1617,13 +1527,13 @@ export class DocumentosService {
                 atualizado_por: userId,
             });
 
-            console.log('✅ Contrato removido do banco (soft delete)');
+            this.logger.log('contract.repo.cancel | Contrato removido do banco (soft delete)');
 
             return {
                 message: 'Documento cancelado com sucesso. Contrato removido e vínculos de turma/bônus tratados por ID, sem afetar contratos duplicados ativos.',
             };
         } catch (error) {
-            console.error('Erro ao cancelar documento:', error);
+            this.logger.error('zapsign.cancel | Erro ao cancelar documento', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao cancelar documento: ${(error as Error).message}`);
         }
     }
@@ -1633,8 +1543,7 @@ export class DocumentosService {
      */
     async excluirDocumentoZapSign(contratoId: string, userId?: number): Promise<{ message: string }> {
         try {
-            console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
-            console.log('ID do contrato:', contratoId);
+            this.logger.log(`zapsign.delete | Excluindo contrato ZapSign contratoId=${contratoId}`);
             const contratoIdNumerico = Number(contratoId);
             if (!Number.isInteger(contratoIdNumerico)) {
                 throw new BadRequestException('ID de contrato inválido');
@@ -1654,18 +1563,14 @@ export class DocumentosService {
                 throw new NotFoundException('Contrato não encontrado');
             }
 
-            console.log('Contrato encontrado no banco:', contrato.id);
+            this.logger.log(`contract.repo.delete | Contrato encontrado para exclusão id=${contrato.id}`);
 
             const dadosContrato = contrato.dados_contrato || {};
             const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
             const idTurmaAlunoComprador = turmaAlunoComprador?.id || null;
             const idAlunoComprador = turmaAlunoComprador?.id_aluno || dadosContrato?.aluno?.id || dadosContrato?.aluno?.id_aluno || null;
 
-            console.log('📋 Exclusão por IDs:', {
-                idContrato: contrato.id,
-                idTurmaAlunoComprador,
-                idAlunoComprador,
-            });
+            this.logger.debug('contract.repo.delete | Exclusão por IDs mapeada');
 
             // IDs de matrícula em turma a remover (comprador + bônus da venda)
             const idsTurmasAlunosParaRemover = new Set<string>();
@@ -1749,12 +1654,9 @@ export class DocumentosService {
                         adicionarTurmaAlunoParaRemocao(turmaAlunoBonus.id);
                     }
 
-                    console.log(
-                        '✅ Matrículas bônus identificadas por IDs:',
-                        matriculasBonus.map((item) => item.id),
-                    );
+                    this.logger.debug(`contract.repo.delete | Matrículas bônus identificadas=${matriculasBonus.length}`);
                 } else {
-                    console.log('ℹ️ Nenhuma turma bônus vinculada por ID encontrada para esta venda; bônus não será removido por segurança.');
+                    this.logger.debug('contract.repo.delete | Nenhuma turma bônus vinculada por ID encontrada para esta venda');
                 }
             }
 
@@ -1765,17 +1667,17 @@ export class DocumentosService {
                 if (podeRemover) {
                     idsTurmasAlunosElegiveisParaRemocao.add(idTurmaAluno);
                 } else {
-                    console.log(`🛡️ Matrícula ${idTurmaAluno} preservada: existem outros contratos ativos vinculados ao mesmo registro.`);
+                    this.logger.debug(`contract.repo.delete | Matrícula preservada por contrato ativo idTurmaAluno=${idTurmaAluno}`);
                 }
             }
 
-            console.log(`🗑️ Removendo ${idsTurmasAlunosElegiveisParaRemocao.size} matrícula(s) de turma por ID sem impactar outros contratos...`);
+            this.logger.log(`contract.repo.delete | Removendo matrículas elegíveis=${idsTurmasAlunosElegiveisParaRemocao.size}`);
             for (const idTurmaAluno of idsTurmasAlunosElegiveisParaRemocao) {
                 try {
                     await this.turmasService.removeAlunoTurma(idTurmaAluno);
-                    console.log(`✅ Aluno removido da turma: ${idTurmaAluno}`);
+                    this.logger.debug(`contract.repo.delete | Aluno removido da turma idTurmaAluno=${idTurmaAluno}`);
                 } catch (error) {
-                    console.error(`⚠️ Erro ao remover aluno ${idTurmaAluno} da turma:`, error);
+                    this.logger.warn(`contract.repo.delete | Erro ao remover aluno da turma idTurmaAluno=${idTurmaAluno}`);
                     // Continuar removendo os outros mesmo se um falhar
                 }
             }
@@ -1785,9 +1687,9 @@ export class DocumentosService {
             if (documentIdZapSign) {
                 try {
                     await this.zapSignService.excluirDocumento(documentIdZapSign);
-                    console.log('Documento removido da Zapsign:', documentIdZapSign);
+                    this.logger.debug(`zapsign.delete | Documento removido da Zapsign documentId=${documentIdZapSign}`);
                 } catch (zapSignError) {
-                    console.error('Erro ao remover da Zapsign:', zapSignError);
+                    this.logger.warn('zapsign.delete | Erro ao remover documento da Zapsign');
                     // Continuar mesmo se falhar na Zapsign
                 }
             }
@@ -1798,10 +1700,10 @@ export class DocumentosService {
                 atualizado_por: userId,
             });
 
-            console.log('✅ Contrato e vínculos de turma removidos com sucesso');
+            this.logger.log('contract.repo.delete | Contrato e vínculos de turma removidos com sucesso');
             return { message: 'Contrato, matrícula da turma e bônus removidos com sucesso. Cadastro do aluno preservado.' };
         } catch (error) {
-            console.error('Erro ao excluir contrato:', error);
+            this.logger.error('zapsign.delete | Erro ao excluir contrato', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao excluir contrato: ${(error as Error).message}`);
         }
     }
@@ -1810,8 +1712,7 @@ export class DocumentosService {
      * Prepara dados para o template usando dados salvos no banco
      */
     private prepareTemplateDataFromSavedContract(contrato: any) {
-        console.log('=== PREPARANDO DADOS DO CONTRATO SALVO ===');
-        console.log('Dados do contrato:', JSON.stringify(contrato, null, 2));
+        this.logger.debug('contract.template.prepare.saved | Preparando dados do contrato salvo para template');
 
         // Usar diretamente os dados salvos no banco
         return {
@@ -1887,8 +1788,7 @@ export class DocumentosService {
      * Gera detalhes de pagamento a partir de valores_formas_pagamento (fallback)
      */
     private generatePaymentDetailsFromValoresFormas(valoresFormas: any, camposVariaveis: any): string {
-        console.log('=== GERANDO DETALHES PAGAMENTO A PARTIR DE VALORES_FORMAS_PAGAMENTO ===');
-        console.log('Valores formas:', JSON.stringify(valoresFormas, null, 2));
+        this.logger.debug('contract.payment.details.saved | Gerando detalhes a partir de valores_formas_pagamento');
 
         const details: string[] = [];
 
@@ -1954,35 +1854,27 @@ export class DocumentosService {
             }
         });
 
-        console.log('Detalhes gerados:', details);
+        this.logger.debug(`contract.payment.details.saved | Detalhes gerados=${details.length}`);
         return details.length > 0 ? details.join('\n') : '• Não informado';
     }
 
     private generatePaymentDetailsFromSaved(dadosContrato: any): string {
-        console.log('=== DEBUG GERAR DETALHES PAGAMENTO SALVO ===');
-        console.log('Dados contrato recebidos:', JSON.stringify(dadosContrato, null, 2));
+        this.logger.debug('contract.payment.details.saved | Gerando detalhes a partir de dados salvos');
 
         // Tentar acessar formas_pagamento de diferentes locais possíveis
         const formasPagamento = dadosContrato.formas_pagamento || dadosContrato.pagamento?.formas_pagamento || [];
         const valoresFormasPagamento = dadosContrato.valores_formas_pagamento || dadosContrato.pagamento?.valores_formas_pagamento || {};
         const camposVariaveis = dadosContrato.campos_variaveis || {};
 
-        console.log('Formas pagamento encontradas:', formasPagamento);
-        console.log('Valores formas pagamento:', valoresFormasPagamento);
-        console.log('Campos variáveis:', camposVariaveis);
-        console.log('Total de formas pagamento encontradas:', formasPagamento.length);
-        console.log('Chaves dos valores formas pagamento:', Object.keys(valoresFormasPagamento));
-
         if (!formasPagamento || !Array.isArray(formasPagamento) || formasPagamento.length === 0) {
-            console.log('Nenhuma forma de pagamento encontrada, tentando usar valores_formas_pagamento');
+            this.logger.debug('contract.payment.details.saved | Nenhuma forma salva encontrada; usando fallback de valores_formas_pagamento');
 
             // Fallback: tentar usar valores_formas_pagamento se formas_pagamento não estiver disponível
             if (valoresFormasPagamento && typeof valoresFormasPagamento === 'object' && Object.keys(valoresFormasPagamento).length > 0) {
-                console.log('Usando valores_formas_pagamento como fallback');
                 return this.generatePaymentDetailsFromValoresFormas(valoresFormasPagamento, camposVariaveis);
             }
 
-            console.log('Nenhuma forma de pagamento encontrada, retornando "Não informado"');
+            this.logger.warn('contract.payment.details.saved | Nenhuma forma de pagamento encontrada nos dados salvos');
             return '• Não informado';
         }
 
@@ -2091,7 +1983,7 @@ export class DocumentosService {
 
             return contratoBasico;
         } catch (error) {
-            console.error('Erro ao buscar contrato básico:', error);
+            this.logger.error('contract.repo.get.basic | Erro ao buscar contrato básico', error instanceof Error ? error.stack : undefined);
             throw new Error('Erro ao buscar contrato básico');
         }
     }
@@ -2215,13 +2107,11 @@ export class DocumentosService {
             const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
             const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
 
-            // Log para debug do treinamento
-            console.log('=== DEBUG BUSCAR CONTRATO COMPLETO ===');
-            console.log('Treinamento dos dados_contrato:', dadosContrato.treinamento);
-            console.log('Treinamento das relations:', turmaAlunoTreinamento?.id_treinamento_fk);
-            console.log('Treinamento final usado:', treinamento);
-            console.log('Dados contrato completos:', JSON.stringify(dadosContrato, null, 2));
-            console.log('Pagamento nos dados contrato:', dadosContrato.pagamento);
+            this.logger.debug(
+                `contract.repo.get.full | Contrato mapeado contratoId=${contrato.id} alunoId=${String(aluno?.id || '')} treinamentoId=${String(
+                    treinamento?.id || '',
+                )}`,
+            );
 
             const contratoMapeado = {
                 id: contrato.id,
@@ -2315,10 +2205,9 @@ export class DocumentosService {
                 },
             };
 
-            console.log('Contrato mapeado final:', JSON.stringify(contratoMapeado, null, 2));
             return contratoMapeado;
         } catch (error) {
-            console.error('Erro ao buscar contrato completo:', error);
+            this.logger.error('contract.repo.get.full | Erro ao buscar contrato completo', error instanceof Error ? error.stack : undefined);
             throw new Error('Erro ao buscar contrato completo');
         }
     }
@@ -2787,10 +2676,10 @@ export class DocumentosService {
                 totalPages,
             };
 
-            console.log('Retornando resultado:', JSON.stringify(resultado, null, 2));
+            this.logger.debug(`contract.repo.list | Listagem concluída total=${total} pagina=${page} limite=${limit}`);
             return resultado;
         } catch (error) {
-            console.error('Erro ao listar contratos do banco:', error);
+            this.logger.error('contract.repo.list | Erro ao listar contratos do banco', error instanceof Error ? error.stack : undefined);
             throw new Error('Erro ao listar contratos do banco de dados');
         }
     }
@@ -2799,7 +2688,7 @@ export class DocumentosService {
         try {
             await this.mailService.sendContractEmail(email, nomeSignatario, signingUrl);
         } catch (error) {
-            console.error('Erro ao enviar email de contrato:', error);
+            this.logger.error('contract.email.send | Erro ao enviar email de contrato', error instanceof Error ? error.stack : undefined);
 
             // Verificar se é erro de configuração SMTP
             if (error instanceof Error && error.message && error.message.includes('SMTP não configurado')) {
@@ -2824,8 +2713,7 @@ export class DocumentosService {
 
     async criarTermoZapSign(criarTermoDto: CriarTermoZapSignDto, userId?: number): Promise<RespostaTermoZapSignDto> {
         try {
-            console.log('=== CRIAR TERMO ZAPSIGN - INÍCIO ===');
-            console.log('criarTermoDto:', JSON.stringify(criarTermoDto, null, 2));
+            this.logger.debug('zapsign.create.term | Iniciando criação de termo ZapSign');
 
             // Buscar dados do aluno
             const aluno = await this.uow.alunosRP.findOne({
@@ -2929,7 +2817,7 @@ export class DocumentosService {
                 file: pdfBuffer,
             };
 
-            console.log('Documento termo sendo criado:', documentData.name);
+            this.logger.debug(`zapsign.create.term | Documento de termo sendo criado: ${documentData.name}`);
 
             const zapSignResponse = await this.zapSignService.createDocumentFromFile(documentData);
 
@@ -3026,7 +2914,7 @@ export class DocumentosService {
 
                             // Se for erro de sequência desincronizada (primary key)
                             if (constraint === 'pk_turmas_alunos_trn') {
-                                console.warn('Sequência de IDs desincronizada detectada em turmas_alunos_treinamentos. Corrigindo...');
+                                this.logger.warn('db.sequence.turmas_alunos_treinamentos | Sequência desincronizada detectada; corrigindo');
 
                                 // Corrigir a sequência
                                 await this.fixTurmasAlunosTreinamentosSequence();
@@ -3042,7 +2930,7 @@ export class DocumentosService {
 
                                 // Tentar novamente
                                 turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(novoRegistro);
-                                console.log('Registro criado com sucesso após correção da sequência');
+                                this.logger.log('db.sequence.turmas_alunos_treinamentos | Registro criado após correção de sequência');
                             } else {
                                 // Se for outro tipo de constraint única, tentar reativar registro deletado
                                 const registroExistente = await this.uow.turmasAlunosTreinamentosRP.findOne({
@@ -3145,7 +3033,7 @@ export class DocumentosService {
                 file_url: zapSignResponse.original_file,
             };
         } catch (error: any) {
-            console.error('Erro ao criar termo no ZapSign:', error);
+            this.logger.error('zapsign.create.term | Erro ao criar termo no ZapSign', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao criar termo: ${error.message}`);
         }
     }
@@ -3305,7 +3193,7 @@ export class DocumentosService {
                 totalAssinaturas: totalSigners,
             };
         } catch (error: any) {
-            console.error('Erro ao sincronizar status do ZapSign:', error);
+            this.logger.error('zapsign.sync | Erro ao sincronizar status do ZapSign', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
         }
     }
@@ -3335,7 +3223,7 @@ export class DocumentosService {
 
             return await this.sincronizarStatusZapSign(contrato.id);
         } catch (error: any) {
-            console.error('Erro ao sincronizar status por document_id:', error);
+            this.logger.error('zapsign.sync | Erro ao sincronizar status por document_id', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
         }
     }
@@ -3365,7 +3253,7 @@ export class DocumentosService {
                     await this.sincronizarStatusZapSign(contrato.id);
                     sincronizados++;
                 } catch (error) {
-                    console.error(`Erro ao sincronizar contrato ${contrato.id}:`, error);
+                    this.logger.warn(`zapsign.sync | Erro ao sincronizar contrato id=${contrato.id}`);
                     erros++;
                 }
             }
@@ -3376,7 +3264,7 @@ export class DocumentosService {
                 erros,
             };
         } catch (error: any) {
-            console.error('Erro ao sincronizar todos os status:', error);
+            this.logger.error('zapsign.sync | Erro ao sincronizar todos os status', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
         }
     }
@@ -3439,9 +3327,9 @@ export class DocumentosService {
             }
 
             await queryRunner.release();
-            console.log(`Sequência de turmas_alunos_treinamentos corrigida. Próximo ID será: ${nextId}`);
+            this.logger.log(`db.sequence.turmas_alunos_treinamentos | Sequência corrigida próximoId=${nextId}`);
         } catch (error) {
-            console.error('Erro ao corrigir sequência de turmas_alunos_treinamentos:', error);
+            this.logger.error('db.sequence.turmas_alunos_treinamentos | Erro ao corrigir sequência', error instanceof Error ? error.stack : undefined);
             // Não relançar o erro, apenas logar
             // Se a correção falhar, o erro original será relançado
         }

@@ -3,8 +3,26 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import * as bodyParser from 'body-parser';
 import { RequestUserContextInterceptor } from './common/interceptors/request-user-context.interceptor';
+import { installStructuredConsoleLogging } from './common/logging/structured-console';
+
+function configureProductionConsolePolicy() {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const allowVerboseLogs = process.env.ENABLE_DEBUG_LOGS === 'true';
+
+    if (!isProduction || allowVerboseLogs) {
+        return;
+    }
+
+    const noop = () => undefined;
+    console.log = noop;
+    console.debug = noop;
+    console.info = noop;
+}
 
 async function bootstrap() {
+    installStructuredConsoleLogging();
+    configureProductionConsolePolicy();
+
     const app = await NestFactory.create(AppModule);
 
     // Prefixo global para todas as rotas da API

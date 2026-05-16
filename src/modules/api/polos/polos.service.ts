@@ -78,9 +78,7 @@ export class PolosService {
             };
         } catch (error) {
             console.error('Erro ao buscar polos:', error);
-            throw new InternalServerErrorException(
-                'Erro interno do servidor ao buscar polos',
-            );
+            throw new InternalServerErrorException('Erro interno do servidor ao buscar polos');
         }
     }
 

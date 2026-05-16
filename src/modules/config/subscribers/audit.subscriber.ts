@@ -45,4 +45,3 @@ export class AuditSubscriber implements EntitySubscriberInterface<BaseEntity> {
         event.entity.atualizado_por = userId;
     }
 }
-

@@ -21,6 +21,7 @@ import {
     TurmaTimesResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
+import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload } from './turmas.service';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('turmas')
@@ -28,6 +29,47 @@ export class TurmasController {
     constructor(private readonly turmasService: TurmasService) {}
 
     // Rotas específicas (devem vir antes das rotas com parâmetros)
+
+    @Get('presentes-sorteio')
+    @UseGuards(JwtAuthGuard)
+    async getPresentesSorteio() {
+        return this.turmasService.getPresentesSorteio();
+    }
+
+    @Post('presentes-sorteio')
+    @UseGuards(JwtAuthGuard)
+    async createPresenteSorteio(@Body() payload: PresenteSorteioPayload, @Req() req: any) {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.createPresenteSorteio(payload, userId);
+    }
+
+    @Put('presentes-sorteio/:id')
+    @UseGuards(JwtAuthGuard)
+    async updatePresenteSorteio(@Param('id', ParseIntPipe) id: number, @Body() payload: PresenteSorteioPayload, @Req() req: any) {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.updatePresenteSorteio(id, payload, userId);
+    }
+
+    @Delete('presentes-sorteio/:id')
+    @UseGuards(JwtAuthGuard)
+    async softDeletePresenteSorteio(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        await this.turmasService.softDeletePresenteSorteio(id, userId);
+        return { message: 'Presente removido com sucesso.' };
+    }
+
+    @Post('historico-sorteados')
+    @UseGuards(JwtAuthGuard)
+    async registrarHistoricoSorteado(@Body() payload: HistoricoSorteadoPayload, @Req() req: any) {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.registrarHistoricoSorteado(payload, userId);
+    }
+
+    @Get('historico-sorteados')
+    @UseGuards(JwtAuthGuard)
+    async getHistoricoSorteados(@Query() filters: HistoricoSorteadosFilters) {
+        return this.turmasService.getHistoricoSorteados(filters);
+    }
 
     @Get('usuarios-lideres')
     async getUsuariosLideres(): Promise<{ id: number; nome: string; email: string; cpf: string | null; telefone: string; funcao: string[] }[]> {

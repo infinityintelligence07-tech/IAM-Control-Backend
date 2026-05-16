@@ -20,6 +20,8 @@ import { Usuarios } from '../entities/usuarios.entity';
 import { EnderecoEventos } from '../entities/enderecoEventos.entity';
 import { AlunosVinculos } from '../entities/alunosVinculos.entity';
 import { HistoricoTransferenciasAlunos } from '../entities/historicoTransferenciasAlunos.entity';
+import { PresentesSorteio } from '../entities/presentesSorteio.entity';
+import { HistoricoSorteados } from '../entities/historicoSorteados.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -151,6 +153,18 @@ export class UnitOfWorkService {
     get historicoTransferenciasRP(): Repository<HistoricoTransferenciasAlunos> {
         if (!this._historicoTransferenciasRP) this._historicoTransferenciasRP = this.postgresEM.getRepository(HistoricoTransferenciasAlunos);
         return this._historicoTransferenciasRP;
+    }
+
+    private _presentesSorteioRP?: Repository<PresentesSorteio>;
+    get presentesSorteioRP(): Repository<PresentesSorteio> {
+        if (!this._presentesSorteioRP) this._presentesSorteioRP = this.postgresEM.getRepository(PresentesSorteio);
+        return this._presentesSorteioRP;
+    }
+
+    private _historicoSorteadosRP?: Repository<HistoricoSorteados>;
+    get historicoSorteadosRP(): Repository<HistoricoSorteados> {
+        if (!this._historicoSorteadosRP) this._historicoSorteadosRP = this.postgresEM.getRepository(HistoricoSorteados);
+        return this._historicoSorteadosRP;
     }
     /*****************************************************************************/
 }

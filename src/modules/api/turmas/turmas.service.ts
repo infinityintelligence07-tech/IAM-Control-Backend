@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral } from '../../config/entities/enum';
 import {
@@ -22,16 +22,268 @@ import {
     UpdateTurmaTimesDto,
     TurmaTimesResponseDto,
 } from './dto/turmas.dto';
-import { FindManyOptions, ILike, Not, In } from 'typeorm';
+import { FindManyOptions, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import * as jwt from 'jsonwebtoken';
+import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
+import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
+
+export interface PresenteSorteioPayload {
+    descricao: string;
+    imagem_base64?: string | null;
+    imagem_mime_type?: string | null;
+    para_toda_turma: boolean;
+}
+
+export interface HistoricoSorteadoPayload {
+    id_turma_aluno: string;
+    id_turma: number;
+    id_presente_sorteio: number;
+    numero_cracha: string;
+    sorteado_em?: string;
+}
+
+export interface HistoricoSorteadosFilters {
+    id_turma?: number;
+    id_presente_sorteio?: number;
+    data_inicio?: string;
+    data_final?: string;
+    page?: number;
+    limit?: number;
+}
 
 @Injectable()
 export class TurmasService {
+    private readonly logger = new Logger(TurmasService.name);
+
     constructor(
         private readonly uow: UnitOfWorkService,
         private readonly whatsappService: WhatsAppService,
     ) {}
+
+    async getPresentesSorteio(): Promise<PresentesSorteio[]> {
+        return this.uow.presentesSorteioRP.find({
+            where: { deletado_em: null },
+            order: { descricao: 'ASC' },
+        });
+    }
+
+    async createPresenteSorteio(payload: PresenteSorteioPayload, userId?: number): Promise<PresentesSorteio> {
+        const descricao = (payload.descricao || '').trim();
+        if (!descricao) {
+            throw new BadRequestException('Descrição do presente é obrigatória.');
+        }
+
+        const presenteToInsert = {
+            descricao,
+            imagem_base64: payload.imagem_base64?.trim() || null,
+            imagem_mime_type: payload.imagem_mime_type?.trim() || null,
+            para_toda_turma: payload.para_toda_turma,
+            criado_por: userId,
+            atualizado_por: userId,
+        };
+
+        const insertResult = await this.uow.presentesSorteioRP.insert(presenteToInsert);
+        const insertedId = Number(insertResult.identifiers?.[0]?.id);
+
+        if (!insertedId) {
+            throw new BadRequestException('Não foi possível criar o presente.');
+        }
+
+        const inserted = await this.uow.presentesSorteioRP.findOne({
+            where: { id: insertedId, deletado_em: null },
+        });
+
+        if (!inserted) {
+            throw new NotFoundException('Presente criado, mas não encontrado para retorno.');
+        }
+
+        return inserted;
+    }
+
+    async updatePresenteSorteio(id: number, payload: PresenteSorteioPayload, userId?: number): Promise<PresentesSorteio> {
+        const presente = await this.uow.presentesSorteioRP.findOne({
+            where: { id, deletado_em: null },
+            select: ['id', 'criado_em', 'atualizado_em', 'criado_por', 'atualizado_por', 'deletado_em'] as any,
+        });
+
+        if (!presente) {
+            throw new NotFoundException('Presente não encontrado.');
+        }
+
+        const descricao = (payload.descricao || '').trim();
+        if (!descricao) {
+            throw new BadRequestException('Descrição do presente é obrigatória.');
+        }
+
+        const shouldUpdateImagem = payload.imagem_base64 !== undefined || payload.imagem_mime_type !== undefined;
+        const atualizadoEm = new Date();
+        const updatePayload: any = {
+            descricao,
+            para_toda_turma: payload.para_toda_turma,
+            atualizado_por: userId ?? presente.atualizado_por,
+            atualizado_em: atualizadoEm,
+        };
+
+        if (shouldUpdateImagem) {
+            updatePayload.imagem_base64 = payload.imagem_base64?.trim() || null;
+            updatePayload.imagem_mime_type = payload.imagem_mime_type?.trim() || null;
+        }
+
+        await this.uow.presentesSorteioRP.update({ id, deletado_em: IsNull() as any }, updatePayload);
+
+        return {
+            ...presente,
+            descricao,
+            ...(shouldUpdateImagem
+                ? {
+                      imagem_base64: payload.imagem_base64?.trim() || null,
+                      imagem_mime_type: payload.imagem_mime_type?.trim() || null,
+                  }
+                : {}),
+            para_toda_turma: payload.para_toda_turma,
+            atualizado_por: userId ?? presente.atualizado_por,
+            atualizado_em: atualizadoEm,
+        } as PresentesSorteio;
+    }
+
+    async softDeletePresenteSorteio(id: number, userId?: number): Promise<void> {
+        const presente = await this.uow.presentesSorteioRP.findOne({
+            where: { id, deletado_em: null },
+            select: ['id', 'atualizado_por'] as any,
+        });
+
+        if (!presente) {
+            throw new NotFoundException('Presente não encontrado.');
+        }
+
+        await this.uow.presentesSorteioRP.update(
+            { id, deletado_em: IsNull() as any },
+            {
+                deletado_em: new Date(),
+                atualizado_por: userId ?? presente.atualizado_por,
+                atualizado_em: new Date(),
+            },
+        );
+    }
+
+    async registrarHistoricoSorteado(payload: HistoricoSorteadoPayload, userId?: number): Promise<HistoricoSorteados> {
+        const numeroCracha = (payload.numero_cracha || '').trim();
+        if (!payload.id_turma_aluno || !payload.id_turma || !payload.id_presente_sorteio || !numeroCracha) {
+            throw new BadRequestException('Dados obrigatórios do histórico de sorteio não informados.');
+        }
+
+        const turmaAluno = await this.uow.turmasAlunosRP.findOne({
+            where: { id: payload.id_turma_aluno, id_turma: payload.id_turma, deletado_em: null },
+            select: ['id', 'id_turma'] as any,
+        });
+        if (!turmaAluno) {
+            throw new NotFoundException('Aluno da turma não encontrado para registrar o sorteio.');
+        }
+
+        const presente = await this.uow.presentesSorteioRP.findOne({
+            where: { id: payload.id_presente_sorteio, deletado_em: null },
+            select: ['id'] as any,
+        });
+        if (!presente) {
+            throw new NotFoundException('Presente não encontrado para registrar o sorteio.');
+        }
+
+        const historicoToInsert = {
+            id_turma_aluno: payload.id_turma_aluno,
+            id_turma: payload.id_turma,
+            id_presente_sorteio: payload.id_presente_sorteio,
+            numero_cracha: numeroCracha,
+            sorteado_em: payload.sorteado_em ? new Date(payload.sorteado_em) : new Date(),
+            criado_por: userId,
+            atualizado_por: userId,
+        };
+
+        const insertResult = await this.uow.historicoSorteadosRP.insert(historicoToInsert);
+        const insertedId = String(insertResult.identifiers?.[0]?.id || '');
+
+        if (!insertedId) {
+            throw new BadRequestException('Não foi possível registrar o histórico de sorteio.');
+        }
+
+        const historico = await this.uow.historicoSorteadosRP.findOne({
+            where: { id: insertedId, deletado_em: null },
+        });
+
+        if (!historico) {
+            throw new NotFoundException('Histórico criado, mas não encontrado para retorno.');
+        }
+
+        return historico;
+    }
+
+    async getHistoricoSorteados(filters: HistoricoSorteadosFilters) {
+        const page = Math.max(1, Number(filters.page || 1));
+        const limit = Math.max(1, Math.min(200, Number(filters.limit || 20)));
+
+        const qb = this.uow.historicoSorteadosRP
+            .createQueryBuilder('hs')
+            .leftJoin('turmas_alunos', 'ta', 'ta.id = hs.id_turma_aluno')
+            .leftJoin('alunos', 'a', 'a.id = ta.id_aluno')
+            .leftJoin('turmas', 't', 't.id = hs.id_turma')
+            .leftJoin('presentes_sorteio', 'ps', 'ps.id = hs.id_presente_sorteio')
+            .leftJoin('usuarios', 'u', 'u.id = hs.criado_por')
+            .where('hs.deletado_em IS NULL');
+
+        if (filters.id_turma) {
+            qb.andWhere('hs.id_turma = :id_turma', { id_turma: Number(filters.id_turma) });
+        }
+
+        if (filters.id_presente_sorteio) {
+            qb.andWhere('hs.id_presente_sorteio = :id_presente_sorteio', {
+                id_presente_sorteio: Number(filters.id_presente_sorteio),
+            });
+        }
+
+        if (filters.data_inicio) {
+            qb.andWhere('hs.sorteado_em >= :data_inicio', {
+                data_inicio: `${filters.data_inicio} 00:00:00`,
+            });
+        }
+
+        if (filters.data_final) {
+            qb.andWhere('hs.sorteado_em <= :data_final', {
+                data_final: `${filters.data_final} 23:59:59`,
+            });
+        }
+
+        const total = await qb.getCount();
+
+        const rows = await qb
+            .select([
+                'hs.id AS id',
+                'hs.id_turma_aluno AS id_turma_aluno',
+                'hs.id_turma AS id_turma',
+                'hs.id_presente_sorteio AS id_presente_sorteio',
+                'hs.numero_cracha AS numero_cracha',
+                'hs.sorteado_em AS sorteado_em',
+                'hs.criado_por AS criado_por',
+                'hs.criado_em AS criado_em',
+                'a.nome AS nome_aluno',
+                'ta.nome_cracha AS nome_cracha',
+                't.edicao_turma AS edicao_turma',
+                't.cidade AS cidade_turma',
+                'ps.descricao AS descricao_presente',
+                'u.nome AS nome_usuario',
+            ])
+            .orderBy('hs.sorteado_em', 'DESC')
+            .skip((page - 1) * limit)
+            .take(limit)
+            .getRawMany();
+
+        return {
+            data: rows,
+            total,
+            page,
+            limit,
+            totalPages: Math.max(1, Math.ceil(total / limit)),
+        };
+    }
 
     /** Mapeia entidade Turmas (com relações id_treinamento_fk e id_polo_fk) para o objeto de tag de transferência. */
     private mapTurmaToTransferenciaTag(
@@ -1335,7 +1587,7 @@ export class TurmasService {
 
             return trilhaCompleta;
         } catch (error) {
-            console.error('Erro ao buscar trilha do aluno:', error);
+            this.logger.error('turma.trilha.get | Erro ao buscar trilha do aluno', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao buscar trilha do aluno');
         }
     }
@@ -1344,11 +1596,9 @@ export class TurmasService {
      * Buscar turmas de IPR (Imersão Prosperar) com inscrições abertas para usar como bônus
      */
     async findIPRTurmasBonus(): Promise<TurmaResponseDto[]> {
-        console.log('🎯 [DEBUG] Iniciando busca de turmas de IPR para bônus...');
+        this.logger.debug('turma.ipr.list | Iniciando busca de turmas IPR para bônus');
 
         try {
-            console.log('🎯 [DEBUG] Buscando turmas com status INSCRICOES_ABERTAS...');
-
             // Buscar turmas com status INSCRICOES_ABERTAS
             const turmas = await this.uow.turmasRP.find({
                 where: {
@@ -1361,19 +1611,14 @@ export class TurmasService {
                 },
             });
 
-            console.log(`📚 [DEBUG] Encontradas ${turmas.length} turmas com inscrições abertas`);
-
             // Filtrar apenas turmas de IPR (Imersão Prosperar)
             const turmasIPR = turmas.filter((turma) => {
                 if (!turma.id_treinamento_fk) {
-                    console.log(`⚠️ [DEBUG] Turma ${turma.id} sem treinamento associado`);
                     return false;
                 }
 
                 const nomeTreinamento = turma.id_treinamento_fk.treinamento?.toLowerCase() || '';
                 const edicaoTurma = turma.edicao_turma?.toLowerCase() || '';
-
-                console.log(`🔍 [DEBUG] Turma ${turma.id}: treinamento="${nomeTreinamento}", edição="${edicaoTurma}"`);
 
                 const isIPR =
                     nomeTreinamento.includes('imersão prosperar') ||
@@ -1381,19 +1626,11 @@ export class TurmasService {
                     edicaoTurma.includes('ipr') ||
                     edicaoTurma.includes('imersão prosperar');
 
-                if (isIPR) {
-                    console.log(`✅ [DEBUG] Turma ${turma.id} identificada como IPR`);
-                }
-
                 return isIPR;
             });
 
-            console.log(`🎯 [DEBUG] Turmas de IPR filtradas: ${turmasIPR.length}`);
-
             // Transformar dados para o formato de resposta
             const turmasResponse: TurmaResponseDto[] = turmasIPR.map((turma) => {
-                console.log(`🔄 [DEBUG] Transformando turma ${turma.id} para resposta`);
-
                 return {
                     id: turma.id,
                     id_polo: turma.id_polo,
@@ -1455,21 +1692,18 @@ export class TurmasService {
                 };
             });
 
-            console.log(`✅ [DEBUG] Turmas de IPR para bônus carregadas: ${turmasResponse.length}`);
-            console.log(`📋 [DEBUG] Dados finais:`, JSON.stringify(turmasResponse, null, 2));
+            this.logger.log(`turma.ipr.list | Turmas IPR carregadas abertas=${turmas.length} filtradas=${turmasResponse.length}`);
 
             return turmasResponse;
         } catch (error) {
-            console.error('❌ [DEBUG] Erro ao buscar turmas de IPR para bônus:', error);
-            console.error('❌ [DEBUG] Stack trace:', error instanceof Error ? error.stack : 'N/A');
+            this.logger.error('turma.ipr.list | Erro ao buscar turmas de IPR para bônus', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao buscar turmas de IPR para bônus');
         }
     }
 
     async update(id: number, updateTurmaDto: UpdateTurmaDto): Promise<TurmaResponseDto> {
         try {
-            console.log(`[DEBUG] Atualizando turma ID: ${id}`);
-            console.log(`[DEBUG] Dados recebidos:`, updateTurmaDto);
+            this.logger.debug(`turma.repo.update | Atualizando turma id=${id}`);
 
             const turma = await this.uow.turmasRP.findOne({
                 where: {
@@ -1479,40 +1713,33 @@ export class TurmasService {
             });
 
             if (!turma) {
-                console.log(`[DEBUG] Turma não encontrada: ${id}`);
                 throw new NotFoundException('Turma não encontrada');
             }
 
             // Validações se campos forem fornecidos
             if (updateTurmaDto.id_polo) {
-                console.log(`[DEBUG] Validando polo ID: ${updateTurmaDto.id_polo}`);
                 const polo = await this.uow.polosRP.findOne({
                     where: { id: updateTurmaDto.id_polo },
                 });
                 if (!polo) {
-                    console.log(`[DEBUG] Polo não encontrado: ${updateTurmaDto.id_polo}`);
                     throw new NotFoundException('Polo não encontrado');
                 }
             }
 
             if (updateTurmaDto.id_treinamento) {
-                console.log(`[DEBUG] Validando treinamento ID: ${updateTurmaDto.id_treinamento}`);
                 const treinamento = await this.uow.treinamentosRP.findOne({
                     where: { id: updateTurmaDto.id_treinamento },
                 });
                 if (!treinamento) {
-                    console.log(`[DEBUG] Treinamento não encontrado: ${updateTurmaDto.id_treinamento}`);
                     throw new NotFoundException('Treinamento não encontrado');
                 }
             }
 
             if (updateTurmaDto.lider_evento) {
-                console.log(`[DEBUG] Validando lider ID: ${updateTurmaDto.lider_evento}`);
                 const lider = await this.uow.usuariosRP.findOne({
                     where: { id: updateTurmaDto.lider_evento },
                 });
                 if (!lider) {
-                    console.log(`[DEBUG] Líder não encontrado: ${updateTurmaDto.lider_evento}`);
                     throw new NotFoundException('Líder do evento não encontrado');
                 }
             }
@@ -1728,9 +1955,10 @@ export class TurmasService {
 
     async getAlunosTurma(id_turma: number, page: number = 1, limit: number = 10): Promise<AlunosTurmaListResponseDto> {
         try {
-            const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma } });
-
-            if (!turma) {
+            const turmaExiste = await this.uow.turmasRP.exist({
+                where: { id: id_turma, deletado_em: IsNull() as any },
+            });
+            if (!turmaExiste) {
                 throw new NotFoundException('Turma não encontrada');
             }
 
@@ -1850,12 +2078,7 @@ export class TurmasService {
             const nomeCracha = addAlunoDto.nome_cracha?.trim() || aluno.nome_cracha?.trim() || aluno.nome?.trim() || 'Aluno';
 
             // Debug: Log dos dados recebidos
-            console.log('=== DADOS RECEBIDOS PARA ADICIONAR ALUNO ===');
-            console.log('addAlunoDto:', addAlunoDto);
-            console.log('origem_aluno:', addAlunoDto.origem_aluno);
-            console.log('status_aluno_turma:', addAlunoDto.status_aluno_turma);
-            console.log('vaga_bonus:', addAlunoDto.vaga_bonus);
-            console.log('id_aluno_bonus:', addAlunoDto.id_aluno_bonus);
+            this.logger.debug(`turma.aluno.add | Adicionando aluno id=${String(addAlunoDto.id_aluno)} na turma id=${id_turma}`);
 
             // Criar registro na turmas_alunos
             const dadosParaSalvar = {
@@ -1875,18 +2098,9 @@ export class TurmasService {
                 }),
             };
 
-            console.log('=== DADOS QUE SERÃO SALVOS ===');
-            console.log('dadosParaSalvar:', dadosParaSalvar);
-
             const turmaAluno = this.uow.turmasAlunosRP.create(dadosParaSalvar);
 
-            console.log('=== ENTIDADE CRIADA ===');
-            console.log('turmaAluno antes do save:', turmaAluno);
-
             const turmaAlunoSalva = await this.uow.turmasAlunosRP.save(turmaAluno);
-
-            console.log('=== ENTIDADE SALVA ===');
-            console.log('turmaAlunoSalva:', turmaAlunoSalva);
 
             // Verificar e atualizar status da turma após adicionar aluno
             const turmaAtualizada = await this.uow.turmasRP.findOne({
@@ -1927,7 +2141,7 @@ export class TurmasService {
                     : undefined,
             };
         } catch (error) {
-            console.error('Erro ao adicionar aluno à turma:', error);
+            this.logger.error('turma.aluno.add | Erro ao adicionar aluno à turma', error instanceof Error ? error.stack : undefined);
             if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
@@ -3251,17 +3465,14 @@ export class TurmasService {
                 }
             }
 
-            console.log('Atualizando aluno turma com dados:', updateAlunoDto);
-            console.log('Dados antes do save:', turmaAluno);
+            this.logger.debug(`turma.aluno.update | Atualizando matrícula id=${id_turma_aluno}`);
 
             const turmaAlunoAtualizada = await this.uow.turmasAlunosRP.save(turmaAluno);
-
-            console.log('Dados após save:', turmaAlunoAtualizada);
 
             // Verificar se o status foi alterado para CHECKIN_REALIZADO
             // Enviar link do formulário para o aluno preencher seus dados
             if (statusAnterior !== EStatusAlunosTurmas.CHECKIN_REALIZADO && turmaAlunoAtualizada.status_aluno_turma === EStatusAlunosTurmas.CHECKIN_REALIZADO) {
-                console.log('📧 Status alterado para CHECKIN_REALIZADO - Enviando link do formulário via WhatsApp...');
+                this.logger.log('turma.aluno.status | CHECKIN_REALIZADO; enviando link do formulário via WhatsApp');
 
                 // Enviar link do formulário via WhatsApp automaticamente
                 await this.enviarLinkFormularioWhatsApp(turmaAlunoAtualizada);
@@ -3293,7 +3504,7 @@ export class TurmasService {
                     : undefined,
             };
         } catch (error) {
-            console.error('Erro ao atualizar aluno na turma:', error);
+            this.logger.error('turma.aluno.update | Erro ao atualizar aluno na turma', error instanceof Error ? error.stack : undefined);
             if (error instanceof NotFoundException) {
                 throw error;
             }
@@ -3340,10 +3551,7 @@ export class TurmasService {
         try {
             // Verificar se temos os dados necessários
             if (!turmaAluno.id_aluno_fk || !turmaAluno.id_turma_fk) {
-                console.error('❌ Dados insuficientes para enviar link do formulário:', {
-                    hasAluno: !!turmaAluno.id_aluno_fk,
-                    hasTurma: !!turmaAluno.id_turma_fk,
-                });
+                this.logger.warn('whatsapp.form.send | Dados insuficientes para enviar link do formulário');
                 return;
             }
 
@@ -3427,11 +3635,7 @@ export class TurmasService {
                 treinamentoNome: treinamento?.treinamento || 'Treinamento não informado',
             };
 
-            console.log('📧 Enviando link do formulário para:', {
-                nome: aluno.nome,
-                telefone: aluno.telefone_um,
-                treinamento: checkInData.treinamentoNome,
-            });
+            this.logger.debug(`whatsapp.form.send | Enviando link do formulário para aluno=${aluno.nome}`);
 
             // Gerar URL do formulário de preenchimento
             const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
@@ -3460,12 +3664,12 @@ Vamos Prosperar! 🙌`;
             const result = await this.whatsappService.sendMessage(aluno.telefone_um, message, aluno.nome);
 
             if (result.success) {
-                console.log('✅ Link do formulário enviado com sucesso para:', aluno.nome);
+                this.logger.log(`whatsapp.form.send | Link enviado com sucesso para ${aluno.nome}`);
             } else {
-                console.error('❌ Erro ao enviar link do formulário para:', aluno.nome, result.error);
+                this.logger.warn(`whatsapp.form.send | Falha ao enviar link para ${aluno.nome}: ${String(result.error || 'erro desconhecido')}`);
             }
         } catch (error) {
-            console.error('❌ Erro interno ao enviar link do formulário via WhatsApp:', error);
+            this.logger.error('whatsapp.form.send | Erro interno ao enviar link do formulário via WhatsApp', error instanceof Error ? error.stack : undefined);
             // Não relançar o erro para não interromper o fluxo principal
         }
     }

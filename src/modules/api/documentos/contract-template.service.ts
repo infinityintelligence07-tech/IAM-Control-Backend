@@ -42,7 +42,12 @@ export class ContractTemplateService {
         const observacoesContrato = (campos_variaveis?.['Observações'] || campos_variaveis?.['Observacoes'] || campos_variaveis?.['OBSERVACOES'] || '')
             .toString()
             .trim();
-        const observacoesContratoHtml = observacoesContrato ? observacoesContrato.replace(/\n/g, '<br>') : '';
+        const observacoesContratoHtml = observacoesContrato
+            ? observacoesContrato
+                  .replace(/\r\n/g, '\n')
+                  .replace(/\n{2,}/g, '\n')
+                  .replace(/\n/g, '<br>')
+            : '';
 
         // Obter a URL absoluta da logo
         const logoUrl = `${process.env.FRONTEND_URL || 'http://iamcontrol.com.br'}/images/logo/logo-escuro.png`;
@@ -207,6 +212,11 @@ export class ContractTemplateService {
             display: block;
             margin: 3px 0;
             font-size: 11px;
+        }
+
+        .observacoes-content {
+            margin-top: 2px;
+            line-height: 1.2;
         }
         
         .checkbox {
@@ -482,8 +492,8 @@ export class ContractTemplateService {
     <table>
         <tr>
             <td>
-                <strong>OBSERVAÇÕES:</strong><br><br>
-                {{OBSERVACOES}}
+                <strong>OBSERVAÇÕES:</strong>
+                <div class="observacoes-content">{{OBSERVACOES}}</div>
             </td>
         </tr>
     </table>
@@ -1525,6 +1535,11 @@ export class ContractTemplateService {
                 margin: 3px 0;
                 font-size: 12px;
               }
+
+              .observacoes-content {
+                margin-top: 2px;
+                line-height: 1.2;
+              }
               
               .checkbox {
                 margin-right: 5px;
@@ -2183,8 +2198,8 @@ export class ContractTemplateService {
               <table class="table">
                 <tr class="table-row">
                   <td class="table-cell">
-                    <strong>OBSERVAÇÕES:</strong><br><br>
-                    ${observacoesContratoHtml || '_________________'}
+                    <strong>OBSERVAÇÕES:</strong>
+                    <div class="observacoes-content">${observacoesContratoHtml || '_________________'}</div>
                   </td>
                 </tr>
               </table>

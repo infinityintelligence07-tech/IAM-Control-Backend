@@ -351,31 +351,34 @@ export class DocumentosService {
             // Persistir o BÔNUS em coluna (não só no JSON do contrato) para que o
             // histórico de vendas leia origem/destino/bônus de colunas reais.
             if (criarContratoDto.id_turma_bonus) {
-                const tiposBonusBruto = Array.isArray(criarContratoDto.tipos_bonus)
+                const tiposBonus = Array.isArray(criarContratoDto.tipos_bonus)
                     ? criarContratoDto.tipos_bonus.filter((t) => t && t !== 'nao_aplica' && t !== 'nenhum')
                     : [];
-                const tiposBonus = tiposBonusBruto.length > 0 ? tiposBonusBruto : ['default'];
 
-                for (const tipo of tiposBonus) {
-                    const jaExiste = await this.uow.turmasAlunosTreinamentosBonusRP.findOne({
-                        where: {
+                // Não cria vínculo de bônus quando nenhum bônus real foi selecionado.
+                if (tiposBonus.length > 0) {
+                    for (const tipo of tiposBonus) {
+                        const jaExiste = await this.uow.turmasAlunosTreinamentosBonusRP.findOne({
+                            where: {
+                                id_turma_aluno: turmaAluno.id,
+                                id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                                id_turma_bonus: criarContratoDto.id_turma_bonus,
+                                tipo_bonus: tipo,
+                                deletado_em: null,
+                            },
+                        });
+                        if (jaExiste) continue;
+
+                        const novoBonus = this.uow.turmasAlunosTreinamentosBonusRP.create({
                             id_turma_aluno: turmaAluno.id,
                             id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                             id_turma_bonus: criarContratoDto.id_turma_bonus,
                             tipo_bonus: tipo,
-                            deletado_em: null,
-                        },
-                    });
-                    if (jaExiste) continue;
-
-                    const novoBonus = this.uow.turmasAlunosTreinamentosBonusRP.create({
-                        id_turma_aluno: turmaAluno.id,
-                        id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
-                        id_turma_bonus: criarContratoDto.id_turma_bonus,
-                        tipo_bonus: tipo,
-                        ganhadores_bonus: [],
-                    });
-                    await this.uow.turmasAlunosTreinamentosBonusRP.save(novoBonus);
+                            // Coluna é jsonb[] no Postgres; '{}' representa array vazio válido.
+                            ganhadores_bonus: '{}' as unknown as any,
+                        });
+                        await this.uow.turmasAlunosTreinamentosBonusRP.save(novoBonus);
+                    }
                 }
             }
 
@@ -482,6 +485,16 @@ export class DocumentosService {
                         tipo_palestra: treinamento.tipo_palestra,
                         tipo_online: treinamento.tipo_online,
                     },
+                    turma: turma
+                        ? {
+                              id: turma.id,
+                              id_treinamento: turma.id_treinamento,
+                              edicao_turma: turma.edicao_turma,
+                              cidade: turma.cidade,
+                              data_inicio: turma.data_inicio,
+                              data_final: turma.data_final,
+                          }
+                        : null,
                     aluno: {
                         id: aluno.id,
                         nome: aluno.nome,
@@ -514,6 +527,8 @@ export class DocumentosService {
                     valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
                     bonus_selecionados: criarContratoDto.tipos_bonus || [],
                     valores_bonus: bonusData.valores_bonus,
+                    fluxo_evento_destino_id_turma: criarContratoDto.id_turma_destino ? Number(criarContratoDto.id_turma_destino) : null,
+                    compradores_adicionais: criarContratoDto.compradores_adicionais || [],
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
                     testemunhas: (() => {
@@ -659,6 +674,7 @@ export class DocumentosService {
             valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
             bonus_selecionados: criarContratoDto.tipos_bonus || [],
             valores_bonus: bonusData.valores_bonus,
+            compradores_adicionais: criarContratoDto.compradores_adicionais || [],
             campos_variaveis: bonusData.campos_variaveis,
             testemunhas:
                 criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome
@@ -1758,6 +1774,7 @@ export class DocumentosService {
             valores_formas_pagamento: contrato.valores_formas_pagamento || {},
             bonus_selecionados: contrato.bonus_selecionados || [],
             valores_bonus: contrato.valores_bonus || {},
+            compradores_adicionais: contrato.compradores_adicionais || [],
             campos_variaveis: contrato.campos_variaveis || {},
             testemunhas: contrato.testemunhas || {},
             observacoes: contrato.observacoes || '',
@@ -2309,6 +2326,8 @@ export class DocumentosService {
                     let turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
                     let turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
                     const documento = contrato.id_documento_fk;
+                    const fallbackIdTurmaDestino =
+                        Number(turmaAlunoTreinamento?.id_turma_destino || dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.turma?.id || 0) || 0;
                     if (!turmaAluno) {
                         const fallbackAlunoId = Number(dadosContrato?.aluno?.id || 0);
                         const fallbackTreinamentoId = Number(dadosContrato?.treinamento?.id || turmaAlunoTreinamento?.id_treinamento || 0);
@@ -2323,6 +2342,7 @@ export class DocumentosService {
                                 .andWhere('turma_aluno.id_aluno = :idAluno', {
                                     idAluno: fallbackAlunoId,
                                 })
+                                .andWhere(fallbackIdTurmaDestino > 0 ? 'turma_aluno.id_turma = :idTurmaDestino' : '1=1', { idTurmaDestino: fallbackIdTurmaDestino })
                                 .andWhere('turma_aluno_treinamento.deletado_em IS NULL')
                                 .andWhere('turma_aluno.deletado_em IS NULL')
                                 .orderBy('turma_aluno_treinamento.atualizado_em', 'DESC')
@@ -2341,6 +2361,7 @@ export class DocumentosService {
                                 .where('turma_aluno.id_aluno = :idAluno', {
                                     idAluno: fallbackAlunoId,
                                 })
+                                .andWhere(fallbackIdTurmaDestino > 0 ? 'turma_aluno.id_turma = :idTurmaDestino' : '1=1', { idTurmaDestino: fallbackIdTurmaDestino })
                                 .andWhere('turma_aluno.deletado_em IS NULL')
                                 .orderBy(
                                     `CASE

@@ -183,6 +183,12 @@ export class CriarContratoZapSignDto {
     valores_bonus?: Record<string, boolean>; // Objeto com os valores dos bônus
 
     @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => CompradorAdicionalDto)
+    compradores_adicionais?: CompradorAdicionalDto[];
+
+    @IsOptional()
     campos_variaveis?: Record<string, string>; // Campos variáveis do contrato
 
     @IsOptional()
@@ -259,6 +265,20 @@ export class FormaPagamentoDto {
     @IsOptional()
     @IsNumber()
     parcelas?: number;
+}
+
+export class CompradorAdicionalDto {
+    @IsOptional()
+    @IsString()
+    nome?: string;
+
+    @IsOptional()
+    @IsString()
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    telefone?: string;
 }
 
 export class RespostaContratoZapSignDto {

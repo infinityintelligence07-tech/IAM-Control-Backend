@@ -4,6 +4,7 @@ import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
 import { TurmasAlunos } from './turmasAlunos.entity';
 import { Treinamentos } from './treinamentos.entity';
+import { Turmas } from './turmas.entity';
 import { EFormasPagamento } from './enum';
 import { TurmasAlunosTreinamentosContratos } from './turmasAlunosTreinamentosContratos.entity';
 
@@ -17,6 +18,13 @@ export class TurmasAlunosTreinamentos extends BaseEntity {
 
     @Column({ type: 'int', name: 'id_treinamento', nullable: false })
     id_treinamento: number;
+
+    /**
+     * Turma DESTINO do treinamento contratado (ex.: turma 87 = Confronto 54).
+     * Adicionado pela migration 1773700000000-AddIdTurmaDestinoVendas.
+     */
+    @Column({ type: 'bigint', name: 'id_turma_destino', nullable: true })
+    id_turma_destino: string | null;
 
     @Column({ type: 'float', name: 'preco_treinamento', nullable: false })
     preco_treinamento: number;
@@ -34,6 +42,10 @@ export class TurmasAlunosTreinamentos extends BaseEntity {
     @ManyToOne(() => Treinamentos, (treinamentos) => treinamentos.turmasAlunosTreinamentos)
     @JoinColumn([{ name: 'id_treinamento', referencedColumnName: 'id' }])
     id_treinamento_fk: Treinamentos;
+
+    @ManyToOne(() => Turmas, (turmas) => turmas.turmasAlunosTreinamentosDestino, { nullable: true })
+    @JoinColumn([{ name: 'id_turma_destino', referencedColumnName: 'id' }])
+    id_turma_destino_fk: Turmas | null;
 
     @OneToMany(() => TurmasAlunosTreinamentosContratos, (turmasAlunosTreinamentosContratos) => turmasAlunosTreinamentosContratos.id_turma_aluno_treinamento_fk)
     turmasAlunosTreinamentosContratos: TurmasAlunosTreinamentosContratos[];

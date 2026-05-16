@@ -140,6 +140,15 @@ export class CriarContratoZapSignDto {
     @IsString()
     id_turma?: string;
 
+    /**
+     * Turma DESTINO do treinamento contratado (ex.: turma 87 = Confronto 54).
+     * Opcional durante o período de transição; passar a obrigatório após o
+     * frontend ser atualizado para sempre enviar este campo.
+     */
+    @IsOptional()
+    @IsString()
+    id_turma_destino?: string;
+
     @IsOptional()
     @IsString()
     cidade_treinamento?: string;

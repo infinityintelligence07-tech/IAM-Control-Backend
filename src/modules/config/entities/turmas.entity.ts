@@ -10,6 +10,7 @@ import { Usuarios } from './usuarios.entity';
 import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.entity';
 import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 import { EnderecoEventos } from './enderecoEventos.entity';
+import { TurmasAlunosTreinamentos } from './turmasAlunosTreinamentos.entity';
 
 export interface TimeEquipeGrupo {
     id: string;
@@ -126,6 +127,12 @@ export class Turmas extends BaseEntity {
     @OneToMany(() => TurmasAlunos, (turmasAlunos) => turmasAlunos.id_turma_fk)
     turmasAlunos: TurmasAlunos[];
 
-    @OneToMany(() => MasterclassPreCadastros, (masterclassPreCadastros) => masterclassPreCadastros.id_turma_fk)
+    @OneToMany(() => TurmasAlunosTreinamentos, (tat) => tat.id_turma_destino_fk)
+    turmasAlunosTreinamentosDestino: TurmasAlunosTreinamentos[];
+
+    @OneToMany(() => TurmasAlunosTreinamentosBonus, (bonus) => bonus.id_turma_bonus_fk)
+    turmasAlunosTreinamentosBonus: TurmasAlunosTreinamentosBonus[];
+
+    @OneToMany(() => MasterclassPreCadastros, (mpc) => mpc.id_turma_fk)
     masterclassPreCadastros: MasterclassPreCadastros[];
 }

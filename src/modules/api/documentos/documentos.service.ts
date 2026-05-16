@@ -223,11 +223,11 @@ export class DocumentosService {
                 });
             }
 
-            const idTurmaReferencia = criarContratoDto.id_turma
-                ? parseInt(criarContratoDto.id_turma)
-                : criarContratoDto.id_turma_bonus
-                  ? parseInt(criarContratoDto.id_turma_bonus)
-                  : undefined;
+            // Origem do aluno. NUNCA cair para id_turma_bonus aqui — isso fazia a
+            // matrícula ser criada na turma do BÔNUS, corrompendo o histórico de vendas.
+            const idTurmaReferencia = criarContratoDto.id_turma ? parseInt(criarContratoDto.id_turma) : undefined;
+
+            const idTurmaDestino = criarContratoDto.id_turma_destino ? criarContratoDto.id_turma_destino : null;
 
             // Buscar ou criar registro de TurmasAlunos primeiro
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({
@@ -276,6 +276,7 @@ export class DocumentosService {
                 if (registroDeletado && registroDeletado.deletado_em) {
                     // Reativar o registro deletado
                     registroDeletado.deletado_em = null;
+                    registroDeletado.id_turma_destino = idTurmaDestino;
                     registroDeletado.atualizado_em = new Date();
                     if (userId) {
                         registroDeletado.atualizado_por = userId;
@@ -287,6 +288,7 @@ export class DocumentosService {
                         turmaAlunoTreinamento = this.uow.turmasAlunosTreinamentosRP.create({
                             id_turma_aluno: turmaAluno.id,
                             id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                            id_turma_destino: idTurmaDestino,
                             preco_treinamento: treinamento.preco_treinamento || 0,
                             forma_pgto: [],
                             preco_total_pago: 0,
@@ -308,6 +310,7 @@ export class DocumentosService {
                                 const novoRegistro = this.uow.turmasAlunosTreinamentosRP.create({
                                     id_turma_aluno: turmaAluno.id,
                                     id_treinamento: parseInt(criarContratoDto.id_treinamento),
+                                    id_turma_destino: idTurmaDestino,
                                     preco_treinamento: treinamento.preco_treinamento || 0,
                                     forma_pgto: [],
                                     preco_total_pago: 0,
@@ -328,6 +331,7 @@ export class DocumentosService {
                                 if (registroExistente && registroExistente.deletado_em) {
                                     // Reativar o registro deletado
                                     registroExistente.deletado_em = null;
+                                    registroExistente.id_turma_destino = idTurmaDestino;
                                     registroExistente.atualizado_em = new Date();
                                     if (userId) {
                                         registroExistente.atualizado_por = userId;
@@ -341,6 +345,37 @@ export class DocumentosService {
                             throw error;
                         }
                     }
+                }
+            }
+
+            // Persistir o BÔNUS em coluna (não só no JSON do contrato) para que o
+            // histórico de vendas leia origem/destino/bônus de colunas reais.
+            if (criarContratoDto.id_turma_bonus) {
+                const tiposBonusBruto = Array.isArray(criarContratoDto.tipos_bonus)
+                    ? criarContratoDto.tipos_bonus.filter((t) => t && t !== 'nao_aplica' && t !== 'nenhum')
+                    : [];
+                const tiposBonus = tiposBonusBruto.length > 0 ? tiposBonusBruto : ['default'];
+
+                for (const tipo of tiposBonus) {
+                    const jaExiste = await this.uow.turmasAlunosTreinamentosBonusRP.findOne({
+                        where: {
+                            id_turma_aluno: turmaAluno.id,
+                            id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                            id_turma_bonus: criarContratoDto.id_turma_bonus,
+                            tipo_bonus: tipo,
+                            deletado_em: null,
+                        },
+                    });
+                    if (jaExiste) continue;
+
+                    const novoBonus = this.uow.turmasAlunosTreinamentosBonusRP.create({
+                        id_turma_aluno: turmaAluno.id,
+                        id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                        id_turma_bonus: criarContratoDto.id_turma_bonus,
+                        tipo_bonus: tipo,
+                        ganhadores_bonus: [],
+                    });
+                    await this.uow.turmasAlunosTreinamentosBonusRP.save(novoBonus);
                 }
             }
 
@@ -2532,9 +2567,11 @@ export class DocumentosService {
                         zapsign_document_id: contrato.zapsign_document_id,
                         zapsign_signers_data: contrato.zapsign_signers_data,
                         zapsign_document_status: contrato.zapsign_document_status,
-                        // Campos diretos para compatibilidade com frontend
-                        aluno_nome: aluno?.nome,
-                        treinamento_nome: treinamento?.treinamento,
+                        // Campos diretos para compatibilidade com frontend.
+                        // Fallback no snapshot JSON (dados_contrato.aluno) quando a relação
+                        // estiver vazia — por exemplo, matrícula soft-deleted por transferência.
+                        aluno_nome: aluno?.nome || dadosContrato?.aluno?.nome || null,
+                        treinamento_nome: treinamento?.treinamento || dadosContrato?.treinamento?.treinamento || null,
                         turma_aluno: {
                             pendencia_pagamento: pendenciaPagamento,
                             quantidade_inscricoes: quantidadeInscricoes,
@@ -2543,17 +2580,20 @@ export class DocumentosService {
                             comprovante_pagamento_base64: comprovantePagamentoBase64,
                         },
                         dados_contrato: {
+                            // Mescla relação (fonte de verdade atualizada) com o snapshot
+                            // do contrato. Snapshot serve de fallback se a matrícula estiver
+                            // soft-deleted por transferência, perda de FK, etc.
                             aluno: {
-                                id: aluno?.id,
-                                nome: aluno?.nome,
-                                cpf: aluno?.cpf,
-                                email: aluno?.email,
-                                data_nascimento: aluno?.data_nascimento,
-                                telefone_um: aluno?.telefone_um,
+                                id: aluno?.id ?? dadosContrato?.aluno?.id ?? null,
+                                nome: aluno?.nome ?? dadosContrato?.aluno?.nome ?? null,
+                                cpf: aluno?.cpf ?? dadosContrato?.aluno?.cpf ?? null,
+                                email: aluno?.email ?? dadosContrato?.aluno?.email ?? null,
+                                data_nascimento: aluno?.data_nascimento ?? dadosContrato?.aluno?.data_nascimento ?? null,
+                                telefone_um: aluno?.telefone_um ?? dadosContrato?.aluno?.telefone_um ?? null,
                                 polo: {
-                                    id: polo?.id,
-                                    cidade: polo?.cidade,
-                                    estado: polo?.estado,
+                                    id: polo?.id ?? dadosContrato?.aluno?.polo?.id ?? null,
+                                    cidade: polo?.cidade ?? dadosContrato?.aluno?.polo?.cidade ?? null,
+                                    estado: polo?.estado ?? dadosContrato?.aluno?.polo?.estado ?? null,
                                 },
                                 endereco: dadosContrato.aluno?.endereco || {
                                     logradouro: aluno?.logradouro || '',

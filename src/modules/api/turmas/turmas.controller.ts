@@ -21,7 +21,7 @@ import {
     TurmaTimesResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
-import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload } from './turmas.service';
+import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('turmas')
@@ -69,6 +69,14 @@ export class TurmasController {
     @UseGuards(JwtAuthGuard)
     async getHistoricoSorteados(@Query() filters: HistoricoSorteadosFilters) {
         return this.turmasService.getHistoricoSorteados(filters);
+    }
+
+    @Delete('historico-sorteados/:id')
+    @UseGuards(JwtAuthGuard)
+    async removerHistoricoSorteado(@Param('id') id: string, @Body() payload: RemoverHistoricoSorteadoPayload, @Req() req: any) {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        await this.turmasService.removerHistoricoSorteado(id, payload, userId);
+        return { message: 'Registro do histórico removido com sucesso.' };
     }
 
     @Get('usuarios-lideres')

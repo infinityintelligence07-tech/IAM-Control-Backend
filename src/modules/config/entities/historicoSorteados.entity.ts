@@ -26,4 +26,7 @@ export class HistoricoSorteados extends BaseEntity {
 
     @Column({ type: 'timestamp', name: 'sorteado_em', nullable: false, default: () => 'CURRENT_TIMESTAMP' })
     sorteado_em: Date;
+
+    @Column({ type: 'text', name: 'observacao', nullable: true })
+    observacao?: string | null;
 }

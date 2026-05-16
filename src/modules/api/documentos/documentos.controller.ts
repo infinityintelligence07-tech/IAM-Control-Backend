@@ -202,9 +202,29 @@ export class DocumentosController {
         @Query('status') status?: string,
         @Query('data_inicio') data_inicio?: string,
         @Query('data_fim') data_fim?: string,
+        @Query('search') search?: string,
+        @Query('canal_venda') canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS',
+        @Query('somente_com_pendencia') somente_com_pendencia?: string,
+        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento',
+        @Query('treinamento_origem') treinamento_origem?: string,
+        @Query('turma_origem') turma_origem?: string,
     ) {
         console.log('=== ENDPOINT PÚBLICO CHAMADO ===');
-        console.log('Query params:', { page, limit, id_aluno, id_treinamento, status, data_inicio, data_fim });
+        console.log('Query params:', {
+            page,
+            limit,
+            id_aluno,
+            id_treinamento,
+            status,
+            data_inicio,
+            data_fim,
+            search,
+            canal_venda,
+            somente_com_pendencia,
+            tipo_filtro_busca,
+            treinamento_origem,
+            turma_origem,
+        });
 
         const filtros = {
             page: page ? parseInt(page) : 1,
@@ -214,6 +234,12 @@ export class DocumentosController {
             status,
             data_inicio,
             data_fim,
+            search,
+            canal_venda,
+            somente_com_pendencia,
+            tipo_filtro_busca,
+            treinamento_origem,
+            turma_origem,
         };
 
         console.log('Filtros processados:', filtros);
@@ -226,6 +252,29 @@ export class DocumentosController {
             console.error('Erro no controller:', error);
             throw error;
         }
+    }
+
+    @Get('public/contratos-banco/opcoes-origem')
+    async listarOpcoesOrigemPublico(
+        @Query('data_inicio') data_inicio?: string,
+        @Query('data_fim') data_fim?: string,
+        @Query('search') search?: string,
+        @Query('canal_venda') canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS',
+        @Query('somente_com_pendencia') somente_com_pendencia?: string,
+        @Query('status') status?: string,
+        @Query('treinamento_origem') treinamento_origem?: string,
+        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento',
+    ) {
+        return this.documentosService.listarOpcoesFiltrosOrigem({
+            data_inicio,
+            data_fim,
+            search,
+            canal_venda,
+            somente_com_pendencia,
+            status,
+            treinamento_origem,
+            tipo_filtro_busca,
+        });
     }
 
     // Endpoint para buscar contrato completo (para compatibilidade com frontend)

@@ -52,6 +52,10 @@ export interface HistoricoSorteadosFilters {
     limit?: number;
 }
 
+export interface RemoverHistoricoSorteadoPayload {
+    observacao: string;
+}
+
 @Injectable()
 export class TurmasService {
     private readonly logger = new Logger(TurmasService.name);
@@ -283,6 +287,50 @@ export class TurmasService {
             limit,
             totalPages: Math.max(1, Math.ceil(total / limit)),
         };
+    }
+
+    async removerHistoricoSorteado(idHistorico: string, payload: RemoverHistoricoSorteadoPayload, userId?: number): Promise<void> {
+        const idNormalizado = String(idHistorico || '').trim();
+        if (!/^\d+$/.test(idNormalizado)) {
+            throw new BadRequestException('ID do histórico de sorteio inválido.');
+        }
+
+        const motivoRemocao = String(payload?.observacao || '').trim();
+        if (motivoRemocao.length < 3) {
+            throw new BadRequestException('Informe um motivo para remoção com pelo menos 3 caracteres.');
+        }
+
+        const historico = await this.uow.historicoSorteadosRP.findOne({
+            where: { id: idNormalizado, deletado_em: null },
+            select: ['id', 'atualizado_por'] as any,
+        });
+
+        if (!historico) {
+            throw new NotFoundException('Registro de histórico não encontrado.');
+        }
+
+        let nomeUsuario = 'Usuário não identificado';
+        if (userId) {
+            const usuario = await this.uow.usuariosRP.findOne({
+                where: { id: userId, deletado_em: null },
+                select: ['id', 'nome'] as any,
+            });
+            if (usuario?.nome) {
+                nomeUsuario = usuario.nome;
+            }
+        }
+
+        const observacaoRemocao = `Removido por ${nomeUsuario}${userId ? ` (ID ${userId})` : ''}. Motivo: ${motivoRemocao}`;
+
+        await this.uow.historicoSorteadosRP.update(
+            { id: idNormalizado, deletado_em: IsNull() as any },
+            {
+                observacao: observacaoRemocao,
+                deletado_em: new Date(),
+                atualizado_por: userId ?? historico.atualizado_por,
+                atualizado_em: new Date(),
+            },
+        );
     }
 
     /** Mapeia entidade Turmas (com relações id_treinamento_fk e id_polo_fk) para o objeto de tag de transferência. */

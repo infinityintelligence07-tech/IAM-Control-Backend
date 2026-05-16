@@ -5,7 +5,7 @@ import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/tur
 import { EStatusAssinaturasContratos, EOrigemAlunos, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import * as crypto from 'crypto';
 import axios from 'axios';
-import { Not, IsNull, In } from 'typeorm';
+import { Not, IsNull, In, Between } from 'typeorm';
 import {
     CreateDocumentoDto,
     UpdateDocumentoDto,
@@ -32,6 +32,18 @@ import { Turmas } from '@/modules/config/entities/turmas.entity';
 @Injectable()
 export class DocumentosService {
     private readonly logger = new Logger(DocumentosService.name);
+    private readonly opcoesOrigemCacheTtlMs = 60000;
+    private readonly opcoesOrigemCacheMaxEntradas = 200;
+    private readonly opcoesOrigemCache = new Map<
+        string,
+        {
+            expiresAt: number;
+            value: {
+                treinamentos_origem: string[];
+                turmas_origem: string[];
+            };
+        }
+    >();
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -2264,6 +2276,240 @@ export class DocumentosService {
         }
     }
 
+    private normalizarTexto(valor?: string | null): string {
+        return String(valor || '')
+            .trim()
+            .toLowerCase();
+    }
+
+    private inferirCanalVendaServidor(
+        treinamentoOrigem: string,
+        turmaOrigem: string,
+        camposVariaveis: Record<string, string>,
+    ): 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' {
+        const texto = [
+            treinamentoOrigem,
+            turmaOrigem,
+            camposVariaveis['Canal de Vendas'],
+            camposVariaveis['Canal da Venda'],
+            camposVariaveis['Origem da Venda'],
+            camposVariaveis['Origem'],
+            camposVariaveis['Observações'],
+        ]
+            .join(' ')
+            .toLowerCase();
+
+        if (texto.includes('masterclass')) return 'MASTERCLASS';
+        if (texto.includes('time de vendas') || texto.includes('vendas iam')) {
+            return 'TIME_VENDAS';
+        }
+        return 'EVENTOS';
+    }
+
+    private extrairTreinamentoOrigemServidor(contrato: any): string {
+        const camposVariaveis = contrato?.dados_contrato?.campos_variaveis || {};
+        return (
+            (contrato?.fluxo_evento_origem_treinamento || '').trim() ||
+            camposVariaveis['Treinamento de Origem'] ||
+            camposVariaveis['Treinamento Origem'] ||
+            camposVariaveis['Treinamento de Entrada'] ||
+            ''
+        );
+    }
+
+    private extrairTurmaOrigemServidor(contrato: any): string {
+        const camposVariaveis = contrato?.dados_contrato?.campos_variaveis || {};
+        return (contrato?.fluxo_evento_origem_turma || '').trim() || camposVariaveis['Turma de Origem'] || camposVariaveis['Turma Origem'] || '';
+    }
+
+    private statusContratoEhConcluido(status?: string | null): boolean {
+        const s = this.normalizarTexto(status);
+        return s === 'signed' || s === 'complete' || s === 'completed' || s === 'assinado';
+    }
+
+    private montarChaveCacheOpcoesOrigem(filtros?: {
+        data_inicio?: string;
+        data_fim?: string;
+        search?: string;
+        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        somente_com_pendencia?: boolean | string;
+        status?: string;
+        treinamento_origem?: string;
+        tipo_filtro_busca?: 'periodo' | 'treinamento';
+    }): string {
+        return JSON.stringify({
+            data_inicio: filtros?.data_inicio || '',
+            data_fim: filtros?.data_fim || '',
+            search: this.normalizarTexto(filtros?.search),
+            canal_venda: filtros?.canal_venda || '',
+            somente_com_pendencia: filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1',
+            status: this.normalizarTexto(filtros?.status),
+            treinamento_origem: this.normalizarTexto(filtros?.treinamento_origem),
+            tipo_filtro_busca: filtros?.tipo_filtro_busca || 'periodo',
+        });
+    }
+
+    private lerCacheOpcoesOrigem(chave: string): {
+        treinamentos_origem: string[];
+        turmas_origem: string[];
+    } | null {
+        const registro = this.opcoesOrigemCache.get(chave);
+        if (!registro) return null;
+
+        if (Date.now() > registro.expiresAt) {
+            this.opcoesOrigemCache.delete(chave);
+            return null;
+        }
+
+        return registro.value;
+    }
+
+    private salvarCacheOpcoesOrigem(
+        chave: string,
+        valor: {
+            treinamentos_origem: string[];
+            turmas_origem: string[];
+        },
+    ): void {
+        const agora = Date.now();
+        this.opcoesOrigemCache.set(chave, {
+            expiresAt: agora + this.opcoesOrigemCacheTtlMs,
+            value: valor,
+        });
+
+        if (this.opcoesOrigemCache.size <= this.opcoesOrigemCacheMaxEntradas) {
+            return;
+        }
+
+        for (const [cacheKey, cacheValue] of this.opcoesOrigemCache.entries()) {
+            if (cacheValue.expiresAt <= agora) {
+                this.opcoesOrigemCache.delete(cacheKey);
+            }
+        }
+
+        if (this.opcoesOrigemCache.size <= this.opcoesOrigemCacheMaxEntradas) {
+            return;
+        }
+
+        const excesso = this.opcoesOrigemCache.size - this.opcoesOrigemCacheMaxEntradas;
+        let removidos = 0;
+        for (const cacheKey of this.opcoesOrigemCache.keys()) {
+            this.opcoesOrigemCache.delete(cacheKey);
+            removidos += 1;
+            if (removidos >= excesso) break;
+        }
+    }
+
+    async listarOpcoesFiltrosOrigem(filtros?: {
+        data_inicio?: string;
+        data_fim?: string;
+        search?: string;
+        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        somente_com_pendencia?: boolean | string;
+        status?: string;
+        treinamento_origem?: string;
+        tipo_filtro_busca?: 'periodo' | 'treinamento';
+    }): Promise<{
+        treinamentos_origem: string[];
+        turmas_origem: string[];
+    }> {
+        const cacheKey = this.montarChaveCacheOpcoesOrigem(filtros);
+        const cacheHit = this.lerCacheOpcoesOrigem(cacheKey);
+        if (cacheHit) {
+            return cacheHit;
+        }
+
+        const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
+        const aplicarFiltroPeriodo = !filtroTreinamentoAtivo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
+        const dataInicioPeriodo = filtros?.data_inicio
+            ? new Date(`${filtros.data_inicio}T00:00:00.000Z`)
+            : (() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 30);
+                  d.setHours(0, 0, 0, 0);
+                  return d;
+              })();
+        const dataFimPeriodo = filtros?.data_fim
+            ? new Date(`${filtros.data_fim}T23:59:59.999Z`)
+            : (() => {
+                  const d = new Date();
+                  d.setHours(23, 59, 59, 999);
+                  return d;
+              })();
+
+        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+            where: {
+                deletado_em: null,
+                ...(aplicarFiltroPeriodo ? { criado_em: Between(dataInicioPeriodo, dataFimPeriodo) } : {}),
+            },
+            relations: [
+                'id_turma_aluno_treinamento_fk',
+                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
+                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
+            ],
+            order: { criado_em: 'DESC' },
+        });
+
+        const termoBusca = this.normalizarTexto(filtros?.search);
+        const treinamentoOrigemSelecionado = this.normalizarTexto(filtros?.treinamento_origem);
+        const canalVendaFiltro = filtros?.canal_venda || '';
+        const somentePendenciaAtivo = filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
+        const statusFiltro = this.normalizarTexto(filtros?.status);
+
+        const treinamentos = new Set<string>();
+        const turmas = new Set<string>();
+
+        contratos.forEach((contrato) => {
+            const contratoAny = contrato as any;
+            const turmaAluno = contratoAny?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
+            const alunoRelacao = turmaAluno?.id_aluno_fk;
+            const dadosContrato = contratoAny?.dados_contrato || {};
+            const camposVariaveis = dadosContrato?.campos_variaveis || {};
+            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || '').trim();
+            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || '').trim();
+            const nomeAluno = this.normalizarTexto(alunoRelacao?.nome || dadosContrato?.aluno?.nome);
+            const emailAluno = this.normalizarTexto(alunoRelacao?.email || dadosContrato?.aluno?.email);
+            const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento || dadosContrato?.turma_aluno?.pendencia_pagamento);
+            const statusDocumento = contratoAny?.zapsign_document_status?.status || '';
+            const concluido = this.statusContratoEhConcluido(statusDocumento);
+            const canalVenda = this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis);
+
+            const matchBusca = !termoBusca || nomeAluno.includes(termoBusca) || emailAluno.includes(termoBusca);
+            const matchCanal = !canalVendaFiltro || canalVenda === canalVendaFiltro;
+            const matchPendencia = !somentePendenciaAtivo || pendenciaPagamento;
+            const matchStatus = !statusFiltro || statusFiltro === 'all' || (statusFiltro === 'completed' ? concluido : !concluido);
+            if (!(matchBusca && matchCanal && matchPendencia && matchStatus)) {
+                return;
+            }
+
+            if (treinamentoOrigem) {
+                treinamentos.add(treinamentoOrigem);
+            }
+
+            if (turmaOrigem && (!treinamentoOrigemSelecionado || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemSelecionado)) {
+                turmas.add(turmaOrigem);
+            }
+        });
+
+        const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        const turmasOrdenadas = Array.from(turmas).sort((a, b) => {
+            const edicaoA = a.match(/-\s*(\d+)\s*$/);
+            const edicaoB = b.match(/-\s*(\d+)\s*$/);
+            const valorA = edicaoA ? parseInt(edicaoA[1], 10) : Number.MAX_SAFE_INTEGER;
+            const valorB = edicaoB ? parseInt(edicaoB[1], 10) : Number.MAX_SAFE_INTEGER;
+            if (valorA !== valorB) return valorA - valorB;
+            return a.localeCompare(b, 'pt-BR');
+        });
+
+        const resultado = {
+            treinamentos_origem: treinamentosOrdenados,
+            turmas_origem: turmasOrdenadas,
+        };
+        this.salvarCacheOpcoesOrigem(cacheKey, resultado);
+
+        return resultado;
+    }
+
     async listarContratosBanco(filtros?: {
         page?: number;
         limit?: number;
@@ -2272,6 +2518,12 @@ export class DocumentosService {
         status?: string;
         data_inicio?: string;
         data_fim?: string;
+        search?: string;
+        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        somente_com_pendencia?: boolean | string;
+        tipo_filtro_busca?: 'periodo' | 'treinamento';
+        treinamento_origem?: string;
+        turma_origem?: string;
     }): Promise<{
         data: any[];
         total: number;
@@ -2283,15 +2535,30 @@ export class DocumentosService {
             const page = filtros?.page || 1;
             const limit = filtros?.limit || 10;
             const offset = (page - 1) * limit;
-
-            // Primeiro, vamos verificar quantos contratos existem no total
-            const totalContratos = await this.uow.turmasAlunosTreinamentosContratosRP.count({
-                where: { deletado_em: null },
-            });
+            const filtroTreinamentoSemPeriodo = filtros?.tipo_filtro_busca === 'treinamento';
+            const aplicarFiltroPeriodo = !filtroTreinamentoSemPeriodo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
+            const dataInicioPeriodo = filtros?.data_inicio
+                ? new Date(`${filtros.data_inicio}T00:00:00.000Z`)
+                : (() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 30);
+                      d.setHours(0, 0, 0, 0);
+                      return d;
+                  })();
+            const dataFimPeriodo = filtros?.data_fim
+                ? new Date(`${filtros.data_fim}T23:59:59.999Z`)
+                : (() => {
+                      const d = new Date();
+                      d.setHours(23, 59, 59, 999);
+                      return d;
+                  })();
 
             // Usar find com relations para garantir que os relacionamentos sejam carregados
             const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
-                where: { deletado_em: null },
+                where: {
+                    deletado_em: null,
+                    ...(aplicarFiltroPeriodo ? { criado_em: Between(dataInicioPeriodo, dataFimPeriodo) } : {}),
+                },
                 relations: [
                     'id_turma_aluno_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
@@ -2307,13 +2574,6 @@ export class DocumentosService {
                     'id_documento_fk',
                 ],
                 order: { criado_em: 'DESC' },
-                skip: offset,
-                take: limit,
-            });
-
-            // Contar total (simplificado para teste)
-            const total = await this.uow.turmasAlunosTreinamentosContratosRP.count({
-                where: { deletado_em: null },
             });
 
             // Mapear dados para o formato esperado pelo frontend
@@ -2727,10 +2987,43 @@ export class DocumentosService {
                 },
             }));
 
-            const totalPages = Math.ceil(total / limit);
+            const termoBusca = this.normalizarTexto(filtros?.search);
+            const treinamentoOrigemFiltro = this.normalizarTexto(filtros?.treinamento_origem);
+            const turmaOrigemFiltro = this.normalizarTexto(filtros?.turma_origem);
+            const canalVendaFiltro = filtros?.canal_venda || '';
+            const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
+            const somentePendenciaAtivo =
+                filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
+            const statusFiltro = this.normalizarTexto(filtros?.status);
+
+            const contratosFiltrados = contratosMapeadosComNomes.filter((contratoMapeado) => {
+                const camposVariaveis = contratoMapeado?.dados_contrato?.campos_variaveis || {};
+                const nomeAluno = this.normalizarTexto(contratoMapeado?.aluno_nome || contratoMapeado?.dados_contrato?.aluno?.nome);
+                const emailAluno = this.normalizarTexto(contratoMapeado?.dados_contrato?.aluno?.email);
+                const treinamentoOrigem = this.extrairTreinamentoOrigemServidor(contratoMapeado);
+                const turmaOrigem = this.extrairTurmaOrigemServidor(contratoMapeado);
+                const canalVenda = this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis);
+                const pendenciaPagamento = Boolean(contratoMapeado?.turma_aluno?.pendencia_pagamento);
+                const statusDocumento = contratoMapeado?.zapsign_document_status?.status || '';
+                const concluido = this.statusContratoEhConcluido(statusDocumento);
+
+                const matchBusca = !termoBusca || nomeAluno.includes(termoBusca) || emailAluno.includes(termoBusca);
+                const matchCanal = !canalVendaFiltro || canalVenda === canalVendaFiltro;
+                const matchPendencia = !somentePendenciaAtivo || pendenciaPagamento;
+                const matchStatus = !statusFiltro || statusFiltro === 'all' || (statusFiltro === 'completed' ? concluido : !concluido);
+                const matchTreinamentoOrigem =
+                    !filtroTreinamentoAtivo || !treinamentoOrigemFiltro || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemFiltro;
+                const matchTurmaOrigem = !filtroTreinamentoAtivo || !turmaOrigemFiltro || this.normalizarTexto(turmaOrigem) === turmaOrigemFiltro;
+
+                return matchBusca && matchCanal && matchPendencia && matchStatus && matchTreinamentoOrigem && matchTurmaOrigem;
+            });
+
+            const total = contratosFiltrados.length;
+            const totalPages = Math.max(1, Math.ceil(total / limit));
+            const data = contratosFiltrados.slice(offset, offset + limit);
 
             const resultado = {
-                data: contratosMapeadosComNomes,
+                data,
                 total,
                 page,
                 limit,

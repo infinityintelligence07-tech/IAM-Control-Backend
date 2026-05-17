@@ -238,6 +238,12 @@ export class DocumentosService {
             // Origem do aluno. NUNCA cair para id_turma_bonus aqui — isso fazia a
             // matrícula ser criada na turma do BÔNUS, corrompendo o histórico de vendas.
             const idTurmaReferencia = criarContratoDto.id_turma ? parseInt(criarContratoDto.id_turma) : undefined;
+            const treinamentoNomeNormalizado = (treinamento.treinamento || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase();
+            const idTurmaOrigemPadrao = treinamentoNomeNormalizado.includes('missao governar') ? 192 : 60;
+            const idTurmaOrigemContrato = idTurmaReferencia ?? idTurmaOrigemPadrao;
 
             const idTurmaDestino = criarContratoDto.id_turma_destino ? criarContratoDto.id_turma_destino : null;
 
@@ -252,7 +258,7 @@ export class DocumentosService {
 
             // Se não existir, criar um registro temporário
             if (!turmaAluno) {
-                const idTurmaParaCracha = idTurmaReferencia || 1;
+                const idTurmaParaCracha = idTurmaOrigemContrato || 1;
                 // Gerar número de crachá único para esta turma
                 const numeroCracha = await this.turmasService.generateUniqueCrachaNumber(idTurmaParaCracha);
 
@@ -539,6 +545,9 @@ export class DocumentosService {
                     valores_formas_pagamento: criarContratoDto.valores_formas_pagamento || {},
                     bonus_selecionados: criarContratoDto.tipos_bonus || [],
                     valores_bonus: bonusData.valores_bonus,
+                    id_turma_origem: idTurmaOrigemContrato ?? null,
+                    fluxo_evento_origem_id_turma: idTurmaOrigemContrato ?? null,
+                    turma_origem: idTurmaOrigemContrato ? { id: idTurmaOrigemContrato } : null,
                     fluxo_evento_destino_id_turma: criarContratoDto.id_turma_destino ? Number(criarContratoDto.id_turma_destino) : null,
                     compradores_adicionais: criarContratoDto.compradores_adicionais || [],
                     campos_variaveis: bonusData.campos_variaveis,
@@ -2580,6 +2589,36 @@ export class DocumentosService {
             const cacheTurmaPorId = new Map<number, Turmas | null>();
             const cacheTurmaOrigemPorTurmaAluno = new Map<string, Turmas | null>();
             const cacheTurmaOrigemIprPorAluno = new Map<number, Turmas | null>();
+            const idsTurmaOrigemViaContrato = Array.from(
+                new Set(
+                    contratos
+                        .map((contrato) => {
+                            const dadosContrato = contrato?.dados_contrato || {};
+                            return Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0);
+                        })
+                        .filter((id) => Number.isFinite(id) && id > 0),
+                ),
+            );
+
+            if (idsTurmaOrigemViaContrato.length > 0) {
+                const turmasOrigemViaContrato = await this.uow.turmasRP.find({
+                    where: {
+                        id: In(idsTurmaOrigemViaContrato),
+                        deletado_em: IsNull(),
+                    },
+                    relations: ['id_treinamento_fk'],
+                });
+
+                turmasOrigemViaContrato.forEach((turma) => {
+                    cacheTurmaPorId.set(turma.id, turma);
+                });
+                idsTurmaOrigemViaContrato.forEach((id) => {
+                    if (!cacheTurmaPorId.has(id)) {
+                        cacheTurmaPorId.set(id, null);
+                    }
+                });
+            }
+
             const contratosMapeados = await Promise.all(
                 contratos.map(async (contrato) => {
                     const dadosContrato = contrato.dados_contrato || {};
@@ -2651,6 +2690,15 @@ export class DocumentosService {
                     let turmaOrigemEvento = turmaAluno?.id_turma_transferencia_de_fk || null;
                     const idAlunoContrato = Number(turmaAluno?.id_aluno || dadosContrato?.aluno?.id || 0);
                     const idTurmaAlunoContrato = turmaAluno?.id ? String(turmaAluno.id) : null;
+                    const fluxoEventoOrigemIdViaDadosContrato =
+                        Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0) || null;
+
+                    // Prioridade máxima: respeitar a turma de origem salva no contrato.
+                    if (fluxoEventoOrigemIdViaDadosContrato && fluxoEventoOrigemIdViaDadosContrato > 0) {
+                        if (cacheTurmaPorId.has(fluxoEventoOrigemIdViaDadosContrato)) {
+                            turmaOrigemEvento = cacheTurmaPorId.get(fluxoEventoOrigemIdViaDadosContrato) || turmaOrigemEvento;
+                        }
+                    }
 
                     // Prioridade 1: histórico de transferência da própria matrícula
                     // (garante origem real da venda quando o relacionamento direto não estiver preenchido).
@@ -2813,7 +2861,7 @@ export class DocumentosService {
                         id_turma_aluno_treinamento: turmaAlunoTreinamento?.id ?? null,
                         id_turma_aluno: turmaAluno?.id ?? null,
                         id_turma: turmaAluno?.id_turma ?? null,
-                        fluxo_evento_origem_id_turma: turmaOrigemEvento?.id ?? null,
+                        fluxo_evento_origem_id_turma: turmaOrigemEvento?.id ?? fluxoEventoOrigemIdViaDadosContrato,
                         fluxo_evento_origem_id_treinamento: turmaOrigemEvento?.id_treinamento ?? null,
                         fluxo_evento_origem_treinamento: fluxoEventoOrigemTreinamento,
                         fluxo_evento_origem_turma: fluxoEventoOrigemTurma,

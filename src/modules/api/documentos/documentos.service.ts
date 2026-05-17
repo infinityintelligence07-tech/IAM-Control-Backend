@@ -3066,6 +3066,90 @@ export class DocumentosService {
                 return matchBusca && matchCanal && matchPendencia && matchStatus && matchTreinamentoOrigem && matchTurmaOrigem;
             });
 
+            const obterQuantidadeInscricoesBonusResumo = (contratoMapeado: any): number => {
+                const camposVariaveis = contratoMapeado?.dados_contrato?.campos_variaveis || {};
+                const valoresBonus = contratoMapeado?.dados_contrato?.bonus?.valores_bonus || {};
+                const quantidadeInscricoes = Math.max(
+                    1,
+                    Number(
+                        contratoMapeado?.turma_aluno?.quantidade_inscricoes ??
+                            contratoMapeado?.dados_contrato?.turma_aluno?.quantidade_inscricoes ??
+                            camposVariaveis['Quantidade de Inscrições'] ??
+                            1,
+                    ) || 1,
+                );
+
+                const quantidadeBonusDiretaKeys = [
+                    'Quantidade de Inscrições Bônus',
+                    'Quantidade de Inscrições Bonus',
+                    'Quantidade Inscrições Bônus',
+                    'Quantidade Inscrições Bonus',
+                    'Quantidade de Bônus',
+                    'Quantidade de Bonus',
+                    'Quantidade Bônus',
+                    'Quantidade Bonus',
+                ];
+                const quantidadeBonusDireta = quantidadeBonusDiretaKeys.reduce((acc, key) => {
+                    if (acc > 0) return acc;
+                    const parsed = Number.parseInt(String(camposVariaveis?.[key] || ''), 10);
+                    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+                }, 0);
+                if (quantidadeBonusDireta > 0) {
+                    return quantidadeBonusDireta;
+                }
+
+                const bonusPorInscricaoKeys = [
+                    'Bônus por Inscrição',
+                    'Bonus por Inscrição',
+                    'Bônus por Inscricao',
+                    'Bonus por Inscricao',
+                    'Quantidade de Bônus por Inscrição',
+                    'Quantidade de Bonus por Inscrição',
+                    'Quantidade de Bônus por Inscricao',
+                    'Quantidade de Bonus por Inscricao',
+                    'Ingressos Bônus por Inscrição',
+                    'Ingressos Bonus por Inscrição',
+                    'Ingressos Bônus por Inscricao',
+                    'Ingressos Bonus por Inscricao',
+                ];
+                const bonusPorInscricao = bonusPorInscricaoKeys.reduce((acc, key) => {
+                    if (acc > 0) return acc;
+                    const parsed = Number.parseInt(String(camposVariaveis?.[key] || ''), 10);
+                    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+                }, 0);
+                if (bonusPorInscricao > 0) {
+                    return quantidadeInscricoes * bonusPorInscricao;
+                }
+
+                const quantidadeBonusViaValores = Object.keys(valoresBonus || {}).reduce((acc, key) => {
+                    if (acc > 0) return acc;
+                    const match = key.match(/B[oô]nus-(\d+)\s+Inscri[cç][aã]o/i);
+                    if (!match?.[1]) return 0;
+                    const parsed = Number.parseInt(match[1], 10);
+                    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+                }, 0);
+                if (quantidadeBonusViaValores > 0) {
+                    return quantidadeBonusViaValores;
+                }
+
+                const temIndicativoBonus = [
+                    camposVariaveis['Turma de Destino'],
+                    camposVariaveis['Turma Destino'],
+                    camposVariaveis['Turma Bônus'],
+                    camposVariaveis['Turma Bonus'],
+                    camposVariaveis['Treinamento de Destino'],
+                    camposVariaveis['Treinamento Destino'],
+                    camposVariaveis['Treinamento Bônus'],
+                    camposVariaveis['Treinamento Bonus'],
+                ].some((valor) => Boolean(String(valor || '').trim()));
+
+                if (temIndicativoBonus) {
+                    return quantidadeInscricoes;
+                }
+
+                return quantidadeInscricoes > 1 ? quantidadeInscricoes : 0;
+            };
+
             const resumo = contratosFiltrados.reduce(
                 (acc, contratoMapeado) => {
                     const quantidadeInscricoes = Math.max(
@@ -3084,6 +3168,7 @@ export class DocumentosService {
                     }, 0);
 
                     acc.total_inscricoes_vendidas += quantidadeInscricoes;
+                    acc.total_inscricoes_bonus += obterQuantidadeInscricoesBonusResumo(contratoMapeado);
                     if (pendenciaPagamento) {
                         acc.total_com_pendencia += 1;
                     }
@@ -3092,6 +3177,7 @@ export class DocumentosService {
                 },
                 {
                     total_inscricoes_vendidas: 0,
+                    total_inscricoes_bonus: 0,
                     total_com_pendencia: 0,
                     receita_total: 0,
                 },

@@ -3066,6 +3066,37 @@ export class DocumentosService {
                 return matchBusca && matchCanal && matchPendencia && matchStatus && matchTreinamentoOrigem && matchTurmaOrigem;
             });
 
+            const resumo = contratosFiltrados.reduce(
+                (acc, contratoMapeado) => {
+                    const quantidadeInscricoes = Math.max(
+                        1,
+                        Number(contratoMapeado?.turma_aluno?.quantidade_inscricoes ?? contratoMapeado?.dados_contrato?.turma_aluno?.quantidade_inscricoes ?? 1) || 1,
+                    );
+                    const pendenciaPagamento = Boolean(contratoMapeado?.turma_aluno?.pendencia_pagamento);
+                    const formasPagamento = Array.isArray(contratoMapeado?.dados_contrato?.pagamento?.formas_pagamento)
+                        ? contratoMapeado?.dados_contrato?.pagamento?.formas_pagamento
+                        : Array.isArray(contratoMapeado?.dados_contrato?.formas_pagamento)
+                          ? contratoMapeado?.dados_contrato?.formas_pagamento
+                          : [];
+                    const valorTotalVenda = formasPagamento.reduce((totalAtual: number, forma: any) => {
+                        const valor = typeof forma?.valor === 'number' ? forma.valor : Number.parseFloat(String(forma?.valor || 0));
+                        return totalAtual + (Number.isFinite(valor) ? valor : 0);
+                    }, 0);
+
+                    acc.total_inscricoes_vendidas += quantidadeInscricoes;
+                    if (pendenciaPagamento) {
+                        acc.total_com_pendencia += 1;
+                    }
+                    acc.receita_total += valorTotalVenda;
+                    return acc;
+                },
+                {
+                    total_inscricoes_vendidas: 0,
+                    total_com_pendencia: 0,
+                    receita_total: 0,
+                },
+            );
+
             const total = contratosFiltrados.length;
             const totalPages = Math.max(1, Math.ceil(total / limit));
             const data = contratosFiltrados.slice(offset, offset + limit);
@@ -3076,6 +3107,7 @@ export class DocumentosService {
                 page,
                 limit,
                 totalPages,
+                resumo,
             };
 
             this.logger.debug(`contract.repo.list | Listagem concluída total=${total} pagina=${page} limite=${limit}`);

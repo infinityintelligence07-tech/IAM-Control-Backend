@@ -2336,6 +2336,31 @@ export class DocumentosService {
         return s === 'signed' || s === 'complete' || s === 'completed' || s === 'assinado';
     }
 
+    private converterDataFiltroParaDate(valor?: string, fimDoDia: boolean = false): Date | null {
+        const bruto = String(valor || '').trim();
+        if (!bruto) return null;
+
+        const contemHorario = /\d{2}:\d{2}/.test(bruto);
+        const possuiTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(bruto);
+        const valorNormalizado = bruto.includes(' ') ? bruto.replace(' ', 'T') : bruto;
+        const candidatoIso = possuiTimezone ? valorNormalizado : `${valorNormalizado}Z`;
+        let data = new Date(candidatoIso);
+
+        if (Number.isNaN(data.getTime())) {
+            const somenteData = bruto.split(' ')[0]?.split('T')[0]?.trim();
+            if (!somenteData) return null;
+            data = new Date(`${somenteData}T${fimDoDia ? '23:59:59.999' : '00:00:00.000'}Z`);
+            if (Number.isNaN(data.getTime())) return null;
+            return data;
+        }
+
+        if (!contemHorario) {
+            data = new Date(`${valorNormalizado}T${fimDoDia ? '23:59:59.999' : '00:00:00.000'}Z`);
+        }
+
+        return Number.isNaN(data.getTime()) ? null : data;
+    }
+
     private montarChaveCacheOpcoesOrigem(filtros?: {
         data_inicio?: string;
         data_fim?: string;
@@ -2430,21 +2455,19 @@ export class DocumentosService {
 
         const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
         const aplicarFiltroPeriodo = !filtroTreinamentoAtivo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
-        const dataInicioPeriodo = filtros?.data_inicio
-            ? new Date(`${filtros.data_inicio}T00:00:00.000Z`)
-            : (() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - 30);
-                  d.setHours(0, 0, 0, 0);
-                  return d;
-              })();
-        const dataFimPeriodo = filtros?.data_fim
-            ? new Date(`${filtros.data_fim}T23:59:59.999Z`)
-            : (() => {
-                  const d = new Date();
-                  d.setHours(23, 59, 59, 999);
-                  return d;
-              })();
+        const dataInicioPadrao = (() => {
+            const d = new Date();
+            d.setDate(d.getDate() - 30);
+            d.setHours(0, 0, 0, 0);
+            return d;
+        })();
+        const dataFimPadrao = (() => {
+            const d = new Date();
+            d.setHours(23, 59, 59, 999);
+            return d;
+        })();
+        const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
+        const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
 
         const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
             where: {
@@ -2455,6 +2478,9 @@ export class DocumentosService {
                 'id_turma_aluno_treinamento_fk',
                 'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
                 'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
+                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_fk',
+                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_fk.id_treinamento_fk',
+                'id_turma_aluno_treinamento_fk.id_treinamento_fk',
             ],
             order: { criado_em: 'DESC' },
         });
@@ -2474,8 +2500,19 @@ export class DocumentosService {
             const alunoRelacao = turmaAluno?.id_aluno_fk;
             const dadosContrato = contratoAny?.dados_contrato || {};
             const camposVariaveis = dadosContrato?.campos_variaveis || {};
-            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || '').trim();
-            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || '').trim();
+            const turmaRelacionada = turmaAluno?.id_turma_fk;
+            const treinamentoOrigemFallback = String(
+                turmaRelacionada?.id_treinamento_fk?.treinamento || contratoAny?.id_turma_aluno_treinamento_fk?.id_treinamento_fk?.treinamento || '',
+            ).trim();
+            const turmaOrigemFallback = (() => {
+                const edicao = String(turmaRelacionada?.edicao_turma || '').trim();
+                if (treinamentoOrigemFallback && edicao) {
+                    return `${treinamentoOrigemFallback} - ${edicao}`;
+                }
+                return treinamentoOrigemFallback;
+            })();
+            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || treinamentoOrigemFallback || '').trim();
+            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || turmaOrigemFallback || '').trim();
             const nomeAluno = this.normalizarTexto(alunoRelacao?.nome || dadosContrato?.aluno?.nome);
             const emailAluno = this.normalizarTexto(alunoRelacao?.email || dadosContrato?.aluno?.email);
             const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento || dadosContrato?.turma_aluno?.pendencia_pagamento);
@@ -2546,21 +2583,19 @@ export class DocumentosService {
             const offset = (page - 1) * limit;
             const filtroTreinamentoSemPeriodo = filtros?.tipo_filtro_busca === 'treinamento';
             const aplicarFiltroPeriodo = !filtroTreinamentoSemPeriodo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
-            const dataInicioPeriodo = filtros?.data_inicio
-                ? new Date(`${filtros.data_inicio}T00:00:00.000Z`)
-                : (() => {
-                      const d = new Date();
-                      d.setDate(d.getDate() - 30);
-                      d.setHours(0, 0, 0, 0);
-                      return d;
-                  })();
-            const dataFimPeriodo = filtros?.data_fim
-                ? new Date(`${filtros.data_fim}T23:59:59.999Z`)
-                : (() => {
-                      const d = new Date();
-                      d.setHours(23, 59, 59, 999);
-                      return d;
-                  })();
+            const dataInicioPadrao = (() => {
+                const d = new Date();
+                d.setDate(d.getDate() - 30);
+                d.setHours(0, 0, 0, 0);
+                return d;
+            })();
+            const dataFimPadrao = (() => {
+                const d = new Date();
+                d.setHours(23, 59, 59, 999);
+                return d;
+            })();
+            const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
+            const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
 
             // Usar find com relations para garantir que os relacionamentos sejam carregados
             const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
@@ -3132,22 +3167,8 @@ export class DocumentosService {
                     return quantidadeBonusViaValores;
                 }
 
-                const temIndicativoBonus = [
-                    camposVariaveis['Turma de Destino'],
-                    camposVariaveis['Turma Destino'],
-                    camposVariaveis['Turma Bônus'],
-                    camposVariaveis['Turma Bonus'],
-                    camposVariaveis['Treinamento de Destino'],
-                    camposVariaveis['Treinamento Destino'],
-                    camposVariaveis['Treinamento Bônus'],
-                    camposVariaveis['Treinamento Bonus'],
-                ].some((valor) => Boolean(String(valor || '').trim()));
-
-                if (temIndicativoBonus) {
-                    return quantidadeInscricoes;
-                }
-
-                return quantidadeInscricoes > 1 ? quantidadeInscricoes : 0;
+                // Nao considerar compradores adicionais/inscricoes extras como bonus.
+                return 0;
             };
 
             const resumo = contratosFiltrados.reduce(

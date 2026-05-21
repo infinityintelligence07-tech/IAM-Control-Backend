@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
 import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/turmasAlunosTreinamentosContratos.entity';
@@ -34,6 +35,10 @@ export class DocumentosService {
     private readonly logger = new Logger(DocumentosService.name);
     private readonly opcoesOrigemCacheTtlMs = 60000;
     private readonly opcoesOrigemCacheMaxEntradas = 200;
+    private readonly contratosBancoCacheTtlMs = 15000;
+    private readonly contratosBancoCacheMaxEntradas = 40;
+    private readonly janelaCronSincronizacaoDias = 7;
+    private sincronizacaoStatusCronEmExecucao = false;
     private readonly opcoesOrigemCache = new Map<
         string,
         {
@@ -41,6 +46,25 @@ export class DocumentosService {
             value: {
                 treinamentos_origem: string[];
                 turmas_origem: string[];
+            };
+        }
+    >();
+    private readonly contratosBancoCache = new Map<
+        string,
+        {
+            expiresAt: number;
+            value: {
+                data: any[];
+                total: number;
+                page: number;
+                limit: number;
+                totalPages: number;
+                resumo: {
+                    total_inscricoes_vendidas: number;
+                    total_inscricoes_bonus: number;
+                    total_com_pendencia: number;
+                    receita_total: number;
+                };
             };
         }
     >();
@@ -2434,6 +2458,44 @@ export class DocumentosService {
         }
     }
 
+    limparCachesHistorico(): {
+        contratosBancoRemovidos: number;
+        opcoesOrigemRemovidas: number;
+    } {
+        const contratosBancoRemovidos = this.contratosBancoCache.size;
+        const opcoesOrigemRemovidas = this.opcoesOrigemCache.size;
+
+        this.contratosBancoCache.clear();
+        this.opcoesOrigemCache.clear();
+
+        this.logger.log(`contract.cache.clear | contratosBanco=${contratosBancoRemovidos} opcoesOrigem=${opcoesOrigemRemovidas}`);
+
+        return {
+            contratosBancoRemovidos,
+            opcoesOrigemRemovidas,
+        };
+    }
+
+    private async obterMarcadorAtualizacaoHistorico(): Promise<string> {
+        const [contratoRaw, turmaAlunoRaw] = await Promise.all([
+            this.uow.turmasAlunosTreinamentosContratosRP
+                .createQueryBuilder('contrato')
+                .select('COALESCE(MAX(contrato.atualizado_em), MAX(contrato.criado_em), NOW())', 'max_atualizacao')
+                .where('contrato.deletado_em IS NULL')
+                .getRawOne<{ max_atualizacao?: string | Date }>(),
+            this.uow.turmasAlunosRP
+                .createQueryBuilder('turma_aluno')
+                .select('COALESCE(MAX(turma_aluno.atualizado_em), MAX(turma_aluno.criado_em), NOW())', 'max_atualizacao')
+                .where('turma_aluno.deletado_em IS NULL')
+                .getRawOne<{ max_atualizacao?: string | Date }>(),
+        ]);
+
+        const marcadorContrato = contratoRaw?.max_atualizacao ? new Date(contratoRaw.max_atualizacao).toISOString() : '0';
+        const marcadorTurmaAluno = turmaAlunoRaw?.max_atualizacao ? new Date(turmaAlunoRaw.max_atualizacao).toISOString() : '0';
+
+        return `${marcadorContrato}|${marcadorTurmaAluno}`;
+    }
+
     async listarOpcoesFiltrosOrigem(filtros?: {
         data_inicio?: string;
         data_fim?: string;
@@ -2596,12 +2658,309 @@ export class DocumentosService {
             })();
             const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
             const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
+            const marcadorAtualizacao = await this.obterMarcadorAtualizacaoHistorico();
+            const chaveCache = JSON.stringify({
+                page,
+                limit,
+                marcadorAtualizacao,
+                id_aluno: filtros?.id_aluno || null,
+                id_treinamento: filtros?.id_treinamento || null,
+                status: filtros?.status || null,
+                data_inicio: dataInicioPeriodo.toISOString(),
+                data_fim: dataFimPeriodo.toISOString(),
+                search: filtros?.search || null,
+                canal_venda: filtros?.canal_venda || null,
+                somente_com_pendencia: filtros?.somente_com_pendencia || null,
+                tipo_filtro_busca: filtros?.tipo_filtro_busca || null,
+                treinamento_origem: filtros?.treinamento_origem || null,
+                turma_origem: filtros?.turma_origem || null,
+            });
+            const cacheExistente = this.contratosBancoCache.get(chaveCache);
 
-            // Usar find com relations para garantir que os relacionamentos sejam carregados
+            if (cacheExistente && cacheExistente.expiresAt > Date.now()) {
+                return cacheExistente.value;
+            }
+
+            const termoBuscaFiltro = this.normalizarTexto(filtros?.search);
+            const statusFiltro = this.normalizarTexto(filtros?.status);
+            const treinamentoOrigemFiltro = this.normalizarTexto(filtros?.treinamento_origem);
+            const turmaOrigemFiltro = this.normalizarTexto(filtros?.turma_origem);
+            const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
+            const somentePendenciaAtivo =
+                filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
+
+            const treinamentoOrigemSql = `LOWER(TRIM(COALESCE(
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Origem', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento Origem', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Entrada', ''),
+                NULLIF(treinamento_tat.treinamento, ''),
+                NULLIF(treinamento_destino.treinamento, ''),
+                ''
+            )))`;
+            const turmaOrigemSql = `LOWER(TRIM(COALESCE(
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Origem', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Origem', ''),
+                CASE
+                    WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
+                        THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
+                    ELSE treinamento_destino.treinamento
+                END,
+                ''
+            )))`;
+            const canalTextoSql = `LOWER(CONCAT_WS(' ',
+                ${treinamentoOrigemSql},
+                ${turmaOrigemSql},
+                COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Canal de Vendas', ''),
+                COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Canal da Venda', ''),
+                COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Origem da Venda', ''),
+                COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Origem', ''),
+                COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Observações', '')
+            ))`;
+            const pendenciaJsonSql = `CASE
+                WHEN contrato.dados_contrato->'turma_aluno'->>'pendencia_pagamento' IN ('true', 'false')
+                    THEN (contrato.dados_contrato->'turma_aluno'->>'pendencia_pagamento')::boolean
+                ELSE false
+            END`;
+            const statusDocumentoSql = `LOWER(COALESCE(contrato.zapsign_document_status->>'status', ''))`;
+            const baseQb = this.uow.turmasAlunosTreinamentosContratosRP
+                .createQueryBuilder('contrato')
+                .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+                .leftJoin('tat.id_turma_aluno_fk', 'ta')
+                .leftJoin('ta.id_aluno_fk', 'aluno')
+                .leftJoin('ta.id_turma_fk', 'turma_destino')
+                .leftJoin('turma_destino.id_treinamento_fk', 'treinamento_destino')
+                .leftJoin('tat.id_treinamento_fk', 'treinamento_tat')
+                .where('contrato.deletado_em IS NULL');
+
+            if (aplicarFiltroPeriodo) {
+                baseQb.andWhere('contrato.criado_em BETWEEN :dataInicioPeriodo AND :dataFimPeriodo', {
+                    dataInicioPeriodo,
+                    dataFimPeriodo,
+                });
+            }
+
+            if (filtros?.id_aluno) {
+                const idAluno = Number(filtros.id_aluno);
+                if (Number.isFinite(idAluno) && idAluno > 0) {
+                    baseQb.andWhere('aluno.id = :idAluno', { idAluno });
+                }
+            }
+
+            if (filtros?.id_treinamento) {
+                const idTreinamento = Number(filtros.id_treinamento);
+                if (Number.isFinite(idTreinamento) && idTreinamento > 0) {
+                    baseQb.andWhere('(tat.id_treinamento = :idTreinamento OR turma_destino.id_treinamento = :idTreinamento)', {
+                        idTreinamento,
+                    });
+                }
+            }
+
+            if (termoBuscaFiltro) {
+                baseQb.andWhere(
+                    `(LOWER(COALESCE(aluno.nome, '')) LIKE :termoBusca OR LOWER(COALESCE(aluno.email, '')) LIKE :termoBusca OR LOWER(COALESCE(contrato.dados_contrato::text, '')) LIKE :termoBusca)`,
+                    {
+                        termoBusca: `%${termoBuscaFiltro}%`,
+                    },
+                );
+            }
+
+            if (somentePendenciaAtivo) {
+                baseQb.andWhere(`(COALESCE(ta.pendencia_pagamento, false) = true OR ${pendenciaJsonSql} = true)`);
+            }
+
+            if (statusFiltro && statusFiltro !== 'all') {
+                if (statusFiltro === 'completed') {
+                    baseQb.andWhere(`${statusDocumentoSql} IN (:...statusConcluido)`, {
+                        statusConcluido: ['signed', 'complete', 'completed', 'assinado'],
+                    });
+                } else {
+                    baseQb.andWhere(`(${statusDocumentoSql} = '' OR ${statusDocumentoSql} NOT IN (:...statusConcluido))`, {
+                        statusConcluido: ['signed', 'complete', 'completed', 'assinado'],
+                    });
+                }
+            }
+
+            if (filtroTreinamentoAtivo && treinamentoOrigemFiltro) {
+                baseQb.andWhere(`${treinamentoOrigemSql} = :treinamentoOrigemFiltro`, {
+                    treinamentoOrigemFiltro,
+                });
+            }
+
+            if (filtroTreinamentoAtivo && turmaOrigemFiltro) {
+                baseQb.andWhere(`${turmaOrigemSql} = :turmaOrigemFiltro`, {
+                    turmaOrigemFiltro,
+                });
+            }
+
+            if (filtros?.canal_venda === 'MASTERCLASS') {
+                baseQb.andWhere(`${canalTextoSql} LIKE :canalMasterclass`, {
+                    canalMasterclass: '%masterclass%',
+                });
+            } else if (filtros?.canal_venda === 'TIME_VENDAS') {
+                baseQb.andWhere(`(${canalTextoSql} LIKE :canalTimeVendas OR ${canalTextoSql} LIKE :canalVendasIam)`, {
+                    canalTimeVendas: '%time de vendas%',
+                    canalVendasIam: '%vendas iam%',
+                });
+            } else if (filtros?.canal_venda === 'EVENTOS') {
+                baseQb.andWhere(
+                    `(${canalTextoSql} NOT LIKE :canalMasterclass AND ${canalTextoSql} NOT LIKE :canalTimeVendas AND ${canalTextoSql} NOT LIKE :canalVendasIam)`,
+                    {
+                        canalMasterclass: '%masterclass%',
+                        canalTimeVendas: '%time de vendas%',
+                        canalVendasIam: '%vendas iam%',
+                    },
+                );
+            }
+
+            const total = await baseQb.clone().select('contrato.id').distinct(true).getCount();
+            const totalPages = Math.max(1, Math.ceil(total / limit));
+            const idsPaginaRaw = await baseQb
+                .clone()
+                .select('contrato.id', 'id')
+                .addSelect('MAX(contrato.criado_em)', 'ordem_criado_em')
+                .groupBy('contrato.id')
+                .orderBy('MAX(contrato.criado_em)', 'DESC')
+                .offset(offset)
+                .limit(limit)
+                .getRawMany<{ id: string }>();
+            const idsPagina = idsPaginaRaw.map((item) => String(item.id));
+
+            const resumoRows = await baseQb
+                .clone()
+                .select('contrato.dados_contrato', 'dados_contrato')
+                .addSelect('COALESCE(ta.quantidade_inscricoes, 1)', 'quantidade_inscricoes')
+                .addSelect('COALESCE(ta.pendencia_pagamento, false)', 'pendencia_pagamento')
+                .distinct(true)
+                .getRawMany<{
+                    dados_contrato: any;
+                    quantidade_inscricoes: string | number;
+                    pendencia_pagamento: string | boolean;
+                }>();
+
+            if (idsPagina.length === 0) {
+                const resultadoVazio = {
+                    data: [],
+                    total,
+                    page,
+                    limit,
+                    totalPages,
+                    resumo: {
+                        total_inscricoes_vendidas: 0,
+                        total_inscricoes_bonus: 0,
+                        total_com_pendencia: 0,
+                        receita_total: 0,
+                    },
+                };
+                this.contratosBancoCache.set(chaveCache, {
+                    expiresAt: Date.now() + this.contratosBancoCacheTtlMs,
+                    value: resultadoVazio,
+                });
+                return resultadoVazio;
+            }
+
             const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
                 where: {
+                    id: In(idsPagina),
                     deletado_em: null,
-                    ...(aplicarFiltroPeriodo ? { criado_em: Between(dataInicioPeriodo, dataFimPeriodo) } : {}),
+                },
+                select: {
+                    id: true,
+                    id_turma_aluno_treinamento: true,
+                    status_ass_aluno: true,
+                    status_ass_test_um: true,
+                    status_ass_test_dois: true,
+                    data_ass_aluno: true,
+                    data_ass_test_um: true,
+                    data_ass_test_dois: true,
+                    criado_em: true,
+                    atualizado_em: true,
+                    criado_por: true,
+                    dados_contrato: true,
+                    zapsign_document_id: true,
+                    zapsign_signers_data: true,
+                    zapsign_document_status: true,
+                    id_turma_aluno_treinamento_fk: {
+                        id: true,
+                        id_turma_aluno: true,
+                        id_treinamento: true,
+                        id_turma_destino: true,
+                        criado_por: true,
+                        id_turma_aluno_fk: {
+                            id: true,
+                            id_turma: true,
+                            id_aluno: true,
+                            pendencia_pagamento: true,
+                            quantidade_inscricoes: true,
+                            outros_clientes: true,
+                            comprovante_pagamento_base64: true,
+                            criado_por: true,
+                            id_turma_transferencia_de: true,
+                            id_turma_transferencia_para: true,
+                            id_aluno_fk: {
+                                id: true,
+                                nome: true,
+                                cpf: true,
+                                email: true,
+                                data_nascimento: true,
+                                telefone_um: true,
+                                logradouro: true,
+                                numero: true,
+                                complemento: true,
+                                bairro: true,
+                                cidade: true,
+                                estado: true,
+                                cep: true,
+                                id_polo_fk: {
+                                    id: true,
+                                    cidade: true,
+                                    estado: true,
+                                },
+                            },
+                            id_turma_fk: {
+                                id: true,
+                                id_treinamento: true,
+                                edicao_turma: true,
+                                turmas_ipr_relacionadas: true,
+                                id_treinamento_fk: {
+                                    id: true,
+                                    treinamento: true,
+                                    sigla_treinamento: true,
+                                },
+                            },
+                            id_turma_transferencia_de_fk: {
+                                id: true,
+                                id_treinamento: true,
+                                edicao_turma: true,
+                                id_treinamento_fk: {
+                                    id: true,
+                                    treinamento: true,
+                                    sigla_treinamento: true,
+                                },
+                            },
+                            id_turma_transferencia_para_fk: {
+                                id: true,
+                                id_treinamento: true,
+                                edicao_turma: true,
+                                id_treinamento_fk: {
+                                    id: true,
+                                    treinamento: true,
+                                    sigla_treinamento: true,
+                                },
+                            },
+                        },
+                        id_treinamento_fk: {
+                            id: true,
+                            treinamento: true,
+                            sigla_treinamento: true,
+                            preco_treinamento: true,
+                            url_logo_treinamento: true,
+                        },
+                    },
+                    id_documento_fk: {
+                        id: true,
+                        documento: true,
+                        clausulas: true,
+                    },
                 },
                 relations: [
                     'id_turma_aluno_treinamento_fk',
@@ -2617,13 +2976,22 @@ export class DocumentosService {
                     'id_turma_aluno_treinamento_fk.id_treinamento_fk',
                     'id_documento_fk',
                 ],
-                order: { criado_em: 'DESC' },
             });
+            const ordemIdsPagina = new Map(idsPagina.map((id, index) => [id, index]));
+            contratos.sort((a, b) => (ordemIdsPagina.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (ordemIdsPagina.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
 
             // Mapear dados para o formato esperado pelo frontend
             const cacheTurmaPorId = new Map<number, Turmas | null>();
             const cacheTurmaOrigemPorTurmaAluno = new Map<string, Turmas | null>();
             const cacheTurmaOrigemIprPorAluno = new Map<number, Turmas | null>();
+            const fallbackContextoPorContratoId = new Map<
+                string,
+                {
+                    fallbackAlunoId: number;
+                    fallbackTreinamentoId: number;
+                    fallbackIdTurmaDestino: number;
+                }
+            >();
             const idsTurmaOrigemViaContrato = Array.from(
                 new Set(
                     contratos
@@ -2634,11 +3002,21 @@ export class DocumentosService {
                         .filter((id) => Number.isFinite(id) && id > 0),
                 ),
             );
+            const idsTurmasIprRelacionadas = Array.from(
+                new Set(
+                    contratos.flatMap((contrato) => {
+                        const turmasRelacionadas = contrato?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_turma_fk?.turmas_ipr_relacionadas;
+                        if (!Array.isArray(turmasRelacionadas)) return [];
+                        return turmasRelacionadas.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0);
+                    }),
+                ),
+            );
+            const idsTurmasCacheInicial = Array.from(new Set([...idsTurmaOrigemViaContrato, ...idsTurmasIprRelacionadas]));
 
-            if (idsTurmaOrigemViaContrato.length > 0) {
+            if (idsTurmasCacheInicial.length > 0) {
                 const turmasOrigemViaContrato = await this.uow.turmasRP.find({
                     where: {
-                        id: In(idsTurmaOrigemViaContrato),
+                        id: In(idsTurmasCacheInicial),
                         deletado_em: IsNull(),
                     },
                     relations: ['id_treinamento_fk'],
@@ -2647,15 +3025,229 @@ export class DocumentosService {
                 turmasOrigemViaContrato.forEach((turma) => {
                     cacheTurmaPorId.set(turma.id, turma);
                 });
-                idsTurmaOrigemViaContrato.forEach((id) => {
+                idsTurmasCacheInicial.forEach((id) => {
                     if (!cacheTurmaPorId.has(id)) {
                         cacheTurmaPorId.set(id, null);
                     }
                 });
             }
 
+            const contextoSemTurmaAluno = contratos
+                .map((contrato) => {
+                    const dadosContrato = contrato.dados_contrato || {};
+                    const turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
+                    const turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
+                    if (turmaAluno) return null;
+
+                    const fallbackIdTurmaDestino =
+                        Number(turmaAlunoTreinamento?.id_turma_destino || dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.turma?.id || 0) || 0;
+                    const fallbackAlunoId = Number(dadosContrato?.aluno?.id || 0);
+                    const fallbackTreinamentoId = Number(dadosContrato?.treinamento?.id || turmaAlunoTreinamento?.id_treinamento || 0) || 0;
+
+                    return {
+                        contratoId: String(contrato.id),
+                        fallbackAlunoId,
+                        fallbackTreinamentoId,
+                        fallbackIdTurmaDestino,
+                    };
+                })
+                .filter(
+                    (
+                        item,
+                    ): item is {
+                        contratoId: string;
+                        fallbackAlunoId: number;
+                        fallbackTreinamentoId: number;
+                        fallbackIdTurmaDestino: number;
+                    } => Boolean(item),
+                );
+
+            contextoSemTurmaAluno.forEach((contexto) => {
+                fallbackContextoPorContratoId.set(contexto.contratoId, {
+                    fallbackAlunoId: contexto.fallbackAlunoId,
+                    fallbackTreinamentoId: contexto.fallbackTreinamentoId,
+                    fallbackIdTurmaDestino: contexto.fallbackIdTurmaDestino,
+                });
+            });
+
+            const montarChaveFallback = (idAluno: number, idTreinamento: number, idTurmaDestino: number) =>
+                `${idAluno}|${idTreinamento}|${idTurmaDestino > 0 ? idTurmaDestino : 0}`;
+
+            const idsFallbackAlunos = Array.from(new Set(contextoSemTurmaAluno.map((item) => item.fallbackAlunoId).filter((id) => id > 0)));
+            const idsFallbackTreinamentos = Array.from(new Set(contextoSemTurmaAluno.map((item) => item.fallbackTreinamentoId).filter((id) => id > 0)));
+            const turmaAlunoTreinamentoFallbackPorChave = new Map<string, any>();
+            const turmaAlunoDiretoFallbackPorChave = new Map<string, any>();
+
+            if (idsFallbackAlunos.length > 0 && idsFallbackTreinamentos.length > 0) {
+                const tatFallbackLote = await this.uow.turmasAlunosTreinamentosRP
+                    .createQueryBuilder('tat_fallback')
+                    .leftJoinAndSelect('tat_fallback.id_turma_aluno_fk', 'turma_aluno')
+                    .where('tat_fallback.id_treinamento IN (:...idsTreinamento)', {
+                        idsTreinamento: idsFallbackTreinamentos,
+                    })
+                    .andWhere('turma_aluno.id_aluno IN (:...idsAluno)', {
+                        idsAluno: idsFallbackAlunos,
+                    })
+                    .andWhere('tat_fallback.deletado_em IS NULL')
+                    .andWhere('turma_aluno.deletado_em IS NULL')
+                    .orderBy('tat_fallback.atualizado_em', 'DESC')
+                    .addOrderBy('tat_fallback.id', 'DESC')
+                    .getMany();
+
+                tatFallbackLote.forEach((item) => {
+                    const idAluno = Number(item?.id_turma_aluno_fk?.id_aluno || 0);
+                    const idTreinamento = Number(item?.id_treinamento || 0);
+                    const idTurmaDestino = Number(item?.id_turma_aluno_fk?.id_turma || 0);
+                    if (!idAluno || !idTreinamento) return;
+
+                    const chaveComDestino = montarChaveFallback(idAluno, idTreinamento, idTurmaDestino);
+                    const chaveSemDestino = montarChaveFallback(idAluno, idTreinamento, 0);
+
+                    if (!turmaAlunoTreinamentoFallbackPorChave.has(chaveComDestino)) {
+                        turmaAlunoTreinamentoFallbackPorChave.set(chaveComDestino, item);
+                    }
+                    if (!turmaAlunoTreinamentoFallbackPorChave.has(chaveSemDestino)) {
+                        turmaAlunoTreinamentoFallbackPorChave.set(chaveSemDestino, item);
+                    }
+                });
+            }
+
+            if (idsFallbackAlunos.length > 0) {
+                const turmaAlunoFallbackLote = await this.uow.turmasAlunosRP
+                    .createQueryBuilder('ta_fallback')
+                    .where('ta_fallback.id_aluno IN (:...idsAluno)', {
+                        idsAluno: idsFallbackAlunos,
+                    })
+                    .andWhere('ta_fallback.deletado_em IS NULL')
+                    .orderBy(
+                        `CASE
+                            WHEN ta_fallback.pendencia_pagamento IS TRUE
+                            OR COALESCE(ta_fallback.quantidade_inscricoes, 1) > 1
+                            OR ta_fallback.comprovante_pagamento_base64 IS NOT NULL
+                            THEN 0
+                            ELSE 1
+                        END`,
+                        'ASC',
+                    )
+                    .addOrderBy('ta_fallback.atualizado_em', 'DESC')
+                    .addOrderBy('ta_fallback.id', 'DESC')
+                    .getMany();
+
+                turmaAlunoFallbackLote.forEach((item) => {
+                    const idAluno = Number(item?.id_aluno || 0);
+                    const idTurmaDestino = Number(item?.id_turma || 0);
+                    if (!idAluno) return;
+
+                    const chaveComDestino = `${idAluno}|${idTurmaDestino > 0 ? idTurmaDestino : 0}`;
+                    const chaveSemDestino = `${idAluno}|0`;
+                    if (!turmaAlunoDiretoFallbackPorChave.has(chaveComDestino)) {
+                        turmaAlunoDiretoFallbackPorChave.set(chaveComDestino, item);
+                    }
+                    if (!turmaAlunoDiretoFallbackPorChave.has(chaveSemDestino)) {
+                        turmaAlunoDiretoFallbackPorChave.set(chaveSemDestino, item);
+                    }
+                });
+
+                const idsTurmaAlunoParaHistorico = Array.from(
+                    new Set(
+                        contratos
+                            .map((contrato) =>
+                                Number(
+                                    contrato?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id ||
+                                        turmaAlunoDiretoFallbackPorChave.get(
+                                            `${Number((contrato?.dados_contrato || {})?.aluno?.id || 0)}|${Number(contrato?.id_turma_aluno_treinamento_fk?.id_turma_destino || (contrato?.dados_contrato || {})?.fluxo_evento_destino_id_turma || (contrato?.dados_contrato || {})?.turma?.id || 0 || 0)}`,
+                                        )?.id ||
+                                        0,
+                                ),
+                            )
+                            .filter((id) => Number.isFinite(id) && id > 0),
+                    ),
+                );
+
+                if (idsTurmaAlunoParaHistorico.length > 0) {
+                    const historicoOrigemLote = await this.uow.historicoTransferenciasRP
+                        .createQueryBuilder('historico')
+                        .leftJoinAndSelect('historico.id_turma_de_fk', 'turma_origem')
+                        .leftJoinAndSelect('turma_origem.id_treinamento_fk', 'treinamento_origem')
+                        .where('historico.id_turma_aluno_para IN (:...idsTurmaAlunoPara)', {
+                            idsTurmaAlunoPara: idsTurmaAlunoParaHistorico,
+                        })
+                        .andWhere('historico.deletado_em IS NULL')
+                        .andWhere('historico.id_turma_de <> historico.id_turma_para')
+                        .orderBy('historico.criado_em', 'DESC')
+                        .addOrderBy('historico.id', 'DESC')
+                        .getMany();
+
+                    historicoOrigemLote.forEach((item) => {
+                        const idTurmaAlunoPara = String(item?.id_turma_aluno_para || '');
+                        if (!idTurmaAlunoPara) return;
+                        if (!cacheTurmaOrigemPorTurmaAluno.has(idTurmaAlunoPara)) {
+                            cacheTurmaOrigemPorTurmaAluno.set(idTurmaAlunoPara, item?.id_turma_de_fk || null);
+                        }
+                    });
+                }
+
+                const idsAlunoIpr = Array.from(
+                    new Set(
+                        contratos
+                            .map((contrato) => {
+                                const dadosContrato = contrato?.dados_contrato || {};
+                                const idAlunoDireto = Number(contrato?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk?.id_aluno || 0);
+                                if (idAlunoDireto > 0) return idAlunoDireto;
+                                return Number(dadosContrato?.aluno?.id || 0);
+                            })
+                            .filter((id) => Number.isFinite(id) && id > 0),
+                    ),
+                );
+
+                if (idsAlunoIpr.length > 0) {
+                    const preencherCacheIpr = async (incluirBonus: boolean, idsAlvo: number[]) => {
+                        if (idsAlvo.length === 0) return;
+                        const qb = this.uow.turmasAlunosRP
+                            .createQueryBuilder('turma_aluno')
+                            .leftJoinAndSelect('turma_aluno.id_turma_fk', 'turma')
+                            .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+                            .where('turma_aluno.id_aluno IN (:...idsAluno)', {
+                                idsAluno: idsAlvo,
+                            })
+                            .andWhere('turma_aluno.deletado_em IS NULL')
+                            .andWhere('turma.deletado_em IS NULL')
+                            .andWhere(
+                                "(LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersao OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersaoAcento OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :ipr)",
+                                {
+                                    imersao: '%imersao prosperar%',
+                                    imersaoAcento: '%imersão prosperar%',
+                                    ipr: '%ipr%',
+                                },
+                            )
+                            .orderBy('turma_aluno.atualizado_em', 'DESC')
+                            .addOrderBy('turma_aluno.id', 'DESC');
+
+                        if (!incluirBonus) {
+                            qb.andWhere('(turma_aluno.vaga_bonus = false OR turma_aluno.vaga_bonus IS NULL)').andWhere(
+                                '(turma_aluno.origem_aluno IS NULL OR turma_aluno.origem_aluno <> :origemBonus)',
+                                {
+                                    origemBonus: EOrigemAlunos.ALUNO_BONUS,
+                                },
+                            );
+                        }
+
+                        const matriculas = await qb.getMany();
+                        matriculas.forEach((matricula) => {
+                            const idAluno = Number(matricula?.id_aluno || 0);
+                            if (!idAluno || cacheTurmaOrigemIprPorAluno.has(idAluno)) return;
+                            cacheTurmaOrigemIprPorAluno.set(idAluno, matricula?.id_turma_fk || null);
+                        });
+                    };
+
+                    await preencherCacheIpr(false, idsAlunoIpr);
+                    const idsSemIpr = idsAlunoIpr.filter((idAluno) => !cacheTurmaOrigemIprPorAluno.has(idAluno));
+                    await preencherCacheIpr(true, idsSemIpr);
+                }
+            }
+
             const contratosMapeados = await Promise.all(
-                contratos.map(async (contrato) => {
+                contratos.map((contrato) => {
                     const dadosContrato = contrato.dados_contrato || {};
                     let turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
                     let turmaAluno = turmaAlunoTreinamento?.id_turma_aluno_fk;
@@ -2663,57 +3255,30 @@ export class DocumentosService {
                     const fallbackIdTurmaDestino =
                         Number(turmaAlunoTreinamento?.id_turma_destino || dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.turma?.id || 0) || 0;
                     if (!turmaAluno) {
-                        const fallbackAlunoId = Number(dadosContrato?.aluno?.id || 0);
-                        const fallbackTreinamentoId = Number(dadosContrato?.treinamento?.id || turmaAlunoTreinamento?.id_treinamento || 0);
-
-                        if (fallbackAlunoId && fallbackTreinamentoId) {
-                            const turmaAlunoTreinamentoFallback = await this.uow.turmasAlunosTreinamentosRP
-                                .createQueryBuilder('turma_aluno_treinamento')
-                                .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
-                                .where('turma_aluno_treinamento.id_treinamento = :idTreinamento', {
-                                    idTreinamento: fallbackTreinamentoId,
-                                })
-                                .andWhere('turma_aluno.id_aluno = :idAluno', {
-                                    idAluno: fallbackAlunoId,
-                                })
-                                .andWhere(fallbackIdTurmaDestino > 0 ? 'turma_aluno.id_turma = :idTurmaDestino' : '1=1', { idTurmaDestino: fallbackIdTurmaDestino })
-                                .andWhere('turma_aluno_treinamento.deletado_em IS NULL')
-                                .andWhere('turma_aluno.deletado_em IS NULL')
-                                .orderBy('turma_aluno_treinamento.atualizado_em', 'DESC')
-                                .addOrderBy('turma_aluno_treinamento.id', 'DESC')
-                                .getOne();
-
+                        const contextoFallback = fallbackContextoPorContratoId.get(String(contrato.id));
+                        if (contextoFallback?.fallbackAlunoId && contextoFallback?.fallbackTreinamentoId) {
+                            const chaveComDestino = montarChaveFallback(
+                                contextoFallback.fallbackAlunoId,
+                                contextoFallback.fallbackTreinamentoId,
+                                contextoFallback.fallbackIdTurmaDestino || fallbackIdTurmaDestino,
+                            );
+                            const chaveSemDestino = montarChaveFallback(contextoFallback.fallbackAlunoId, contextoFallback.fallbackTreinamentoId, 0);
+                            const turmaAlunoTreinamentoFallback =
+                                turmaAlunoTreinamentoFallbackPorChave.get(chaveComDestino) || turmaAlunoTreinamentoFallbackPorChave.get(chaveSemDestino);
                             if (turmaAlunoTreinamentoFallback?.id_turma_aluno_fk) {
                                 turmaAlunoTreinamento = turmaAlunoTreinamentoFallback;
                                 turmaAluno = turmaAlunoTreinamentoFallback.id_turma_aluno_fk;
                             }
                         }
 
-                        if (!turmaAluno && fallbackAlunoId) {
-                            const turmaAlunoDiretoFallback = await this.uow.turmasAlunosRP
-                                .createQueryBuilder('turma_aluno')
-                                .where('turma_aluno.id_aluno = :idAluno', {
-                                    idAluno: fallbackAlunoId,
-                                })
-                                .andWhere(fallbackIdTurmaDestino > 0 ? 'turma_aluno.id_turma = :idTurmaDestino' : '1=1', { idTurmaDestino: fallbackIdTurmaDestino })
-                                .andWhere('turma_aluno.deletado_em IS NULL')
-                                .orderBy(
-                                    `CASE
-                                    WHEN turma_aluno.pendencia_pagamento IS TRUE
-                                      OR COALESCE(turma_aluno.quantidade_inscricoes, 1) > 1
-                                      OR turma_aluno.comprovante_pagamento_base64 IS NOT NULL
-                                    THEN 0
-                                    ELSE 1
-                                  END`,
-                                    'ASC',
-                                )
-                                .addOrderBy('turma_aluno.atualizado_em', 'DESC')
-                                .addOrderBy('turma_aluno.id', 'DESC')
-                                .getOne();
-
-                            if (turmaAlunoDiretoFallback) {
-                                turmaAluno = turmaAlunoDiretoFallback;
-                            }
+                        if (!turmaAluno && contextoFallback?.fallbackAlunoId) {
+                            const chaveDiretoComDestino = `${contextoFallback.fallbackAlunoId}|${
+                                (contextoFallback.fallbackIdTurmaDestino || fallbackIdTurmaDestino) > 0
+                                    ? contextoFallback.fallbackIdTurmaDestino || fallbackIdTurmaDestino
+                                    : 0
+                            }`;
+                            const chaveDiretoSemDestino = `${contextoFallback.fallbackAlunoId}|0`;
+                            turmaAluno = turmaAlunoDiretoFallbackPorChave.get(chaveDiretoComDestino) || turmaAlunoDiretoFallbackPorChave.get(chaveDiretoSemDestino);
                         }
                     }
                     const aluno = turmaAluno?.id_aluno_fk;
@@ -2738,77 +3303,12 @@ export class DocumentosService {
                     // Prioridade 1: histórico de transferência da própria matrícula
                     // (garante origem real da venda quando o relacionamento direto não estiver preenchido).
                     if (!turmaOrigemEvento && idTurmaAlunoContrato) {
-                        if (!cacheTurmaOrigemPorTurmaAluno.has(idTurmaAlunoContrato)) {
-                            const historicoOrigem = await this.uow.historicoTransferenciasRP
-                                .createQueryBuilder('historico')
-                                .leftJoinAndSelect('historico.id_turma_de_fk', 'turma_origem')
-                                .leftJoinAndSelect('turma_origem.id_treinamento_fk', 'treinamento_origem')
-                                .where('historico.id_turma_aluno_para = :idTurmaAluno', { idTurmaAluno: idTurmaAlunoContrato })
-                                .andWhere('historico.deletado_em IS NULL')
-                                .andWhere('historico.id_turma_de <> historico.id_turma_para')
-                                .orderBy('historico.criado_em', 'DESC')
-                                .addOrderBy('historico.id', 'DESC')
-                                .getOne();
-
-                            cacheTurmaOrigemPorTurmaAluno.set(idTurmaAlunoContrato, historicoOrigem?.id_turma_de_fk || null);
-                        }
-
                         turmaOrigemEvento = cacheTurmaOrigemPorTurmaAluno.get(idTurmaAlunoContrato) || null;
                     }
 
                     // Para vendas de Confronto com bônus de IPR, a origem deve refletir
                     // a turma IPR de compra (não a turma bônus ofertada).
                     if (!turmaOrigemEvento && idAlunoContrato > 0) {
-                        if (!cacheTurmaOrigemIprPorAluno.has(idAlunoContrato)) {
-                            let matriculaIprOrigem = await this.uow.turmasAlunosRP
-                                .createQueryBuilder('turma_aluno')
-                                .leftJoinAndSelect('turma_aluno.id_turma_fk', 'turma')
-                                .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
-                                .where('turma_aluno.id_aluno = :idAluno', { idAluno: idAlunoContrato })
-                                .andWhere('turma_aluno.deletado_em IS NULL')
-                                .andWhere('(turma_aluno.vaga_bonus = false OR turma_aluno.vaga_bonus IS NULL)')
-                                .andWhere('(turma_aluno.origem_aluno IS NULL OR turma_aluno.origem_aluno <> :origemBonus)', {
-                                    origemBonus: EOrigemAlunos.ALUNO_BONUS,
-                                })
-                                .andWhere('turma.deletado_em IS NULL')
-                                .andWhere(
-                                    "(LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersao OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersaoAcento OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :ipr)",
-                                    {
-                                        imersao: '%imersao prosperar%',
-                                        imersaoAcento: '%imersão prosperar%',
-                                        ipr: '%ipr%',
-                                    },
-                                )
-                                .orderBy('turma_aluno.atualizado_em', 'DESC')
-                                .addOrderBy('turma_aluno.id', 'DESC')
-                                .getOne();
-
-                            // Fallback: quando o aluno só possui IPR como vaga bônus,
-                            // ainda assim essa turma deve ser a origem do Confronto.
-                            if (!matriculaIprOrigem) {
-                                matriculaIprOrigem = await this.uow.turmasAlunosRP
-                                    .createQueryBuilder('turma_aluno')
-                                    .leftJoinAndSelect('turma_aluno.id_turma_fk', 'turma')
-                                    .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
-                                    .where('turma_aluno.id_aluno = :idAluno', { idAluno: idAlunoContrato })
-                                    .andWhere('turma_aluno.deletado_em IS NULL')
-                                    .andWhere('turma.deletado_em IS NULL')
-                                    .andWhere(
-                                        "(LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersao OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :imersaoAcento OR LOWER(COALESCE(treinamento.treinamento, '')) LIKE :ipr)",
-                                        {
-                                            imersao: '%imersao prosperar%',
-                                            imersaoAcento: '%imersão prosperar%',
-                                            ipr: '%ipr%',
-                                        },
-                                    )
-                                    .orderBy('turma_aluno.atualizado_em', 'DESC')
-                                    .addOrderBy('turma_aluno.id', 'DESC')
-                                    .getOne();
-                            }
-
-                            cacheTurmaOrigemIprPorAluno.set(idAlunoContrato, matriculaIprOrigem?.id_turma_fk || null);
-                        }
-
                         turmaOrigemEvento = cacheTurmaOrigemIprPorAluno.get(idAlunoContrato) || null;
                     }
 
@@ -2819,27 +3319,6 @@ export class DocumentosService {
 
                         if (turmasIprRelacionadas.length > 0) {
                             const idsTurmasOrigem = turmasIprRelacionadas.map((id) => Number(id)).filter((id) => Number.isFinite(id));
-
-                            const idsSemCache = idsTurmasOrigem.filter((id) => !cacheTurmaPorId.has(id));
-
-                            if (idsSemCache.length > 0) {
-                                const turmasOrigemRelacionadas = await this.uow.turmasRP.find({
-                                    where: {
-                                        id: In(idsSemCache),
-                                        deletado_em: IsNull(),
-                                    },
-                                    relations: ['id_treinamento_fk'],
-                                });
-
-                                turmasOrigemRelacionadas.forEach((turma) => {
-                                    cacheTurmaPorId.set(turma.id, turma);
-                                });
-                                idsSemCache.forEach((id) => {
-                                    if (!cacheTurmaPorId.has(id)) {
-                                        cacheTurmaPorId.set(id, null);
-                                    }
-                                });
-                            }
 
                             const turmasCandidatas = idsTurmasOrigem
                                 .map((id) => cacheTurmaPorId.get(id))
@@ -2891,7 +3370,7 @@ export class DocumentosService {
                     const criadoPorConsolidado = criadoPorContrato ?? criadoPorTurmaAlunoTreinamento ?? criadoPorTurmaAluno ?? null;
                     const criadoPorDivergente = criadosPorUnicos.length > 1;
 
-                    return {
+                    return Promise.resolve({
                         id: contrato.id,
                         id_turma_aluno_treinamento: turmaAlunoTreinamento?.id ?? null,
                         id_turma_aluno: turmaAluno?.id ?? null,
@@ -3009,97 +3488,21 @@ export class DocumentosService {
                                 comprovante_pagamento_base64: comprovantePagamentoBase64,
                             },
                         },
-                    };
+                    });
                 }),
             );
 
-            const idsCriadoresUnicos = Array.from(
-                new Set(
-                    contratosMapeados
-                        .flatMap((contrato) => [
-                            contrato.criado_por,
-                            contrato.criado_por_contrato,
-                            contrato.criado_por_turma_aluno_treinamento,
-                            contrato.criado_por_turma_aluno,
-                        ])
-                        .map((valor) => Number(valor))
-                        .filter((valor) => Number.isFinite(valor) && valor > 0),
-                ),
-            );
-
-            const nomeUsuarioPorId = new Map<number, string>();
-            if (idsCriadoresUnicos.length > 0) {
-                const usuarios = await this.uow.usuariosRP.find({
-                    where: {
-                        id: In(idsCriadoresUnicos),
-                        deletado_em: IsNull(),
-                    },
-                    select: {
-                        id: true,
-                        nome: true,
-                        primeiro_nome: true,
-                        sobrenome: true,
-                    },
-                });
-
-                usuarios.forEach((usuario) => {
-                    const nomeCompleto = usuario.nome || `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() || `Usuário ${usuario.id}`;
-                    nomeUsuarioPorId.set(usuario.id, nomeCompleto);
-                });
-            }
-
-            const obterNomePorId = (valor?: number | string | null): string | null => {
-                if (valor === null || valor === undefined) return null;
-                const id = Number(valor);
-                if (!Number.isFinite(id) || id <= 0) return null;
-                return nomeUsuarioPorId.get(id) || null;
+            const parseJsonSeguro = (valor: unknown): Record<string, any> => {
+                if (!valor) return {};
+                if (typeof valor === 'object') return valor as Record<string, any>;
+                if (typeof valor !== 'string') return {};
+                try {
+                    const parsed = JSON.parse(valor);
+                    return parsed && typeof parsed === 'object' ? (parsed as Record<string, any>) : {};
+                } catch {
+                    return {};
+                }
             };
-
-            const contratosMapeadosComNomes = contratosMapeados.map((contratoMapeado) => ({
-                ...contratoMapeado,
-                criado_por_nome: obterNomePorId(contratoMapeado.criado_por),
-                criado_por_contrato_nome: obterNomePorId(contratoMapeado.criado_por_contrato),
-                criado_por_turma_aluno_treinamento_nome: obterNomePorId(contratoMapeado.criado_por_turma_aluno_treinamento),
-                criado_por_turma_aluno_nome: obterNomePorId(contratoMapeado.criado_por_turma_aluno),
-                criado_por_confronto: {
-                    ...contratoMapeado.criado_por_confronto,
-                    consolidado_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.consolidado),
-                    contrato_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.contrato),
-                    turma_aluno_treinamento_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.turma_aluno_treinamento),
-                    turma_aluno_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.turma_aluno),
-                },
-            }));
-
-            const termoBusca = this.normalizarTexto(filtros?.search);
-            const treinamentoOrigemFiltro = this.normalizarTexto(filtros?.treinamento_origem);
-            const turmaOrigemFiltro = this.normalizarTexto(filtros?.turma_origem);
-            const canalVendaFiltro = filtros?.canal_venda || '';
-            const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
-            const somentePendenciaAtivo =
-                filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
-            const statusFiltro = this.normalizarTexto(filtros?.status);
-
-            const contratosFiltrados = contratosMapeadosComNomes.filter((contratoMapeado) => {
-                const camposVariaveis = contratoMapeado?.dados_contrato?.campos_variaveis || {};
-                const nomeAluno = this.normalizarTexto(contratoMapeado?.aluno_nome || contratoMapeado?.dados_contrato?.aluno?.nome);
-                const emailAluno = this.normalizarTexto(contratoMapeado?.dados_contrato?.aluno?.email);
-                const treinamentoOrigem = this.extrairTreinamentoOrigemServidor(contratoMapeado);
-                const turmaOrigem = this.extrairTurmaOrigemServidor(contratoMapeado);
-                const canalVenda = this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis);
-                const pendenciaPagamento = Boolean(contratoMapeado?.turma_aluno?.pendencia_pagamento);
-                const statusDocumento = contratoMapeado?.zapsign_document_status?.status || '';
-                const concluido = this.statusContratoEhConcluido(statusDocumento);
-
-                const matchBusca = !termoBusca || nomeAluno.includes(termoBusca) || emailAluno.includes(termoBusca);
-                const matchCanal = !canalVendaFiltro || canalVenda === canalVendaFiltro;
-                const matchPendencia = !somentePendenciaAtivo || pendenciaPagamento;
-                const matchStatus = !statusFiltro || statusFiltro === 'all' || (statusFiltro === 'completed' ? concluido : !concluido);
-                const matchTreinamentoOrigem =
-                    !filtroTreinamentoAtivo || !treinamentoOrigemFiltro || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemFiltro;
-                const matchTurmaOrigem = !filtroTreinamentoAtivo || !turmaOrigemFiltro || this.normalizarTexto(turmaOrigem) === turmaOrigemFiltro;
-
-                return matchBusca && matchCanal && matchPendencia && matchStatus && matchTreinamentoOrigem && matchTurmaOrigem;
-            });
 
             const obterQuantidadeInscricoesBonusResumo = (contratoMapeado: any): number => {
                 const camposVariaveis = contratoMapeado?.dados_contrato?.campos_variaveis || {};
@@ -3171,7 +3574,15 @@ export class DocumentosService {
                 return 0;
             };
 
-            const resumo = contratosFiltrados.reduce(
+            const contratosParaResumo = resumoRows.map((row) => ({
+                turma_aluno: {
+                    quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
+                    pendencia_pagamento: row.pendencia_pagamento === true || String(row.pendencia_pagamento).toLowerCase() === 'true',
+                },
+                dados_contrato: parseJsonSeguro(row.dados_contrato),
+            }));
+
+            const resumo = contratosParaResumo.reduce(
                 (acc, contratoMapeado) => {
                     const quantidadeInscricoes = Math.max(
                         1,
@@ -3203,10 +3614,63 @@ export class DocumentosService {
                     receita_total: 0,
                 },
             );
+            const dataPagina = contratosMapeados;
+            const idsCriadoresUnicos = Array.from(
+                new Set(
+                    dataPagina
+                        .flatMap((contrato) => [
+                            contrato.criado_por,
+                            contrato.criado_por_contrato,
+                            contrato.criado_por_turma_aluno_treinamento,
+                            contrato.criado_por_turma_aluno,
+                        ])
+                        .map((valor) => Number(valor))
+                        .filter((valor) => Number.isFinite(valor) && valor > 0),
+                ),
+            );
 
-            const total = contratosFiltrados.length;
-            const totalPages = Math.max(1, Math.ceil(total / limit));
-            const data = contratosFiltrados.slice(offset, offset + limit);
+            const nomeUsuarioPorId = new Map<number, string>();
+            if (idsCriadoresUnicos.length > 0) {
+                const usuarios = await this.uow.usuariosRP.find({
+                    where: {
+                        id: In(idsCriadoresUnicos),
+                        deletado_em: IsNull(),
+                    },
+                    select: {
+                        id: true,
+                        nome: true,
+                        primeiro_nome: true,
+                        sobrenome: true,
+                    },
+                });
+
+                usuarios.forEach((usuario) => {
+                    const nomeCompleto = usuario.nome || `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() || `Usuário ${usuario.id}`;
+                    nomeUsuarioPorId.set(usuario.id, nomeCompleto);
+                });
+            }
+
+            const obterNomePorId = (valor?: number | string | null): string | null => {
+                if (valor === null || valor === undefined) return null;
+                const id = Number(valor);
+                if (!Number.isFinite(id) || id <= 0) return null;
+                return nomeUsuarioPorId.get(id) || null;
+            };
+
+            const data = dataPagina.map((contratoMapeado) => ({
+                ...contratoMapeado,
+                criado_por_nome: obterNomePorId(contratoMapeado.criado_por),
+                criado_por_contrato_nome: obterNomePorId(contratoMapeado.criado_por_contrato),
+                criado_por_turma_aluno_treinamento_nome: obterNomePorId(contratoMapeado.criado_por_turma_aluno_treinamento),
+                criado_por_turma_aluno_nome: obterNomePorId(contratoMapeado.criado_por_turma_aluno),
+                criado_por_confronto: {
+                    ...contratoMapeado.criado_por_confronto,
+                    consolidado_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.consolidado),
+                    contrato_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.contrato),
+                    turma_aluno_treinamento_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.turma_aluno_treinamento),
+                    turma_aluno_nome: obterNomePorId(contratoMapeado.criado_por_confronto?.turma_aluno),
+                },
+            }));
 
             const resultado = {
                 data,
@@ -3216,6 +3680,17 @@ export class DocumentosService {
                 totalPages,
                 resumo,
             };
+
+            this.contratosBancoCache.set(chaveCache, {
+                expiresAt: Date.now() + this.contratosBancoCacheTtlMs,
+                value: resultado,
+            });
+            if (this.contratosBancoCache.size > this.contratosBancoCacheMaxEntradas) {
+                const chaveMaisAntiga = this.contratosBancoCache.keys().next().value;
+                if (chaveMaisAntiga) {
+                    this.contratosBancoCache.delete(chaveMaisAntiga);
+                }
+            }
 
             this.logger.debug(`contract.repo.list | Listagem concluída total=${total} pagina=${page} limite=${limit}`);
             return resultado;
@@ -3808,6 +4283,62 @@ export class DocumentosService {
             this.logger.error('zapsign.sync | Erro ao sincronizar todos os status', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao sincronizar status: ${error.message || 'Erro desconhecido'}`);
         }
+    }
+
+    @Cron('*/20 * * * *')
+    async sincronizarStatusZapSignCron(): Promise<void> {
+        if (this.sincronizacaoStatusCronEmExecucao) {
+            this.logger.warn('zapsign.sync.cron | Execução anterior ainda em andamento, pulando ciclo');
+            return;
+        }
+
+        this.sincronizacaoStatusCronEmExecucao = true;
+
+        try {
+            const resultado = await this.sincronizarStatusContratosPendentesRecentesZapSign(this.janelaCronSincronizacaoDias);
+            this.logger.log(
+                `zapsign.sync.cron | Concluído em janela=${this.janelaCronSincronizacaoDias}d sincronizados=${resultado.sincronizados} erros=${resultado.erros}`,
+            );
+        } catch (error) {
+            this.logger.error('zapsign.sync.cron | Erro ao executar sincronização automática', error instanceof Error ? error.stack : undefined);
+        } finally {
+            this.sincronizacaoStatusCronEmExecucao = false;
+        }
+    }
+
+    private async sincronizarStatusContratosPendentesRecentesZapSign(janelaDias: number): Promise<{
+        sincronizados: number;
+        erros: number;
+    }> {
+        const dataLimite = new Date();
+        dataLimite.setDate(dataLimite.getDate() - janelaDias);
+
+        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+            where: {
+                zapsign_document_id: Not(IsNull()),
+                deletado_em: null,
+                criado_em: Between(dataLimite, new Date()),
+                status_ass_aluno: Not(EStatusAssinaturasContratos.ASSINADO),
+            },
+        });
+
+        let sincronizados = 0;
+        let erros = 0;
+
+        for (const contrato of contratos) {
+            try {
+                await this.sincronizarStatusZapSign(contrato.id);
+                sincronizados++;
+            } catch (error) {
+                this.logger.warn(`zapsign.sync.cron | Erro ao sincronizar contrato id=${contrato.id}`, error instanceof Error ? error.message : undefined);
+                erros++;
+            }
+        }
+
+        return {
+            sincronizados,
+            erros,
+        };
     }
 
     private async generateTermPDF(templateData: any): Promise<Buffer> {

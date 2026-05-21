@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, UseGuards, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe, UseGuards, Req, Res, Logger } from '@nestjs/common';
 import { ClassSerializerInterceptor, UseInterceptors } from '@nestjs/common';
 import { DocumentosService } from './documentos.service';
 import {
@@ -19,6 +19,7 @@ import { EFormasPagamento } from '@/modules/config/entities/enum';
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('documentos')
 export class DocumentosController {
+    private readonly logger = new Logger(DocumentosController.name);
     constructor(private readonly documentosService: DocumentosService) {}
 
     @Post()
@@ -209,23 +210,6 @@ export class DocumentosController {
         @Query('treinamento_origem') treinamento_origem?: string,
         @Query('turma_origem') turma_origem?: string,
     ) {
-        console.log('=== ENDPOINT PÚBLICO CHAMADO ===');
-        console.log('Query params:', {
-            page,
-            limit,
-            id_aluno,
-            id_treinamento,
-            status,
-            data_inicio,
-            data_fim,
-            search,
-            canal_venda,
-            somente_com_pendencia,
-            tipo_filtro_busca,
-            treinamento_origem,
-            turma_origem,
-        });
-
         const filtros = {
             page: page ? parseInt(page) : 1,
             limit: limit ? parseInt(limit) : 10,
@@ -242,14 +226,14 @@ export class DocumentosController {
             turma_origem,
         };
 
-        console.log('Filtros processados:', filtros);
-
         try {
             const resultado = await this.documentosService.listarContratosBanco(filtros);
-            console.log('Resultado do serviço:', resultado);
+            this.logger.debug(
+                `contract.public.list | page=${filtros.page} limit=${filtros.limit} total=${resultado.total} returned=${resultado.data.length}`,
+            );
             return resultado;
         } catch (error) {
-            console.error('Erro no controller:', error);
+            this.logger.error('contract.public.list | Erro ao listar contratos do banco', error instanceof Error ? error.stack : undefined);
             throw error;
         }
     }
@@ -275,6 +259,16 @@ export class DocumentosController {
             treinamento_origem,
             tipo_filtro_busca,
         });
+    }
+
+    @Post('admin/cache/historico/clear')
+    @UseGuards(JwtAuthGuard)
+    limparCachesHistorico() {
+        const resultado = this.documentosService.limparCachesHistorico();
+        return {
+            message: 'Caches do histórico invalidados com sucesso.',
+            ...resultado,
+        };
     }
 
     // Endpoint para buscar contrato completo (para compatibilidade com frontend)

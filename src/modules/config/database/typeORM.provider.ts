@@ -12,6 +12,14 @@ const parseNumberEnv = (value: string | undefined, fallback: number): number => 
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const parseBooleanEnv = (value: string | undefined, fallback: boolean): boolean => {
+    if (value === undefined) return fallback;
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return fallback;
+};
+
 const buildDataSourceOptions = ({
     host,
     port,
@@ -36,7 +44,7 @@ const buildDataSourceOptions = ({
     database,
     synchronize: true,
     schema,
-    logging: true,
+    logging: parseBooleanEnv(process.env.TYPEORM_LOGGING, false),
     migrationsRun: true,
     migrationsTransactionMode: 'each', // cada migration em sua própria transação (evita erro 55P04 com enum no PostgreSQL)
     entities: [path.join(__dirname, '../entities/*.entity{.ts,.js}')],

@@ -3305,7 +3305,7 @@ export class DocumentosService {
                     if (!turmaOrigemEvento && idTurmaAlunoContrato) {
                         turmaOrigemEvento = cacheTurmaOrigemPorTurmaAluno.get(idTurmaAlunoContrato) || null;
                     }
-
+''
                     // Para vendas de Confronto com bônus de IPR, a origem deve refletir
                     // a turma IPR de compra (não a turma bônus ofertada).
                     if (!turmaOrigemEvento && idAlunoContrato > 0) {

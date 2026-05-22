@@ -2026,6 +2026,98 @@ export class TurmasService {
                 take: limit,
             });
 
+            const turmaAlunoIds = turmasAlunos.map((item) => item.id);
+            const canalIngressoPorTurmaAlunoId = new Map<
+                string,
+                'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO'
+            >();
+
+            if (turmaAlunoIds.length > 0) {
+                const canaisRaw = await this.uow.turmasAlunosRP
+                    .createQueryBuilder('ta')
+                    .select('ta.id', 'id_turma_aluno')
+                    .addSelect(
+                        `(EXISTS (
+                            SELECT 1
+                            FROM historico_transferencias_alunos h
+                            WHERE h.id_turma_aluno_para = ta.id
+                              AND h.id_turma_para = :id_turma
+                              AND h.id_turma_de = :id_turma
+                              AND h.deletado_em IS NULL
+                        ))`,
+                        'hist_time_vendas',
+                    )
+                    .addSelect(
+                        `(
+                            COALESCE((
+                                SELECT (
+                                    (tr.tipo_palestra = true OR tr.tipo_treinamento = false)
+                                    OR (
+                                        t_de.edicao_turma IS NOT NULL
+                                        AND LEFT(UPPER(TRIM(t_de.edicao_turma)), 3) = 'MC_'
+                                    )
+                                )
+                                FROM historico_transferencias_alunos h
+                                INNER JOIN turmas t_de ON t_de.id = h.id_turma_de
+                                INNER JOIN treinamentos tr ON tr.id = t_de.id_treinamento
+                                WHERE h.id_turma_aluno_para = ta.id
+                                  AND h.id_turma_para = :id_turma
+                                  AND h.id_turma_de <> :id_turma
+                                  AND h.deletado_em IS NULL
+                                ORDER BY h.id DESC
+                                LIMIT 1
+                            ), false)
+                            OR (
+                                ta.id_turma_transferencia_de IS NOT NULL
+                                AND EXISTS (
+                                    SELECT 1
+                                    FROM turmas t_td
+                                    INNER JOIN treinamentos tr_td ON tr_td.id = t_td.id_treinamento
+                                    WHERE t_td.id = ta.id_turma_transferencia_de
+                                      AND t_td.deletado_em IS NULL
+                                      AND (
+                                          tr_td.tipo_palestra = true
+                                          OR tr_td.tipo_treinamento = false
+                                          OR (
+                                              t_td.edicao_turma IS NOT NULL
+                                              AND LEFT(UPPER(TRIM(t_td.edicao_turma)), 3) = 'MC_'
+                                          )
+                                      )
+                                )
+                            )
+                            OR (
+                                ta.codigo_turma_origem_planilha IS NOT NULL
+                                AND LEFT(UPPER(TRIM(ta.codigo_turma_origem_planilha)), 3) = 'MC_'
+                            )
+                        )`,
+                        'origem_turma_eh_palestra_ou_masterclass',
+                    )
+                    .where('ta.id_turma = :id_turma', { id_turma })
+                    .andWhere('ta.id IN (:...turmaAlunoIds)', { turmaAlunoIds })
+                    .andWhere('ta.deletado_em IS NULL')
+                    .setParameter('id_turma', id_turma)
+                    .getRawMany();
+
+                const isTruthyPgBool = (v: unknown): boolean =>
+                    v === true || v === 'true' || v === 't' || v === 1 || v === '1';
+
+                for (const row of canaisRaw) {
+                    const idTurmaAluno = String(row.id_turma_aluno);
+                    if (isTruthyPgBool(row.hist_time_vendas)) {
+                        canalIngressoPorTurmaAlunoId.set(idTurmaAluno, 'TIME_VENDAS');
+                        continue;
+                    }
+                    if (isTruthyPgBool(row.origem_turma_eh_palestra_ou_masterclass)) {
+                        canalIngressoPorTurmaAlunoId.set(idTurmaAluno, 'MASTERCLASS');
+                        continue;
+                    }
+                    canalIngressoPorTurmaAlunoId.set(
+                        idTurmaAluno,
+                        'DEMAIS_IMPORTACAO',
+                    );
+                }
+            }
+
             const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => ({
                 id: turmaAluno.id,
                 id_turma: turmaAluno.id_turma,
@@ -2034,6 +2126,11 @@ export class TurmasService {
                 numero_cracha: turmaAluno.numero_cracha,
                 vaga_bonus: turmaAluno.vaga_bonus,
                 origem_aluno: turmaAluno.origem_aluno ?? undefined,
+                origem_canal_ingresso:
+                    turmaAluno.origem_aluno === EOrigemAlunos.COMPROU_INGRESSO
+                        ? canalIngressoPorTurmaAlunoId.get(turmaAluno.id) ||
+                          'DEMAIS_IMPORTACAO'
+                        : undefined,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
                 presenca_turma: turmaAluno.presenca_turma,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,

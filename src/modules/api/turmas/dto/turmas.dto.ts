@@ -627,6 +627,8 @@ export class AlunoTurmaResponseDto {
     numero_cracha: string;
     vaga_bonus: boolean;
     origem_aluno?: string;
+    /** Distinção de canal para origem COMPROU_INGRESSO */
+    origem_canal_ingresso?: 'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO';
     status_aluno_turma?: string;
     presenca_turma?: string;
     ficha_preenchida?: boolean;

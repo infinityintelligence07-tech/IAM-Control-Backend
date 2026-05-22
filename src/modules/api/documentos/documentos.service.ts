@@ -2340,9 +2340,11 @@ export class DocumentosService {
     }
 
     private extrairTreinamentoOrigemServidor(contrato: any): string {
+        const dadosContrato = contrato?.dados_contrato || {};
         const camposVariaveis = contrato?.dados_contrato?.campos_variaveis || {};
         return (
             (contrato?.fluxo_evento_origem_treinamento || '').trim() ||
+            String(dadosContrato?.fluxo_evento_origem_treinamento || '').trim() ||
             camposVariaveis['Treinamento de Origem'] ||
             camposVariaveis['Treinamento Origem'] ||
             camposVariaveis['Treinamento de Entrada'] ||
@@ -2351,8 +2353,15 @@ export class DocumentosService {
     }
 
     private extrairTurmaOrigemServidor(contrato: any): string {
+        const dadosContrato = contrato?.dados_contrato || {};
         const camposVariaveis = contrato?.dados_contrato?.campos_variaveis || {};
-        return (contrato?.fluxo_evento_origem_turma || '').trim() || camposVariaveis['Turma de Origem'] || camposVariaveis['Turma Origem'] || '';
+        return (
+            (contrato?.fluxo_evento_origem_turma || '').trim() ||
+            String(dadosContrato?.fluxo_evento_origem_turma || '').trim() ||
+            camposVariaveis['Turma de Origem'] ||
+            camposVariaveis['Turma Origem'] ||
+            ''
+        );
     }
 
     private statusContratoEhConcluido(status?: string | null): boolean {
@@ -2552,6 +2561,57 @@ export class DocumentosService {
         const canalVendaFiltro = filtros?.canal_venda || '';
         const somentePendenciaAtivo = filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
         const statusFiltro = this.normalizarTexto(filtros?.status);
+        const normalizarComparacao = (valor?: string | null): string =>
+            String(valor || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim();
+        const treinamentosExcluidos = ['missao governar', 'liberty begin', 'liberty', 'imersao de negocios'];
+        const termosTurmaInvalidos = ['cancelad', 'inadimplente', 'sem turma'];
+        const treinamentoEhExcluido = (treinamento?: string | null): boolean => {
+            const nome = normalizarComparacao(treinamento);
+            return treinamentosExcluidos.some((termo) => nome.includes(termo));
+        };
+        const turmaEhInvalida = (turma?: string | null): boolean => {
+            const nome = normalizarComparacao(turma);
+            return !nome || termosTurmaInvalidos.some((termo) => nome.includes(termo));
+        };
+        const idsTurmaOrigemViaDadosContrato = Array.from(
+            new Set(
+                contratos
+                    .map((contrato) => {
+                        const dadosContrato = (contrato as any)?.dados_contrato || {};
+                        return Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0);
+                    })
+                    .filter((id) => Number.isFinite(id) && id > 0),
+            ),
+        );
+        const turmasOrigemPorId = new Map<
+            number,
+            {
+                treinamento: string;
+                turma: string;
+            }
+        >();
+        if (idsTurmaOrigemViaDadosContrato.length > 0) {
+            const turmasOrigemViaDadosContrato = await this.uow.turmasRP.find({
+                where: {
+                    id: In(idsTurmaOrigemViaDadosContrato),
+                    deletado_em: IsNull(),
+                },
+                relations: ['id_treinamento_fk'],
+            });
+            turmasOrigemViaDadosContrato.forEach((turma) => {
+                const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
+                const edicao = String(turma?.edicao_turma || '').trim();
+                const turmaFormatada = treinamento && edicao ? `${treinamento} - ${edicao}` : treinamento;
+                turmasOrigemPorId.set(turma.id, {
+                    treinamento,
+                    turma: turmaFormatada,
+                });
+            });
+        }
 
         const treinamentos = new Set<string>();
         const turmas = new Set<string>();
@@ -2562,19 +2622,11 @@ export class DocumentosService {
             const alunoRelacao = turmaAluno?.id_aluno_fk;
             const dadosContrato = contratoAny?.dados_contrato || {};
             const camposVariaveis = dadosContrato?.campos_variaveis || {};
-            const turmaRelacionada = turmaAluno?.id_turma_fk;
-            const treinamentoOrigemFallback = String(
-                turmaRelacionada?.id_treinamento_fk?.treinamento || contratoAny?.id_turma_aluno_treinamento_fk?.id_treinamento_fk?.treinamento || '',
-            ).trim();
-            const turmaOrigemFallback = (() => {
-                const edicao = String(turmaRelacionada?.edicao_turma || '').trim();
-                if (treinamentoOrigemFallback && edicao) {
-                    return `${treinamentoOrigemFallback} - ${edicao}`;
-                }
-                return treinamentoOrigemFallback;
-            })();
-            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || treinamentoOrigemFallback || '').trim();
-            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || turmaOrigemFallback || '').trim();
+            const idTurmaOrigemViaDadosContrato =
+                Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0) || 0;
+            const fallbackViaId = turmasOrigemPorId.get(idTurmaOrigemViaDadosContrato);
+            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || fallbackViaId?.treinamento || '').trim();
+            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || fallbackViaId?.turma || '').trim();
             const nomeAluno = this.normalizarTexto(alunoRelacao?.nome || dadosContrato?.aluno?.nome);
             const emailAluno = this.normalizarTexto(alunoRelacao?.email || dadosContrato?.aluno?.email);
             const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento || dadosContrato?.turma_aluno?.pendencia_pagamento);
@@ -2590,22 +2642,78 @@ export class DocumentosService {
                 return;
             }
 
-            if (treinamentoOrigem) {
+            if (treinamentoOrigem && !treinamentoEhExcluido(treinamentoOrigem)) {
                 treinamentos.add(treinamentoOrigem);
             }
 
-            if (turmaOrigem && (!treinamentoOrigemSelecionado || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemSelecionado)) {
+            if (
+                turmaOrigem &&
+                !turmaEhInvalida(turmaOrigem) &&
+                !treinamentoEhExcluido(treinamentoOrigem) &&
+                (!treinamentoOrigemSelecionado || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemSelecionado)
+            ) {
                 turmas.add(turmaOrigem);
             }
         });
 
+        // Completa o autocomplete com turmas ativas de outros treinamentos
+        // (não depender apenas dos contratos que já possuem snapshot de origem).
+        const turmasGerais = await this.uow.turmasRP.find({
+            where: {
+                deletado_em: IsNull(),
+            },
+            relations: ['id_treinamento_fk'],
+        });
+        turmasGerais.forEach((turma) => {
+            const nomeTreinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
+            const edicao = String(turma?.edicao_turma || '').trim();
+            const turmaFormatada = nomeTreinamento && edicao ? `${nomeTreinamento} - ${edicao}` : '';
+            if (!nomeTreinamento || !edicao) return;
+            if (treinamentoEhExcluido(nomeTreinamento)) return;
+            if (turmaEhInvalida(turmaFormatada)) return;
+            if (treinamentoOrigemSelecionado && this.normalizarTexto(nomeTreinamento) !== treinamentoOrigemSelecionado) return;
+            treinamentos.add(nomeTreinamento);
+            turmas.add(turmaFormatada);
+        });
+
         const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        const extrairPartesTurma = (valor: string): { treinamento: string; edicaoTexto: string; edicaoNumero: number } => {
+            const partes = String(valor || '')
+                .split(' - ')
+                .map((parte) => parte.trim())
+                .filter(Boolean);
+            if (partes.length <= 1) {
+                const texto = String(valor || '').trim();
+                return {
+                    treinamento: texto,
+                    edicaoTexto: '',
+                    edicaoNumero: Number.MAX_SAFE_INTEGER,
+                };
+            }
+            const edicaoTexto = partes[partes.length - 1];
+            const treinamento = partes.slice(0, -1).join(' - ');
+            const numeroEdicao = edicaoTexto.match(/\d+/)?.[0];
+            return {
+                treinamento,
+                edicaoTexto,
+                edicaoNumero: numeroEdicao ? parseInt(numeroEdicao, 10) : Number.MAX_SAFE_INTEGER,
+            };
+        };
         const turmasOrdenadas = Array.from(turmas).sort((a, b) => {
-            const edicaoA = a.match(/-\s*(\d+)\s*$/);
-            const edicaoB = b.match(/-\s*(\d+)\s*$/);
-            const valorA = edicaoA ? parseInt(edicaoA[1], 10) : Number.MAX_SAFE_INTEGER;
-            const valorB = edicaoB ? parseInt(edicaoB[1], 10) : Number.MAX_SAFE_INTEGER;
-            if (valorA !== valorB) return valorA - valorB;
+            const turmaA = extrairPartesTurma(a);
+            const turmaB = extrairPartesTurma(b);
+            const comparacaoTreinamento = turmaA.treinamento.localeCompare(turmaB.treinamento, 'pt-BR', {
+                sensitivity: 'base',
+            });
+            if (comparacaoTreinamento !== 0) return comparacaoTreinamento;
+            if (turmaA.edicaoNumero !== turmaB.edicaoNumero) {
+                return turmaA.edicaoNumero - turmaB.edicaoNumero;
+            }
+            const comparacaoEdicaoTexto = turmaA.edicaoTexto.localeCompare(turmaB.edicaoTexto, 'pt-BR', {
+                sensitivity: 'base',
+                numeric: true,
+            });
+            if (comparacaoEdicaoTexto !== 0) return comparacaoEdicaoTexto;
             return a.localeCompare(b, 'pt-BR');
         });
 
@@ -2688,22 +2796,29 @@ export class DocumentosService {
             const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
+            const idTurmaOrigemDadosContratoSql = `NULLIF(COALESCE(
+                contrato.dados_contrato->>'fluxo_evento_origem_id_turma',
+                contrato.dados_contrato->>'id_turma_origem',
+                contrato.dados_contrato->'turma_origem'->>'id',
+                ''
+            ), '')::int`;
 
             const treinamentoOrigemSql = `LOWER(TRIM(COALESCE(
+                NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_treinamento', ''),
+                NULLIF(treinamento_origem_evento.treinamento, ''),
                 NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Origem', ''),
                 NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento Origem', ''),
                 NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Entrada', ''),
-                NULLIF(treinamento_tat.treinamento, ''),
-                NULLIF(treinamento_destino.treinamento, ''),
                 ''
             )))`;
             const turmaOrigemSql = `LOWER(TRIM(COALESCE(
+                NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_turma', ''),
                 NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Origem', ''),
                 NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Origem', ''),
                 CASE
-                    WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
-                        THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
-                    ELSE treinamento_destino.treinamento
+                    WHEN treinamento_origem_evento.treinamento IS NOT NULL AND turma_origem_evento.edicao_turma IS NOT NULL
+                        THEN CONCAT(treinamento_origem_evento.treinamento, ' - ', turma_origem_evento.edicao_turma)
+                    ELSE treinamento_origem_evento.treinamento
                 END,
                 ''
             )))`;
@@ -2730,6 +2845,8 @@ export class DocumentosService {
                 .leftJoin('ta.id_turma_fk', 'turma_destino')
                 .leftJoin('turma_destino.id_treinamento_fk', 'treinamento_destino')
                 .leftJoin('tat.id_treinamento_fk', 'treinamento_tat')
+                .leftJoin(Turmas, 'turma_origem_evento', `turma_origem_evento.id = ${idTurmaOrigemDadosContratoSql}`)
+                .leftJoin('turma_origem_evento.id_treinamento_fk', 'treinamento_origem_evento')
                 .where('contrato.deletado_em IS NULL');
 
             if (aplicarFiltroPeriodo) {

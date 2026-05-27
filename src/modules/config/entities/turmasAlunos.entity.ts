@@ -50,6 +50,12 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'enum', enum: EStatusAlunosTurmas, enumName: 'EStatusAlunosTurmas', name: 'status_aluno_turma', nullable: true })
     status_aluno_turma: EStatusAlunosTurmas;
 
+    @Column({ type: 'boolean', name: 'confirmacao_realizada', default: false, nullable: false })
+    confirmacao_realizada: boolean;
+
+    @Column({ type: 'boolean', name: 'checkin_realizado', default: false, nullable: false })
+    checkin_realizado: boolean;
+
     @Column({ type: 'varchar', name: 'nome_cracha', nullable: false })
     nome_cracha: string;
 

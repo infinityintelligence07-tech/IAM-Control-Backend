@@ -543,6 +543,14 @@ export class UpdateAlunoTurmaDto {
     @IsOptional()
     @IsString()
     atualizado_em?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    confirmacao_realizada?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    checkin_realizado?: boolean;
 }
 
 export class TurmaResponseDto {
@@ -630,6 +638,8 @@ export class AlunoTurmaResponseDto {
     /** Distinção de canal para origem COMPROU_INGRESSO */
     origem_canal_ingresso?: 'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO';
     status_aluno_turma?: string;
+    confirmacao_realizada?: boolean;
+    checkin_realizado?: boolean;
     presenca_turma?: string;
     ficha_preenchida?: boolean;
     url_comprovante_pgto?: string;
@@ -781,6 +791,8 @@ export class TurmaStatusResumoResponseDto {
     transferidos_de_outra_turma_para_essa: number;
     falta_enviar_confirmacao: number;
     aguardando_confirmacao: number;
+    /** Confirmado = passou da etapa de confirmação (aguardando check-in + check-in realizado). */
+    confirmados: number;
     falta_enviar_checkin: number;
     aguardando_checkin: number;
     checkin_realizado: number;
@@ -796,6 +808,8 @@ export class TurmaStatusAlunosItemDto {
     email: string;
     telefone: string | null;
     status_aluno_turma: EStatusAlunosTurmas | null;
+    confirmacao_realizada?: boolean;
+    checkin_realizado?: boolean;
     transferencia_direcao?: 'Transferido De' | 'Transferido Para' | null;
     transferencia_turma_relacionada?: string | null;
 }

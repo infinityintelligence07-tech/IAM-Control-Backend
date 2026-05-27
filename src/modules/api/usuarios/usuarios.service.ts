@@ -1,13 +1,27 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
-import { ILike, IsNull, Not, ArrayContains } from 'typeorm';
+import { ILike, IsNull, Not, ArrayContains, Raw } from 'typeorm';
 import { Usuarios } from '../../config/entities/usuarios.entity';
 import { ESetores, EFuncoes } from '../../config/entities/enum';
 
 @Injectable()
 export class UsuariosService {
     constructor(private readonly uow: UnitOfWorkService) {}
+    private readonly sourceAccents = 'áàâãäéèêëíìîïóòôõöúùûüçñýÿ';
+    private readonly targetAccents = 'aaaaaeeeeiiiiooooouuuucnyy';
+
+    private normalizeTextForSearch(value: string): string {
+        return value
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '');
+    }
+
+    private buildNormalizedContainsQuery(alias: string): string {
+        return `regexp_replace(translate(lower(${alias}), '${this.sourceAccents}', '${this.targetAccents}'), '[^a-z0-9]', '', 'g')`;
+    }
 
     async findAll(filters: GetUsuariosDto): Promise<UsuariosListResponseDto> {
         const { page = 1, limit = 10, nome, email, setor, funcao } = filters;
@@ -20,11 +34,27 @@ export class UsuariosService {
         };
 
         if (nome) {
-            whereConditions.nome = ILike(`%${nome}%`);
+            const normalizedNome = this.normalizeTextForSearch(nome);
+
+            if (normalizedNome) {
+                whereConditions.nome = Raw(
+                    (alias) =>
+                        `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedNome`,
+                    { normalizedNome: `%${normalizedNome}%` },
+                );
+            }
         }
 
         if (email) {
-            whereConditions.email = ILike(`%${email}%`);
+            const normalizedEmail = this.normalizeTextForSearch(email);
+
+            if (normalizedEmail) {
+                whereConditions.email = Raw(
+                    (alias) =>
+                        `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedEmail`,
+                    { normalizedEmail: `%${normalizedEmail}%` },
+                );
+            }
         }
 
         if (setor) {

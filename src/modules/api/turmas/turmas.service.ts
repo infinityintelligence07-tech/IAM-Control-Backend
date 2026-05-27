@@ -362,6 +362,20 @@ export class TurmasService {
         return [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN].includes(turmaAluno.status_aluno_turma as EStatusAlunosTurmas);
     }
 
+    private buildConfirmacaoCheckinFlags(
+        statusAlunoTurma?: EStatusAlunosTurmas | null,
+        presencaTurma?: EPresencaTurmas | null,
+    ): { confirmacao_realizada: boolean; checkin_realizado: boolean } {
+        const checkinRealizado = statusAlunoTurma === EStatusAlunosTurmas.CHECKIN_REALIZADO || presencaTurma === EPresencaTurmas.PRESENTE;
+
+        const confirmacaoRealizada = checkinRealizado || statusAlunoTurma === EStatusAlunosTurmas.AGUARDANDO_CHECKIN;
+
+        return {
+            confirmacao_realizada: confirmacaoRealizada,
+            checkin_realizado: checkinRealizado,
+        };
+    }
+
     private isInscricaoExtraNaTurma(turmaAluno: any): boolean {
         if (!turmaAluno) return false;
 
@@ -1294,6 +1308,8 @@ export class TurmasService {
                 numero_cracha: turmaAluno.numero_cracha,
                 vaga_bonus: turmaAluno.vaga_bonus,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
+                confirmacao_realizada: turmaAluno.confirmacao_realizada,
+                checkin_realizado: turmaAluno.checkin_realizado,
                 presenca_turma: turmaAluno.presenca_turma,
                 transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
                 transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
@@ -2027,10 +2043,7 @@ export class TurmasService {
             });
 
             const turmaAlunoIds = turmasAlunos.map((item) => item.id);
-            const canalIngressoPorTurmaAlunoId = new Map<
-                string,
-                'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO'
-            >();
+            const canalIngressoPorTurmaAlunoId = new Map<string, 'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO'>();
 
             if (turmaAlunoIds.length > 0) {
                 const canaisRaw = await this.uow.turmasAlunosRP
@@ -2098,8 +2111,7 @@ export class TurmasService {
                     .setParameter('id_turma', id_turma)
                     .getRawMany();
 
-                const isTruthyPgBool = (v: unknown): boolean =>
-                    v === true || v === 'true' || v === 't' || v === 1 || v === '1';
+                const isTruthyPgBool = (v: unknown): boolean => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
 
                 for (const row of canaisRaw) {
                     const idTurmaAluno = String(row.id_turma_aluno);
@@ -2111,10 +2123,7 @@ export class TurmasService {
                         canalIngressoPorTurmaAlunoId.set(idTurmaAluno, 'MASTERCLASS');
                         continue;
                     }
-                    canalIngressoPorTurmaAlunoId.set(
-                        idTurmaAluno,
-                        'DEMAIS_IMPORTACAO',
-                    );
+                    canalIngressoPorTurmaAlunoId.set(idTurmaAluno, 'DEMAIS_IMPORTACAO');
                 }
             }
 
@@ -2127,11 +2136,10 @@ export class TurmasService {
                 vaga_bonus: turmaAluno.vaga_bonus,
                 origem_aluno: turmaAluno.origem_aluno ?? undefined,
                 origem_canal_ingresso:
-                    turmaAluno.origem_aluno === EOrigemAlunos.COMPROU_INGRESSO
-                        ? canalIngressoPorTurmaAlunoId.get(turmaAluno.id) ||
-                          'DEMAIS_IMPORTACAO'
-                        : undefined,
+                    turmaAluno.origem_aluno === EOrigemAlunos.COMPROU_INGRESSO ? canalIngressoPorTurmaAlunoId.get(turmaAluno.id) || 'DEMAIS_IMPORTACAO' : undefined,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
+                confirmacao_realizada: turmaAluno.confirmacao_realizada,
+                checkin_realizado: turmaAluno.checkin_realizado,
                 presenca_turma: turmaAluno.presenca_turma,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 pendencia_pagamento: turmaAluno.pendencia_pagamento ?? undefined,
@@ -2234,6 +2242,7 @@ export class TurmasService {
                 vaga_bonus: addAlunoDto.vaga_bonus || false,
                 origem_aluno: (addAlunoDto.origem_aluno as EOrigemAlunos) || EOrigemAlunos.COMPROU_INGRESSO,
                 status_aluno_turma: addAlunoDto.status_aluno_turma || EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
+                ...this.buildConfirmacaoCheckinFlags(addAlunoDto.status_aluno_turma || EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO, null),
                 ...(addAlunoDto.id_aluno_bonus && { id_aluno_bonus: addAlunoDto.id_aluno_bonus }),
                 ...(addAlunoDto.pendencia_pagamento !== undefined && { pendencia_pagamento: addAlunoDto.pendencia_pagamento }),
                 ...(addAlunoDto.quantidade_inscricoes !== undefined && { quantidade_inscricoes: addAlunoDto.quantidade_inscricoes }),
@@ -2270,6 +2279,8 @@ export class TurmasService {
                 nome_cracha: turmaAlunoCompleta.nome_cracha,
                 numero_cracha: turmaAlunoCompleta.numero_cracha,
                 vaga_bonus: turmaAlunoCompleta.vaga_bonus,
+                confirmacao_realizada: turmaAlunoCompleta.confirmacao_realizada,
+                checkin_realizado: turmaAlunoCompleta.checkin_realizado,
                 pendencia_pagamento: turmaAlunoCompleta.pendencia_pagamento,
                 quantidade_inscricoes: turmaAlunoCompleta.quantidade_inscricoes ?? 1,
                 outros_clientes: turmaAlunoCompleta.outros_clientes ?? [],
@@ -2431,6 +2442,8 @@ export class TurmasService {
                 vaga_bonus: matriculaDestinoCompleta.vaga_bonus,
                 origem_aluno: matriculaDestinoCompleta.origem_aluno,
                 status_aluno_turma: matriculaDestinoCompleta.status_aluno_turma,
+                confirmacao_realizada: matriculaDestinoCompleta.confirmacao_realizada,
+                checkin_realizado: matriculaDestinoCompleta.checkin_realizado,
                 presenca_turma: matriculaDestinoCompleta.presenca_turma,
                 url_comprovante_pgto: matriculaDestinoCompleta.url_comprovante_pgto,
                 pendencia_pagamento: matriculaDestinoCompleta.pendencia_pagamento,
@@ -2472,6 +2485,8 @@ export class TurmasService {
             jaNaTurmaDestino.id_turma_transferencia_de = jaNaTurmaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
             jaNaTurmaDestino.nome_cracha = jaNaTurmaDestino.nome_cracha || nomeCracha;
             jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
+            jaNaTurmaDestino.confirmacao_realizada = false;
+            jaNaTurmaDestino.checkin_realizado = false;
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(jaNaTurmaDestino);
         } else {
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
@@ -2483,6 +2498,8 @@ export class TurmasService {
                 vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
                 origem_aluno: EOrigemAlunos.TRANSFERENCIA,
                 status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
+                confirmacao_realizada: false,
+                checkin_realizado: false,
                 id_turma_transferencia_de: idTurmaOrigemHistorica,
             });
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
@@ -2515,6 +2532,8 @@ export class TurmasService {
             numero_cracha: turmaAlunoCompleta.numero_cracha,
             vaga_bonus: turmaAlunoCompleta.vaga_bonus,
             status_aluno_turma: turmaAlunoCompleta.status_aluno_turma,
+            confirmacao_realizada: turmaAlunoCompleta.confirmacao_realizada,
+            checkin_realizado: turmaAlunoCompleta.checkin_realizado,
             presenca_turma: turmaAlunoCompleta.presenca_turma,
             url_comprovante_pgto: turmaAlunoCompleta.url_comprovante_pgto,
             pendencia_pagamento: turmaAlunoCompleta.pendencia_pagamento,
@@ -2711,6 +2730,8 @@ export class TurmasService {
                 vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
                 origem_aluno: turmaAlunoOrigem.origem_aluno,
                 status_aluno_turma: EStatusAlunosTurmas.CANCELADO,
+                confirmacao_realizada: false,
+                checkin_realizado: false,
                 presenca_turma: null,
                 pendencia_pagamento: turmaAlunoOrigem.pendencia_pagamento,
                 quantidade_inscricoes: turmaAlunoOrigem.quantidade_inscricoes ?? 1,
@@ -2721,6 +2742,8 @@ export class TurmasService {
             });
         } else {
             matriculaDestino.status_aluno_turma = EStatusAlunosTurmas.CANCELADO;
+            matriculaDestino.confirmacao_realizada = false;
+            matriculaDestino.checkin_realizado = false;
             matriculaDestino.presenca_turma = null;
             matriculaDestino.id_turma_transferencia_de = matriculaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
         }
@@ -3019,6 +3042,7 @@ export class TurmasService {
             transferidos_de_outra_turma_para_essa: transferidosDeOutraTurmaParaEssa,
             falta_enviar_confirmacao: statusCounts[EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO] || 0,
             aguardando_confirmacao: statusCounts[EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO] || 0,
+            confirmados: (statusCounts[EStatusAlunosTurmas.AGUARDANDO_CHECKIN] ?? 0) + (statusCounts[EStatusAlunosTurmas.CHECKIN_REALIZADO] ?? 0),
             falta_enviar_checkin: statusCounts.FALTA_ENVIAR_LINK_CHECKIN || 0,
             aguardando_checkin: statusCounts[EStatusAlunosTurmas.AGUARDANDO_CHECKIN] || 0,
             checkin_realizado: statusCounts[EStatusAlunosTurmas.CHECKIN_REALIZADO] || 0,
@@ -3045,6 +3069,8 @@ export class TurmasService {
             .addSelect('aluno.email', 'email')
             .addSelect('aluno.telefone_um', 'telefone')
             .addSelect('ta.status_aluno_turma', 'status_aluno_turma')
+            .addSelect('ta.confirmacao_realizada', 'confirmacao_realizada')
+            .addSelect('ta.checkin_realizado', 'checkin_realizado')
             .where('ta.id_turma = :id_turma', { id_turma })
             .andWhere('ta.deletado_em IS NULL');
 
@@ -3286,6 +3312,8 @@ export class TurmasService {
                         .addSelect('aluno.email', 'email')
                         .addSelect('aluno.telefone_um', 'telefone')
                         .addSelect('COALESCE(taPara.status_aluno_turma, taDe.status_aluno_turma)', 'status_aluno_turma')
+                        .addSelect('COALESCE(taPara.confirmacao_realizada, taDe.confirmacao_realizada)', 'confirmacao_realizada')
+                        .addSelect('COALESCE(taPara.checkin_realizado, taDe.checkin_realizado)', 'checkin_realizado')
                         .addSelect('ht.id_turma_de', 'id_turma_de')
                         .addSelect('ht.id_turma_para', 'id_turma_para')
                         .addSelect('turmaDe.edicao_turma', 'turma_de_edicao')
@@ -3306,6 +3334,8 @@ export class TurmasService {
                         email: row.email,
                         telefone: row.telefone,
                         status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+                        confirmacao_realizada: row.confirmacao_realizada === true || row.confirmacao_realizada === 'true',
+                        checkin_realizado: row.checkin_realizado === true || row.checkin_realizado === 'true',
                         transferencia_direcao: Number(row.id_turma_para) === id_turma ? 'Transferido De' : 'Transferido Para',
                         transferencia_turma_relacionada:
                             Number(row.id_turma_para) === id_turma
@@ -3342,6 +3372,8 @@ export class TurmasService {
                         .addSelect('aluno.email', 'email')
                         .addSelect('aluno.telefone_um', 'telefone')
                         .addSelect('taPara.status_aluno_turma', 'status_aluno_turma')
+                        .addSelect('taPara.confirmacao_realizada', 'confirmacao_realizada')
+                        .addSelect('taPara.checkin_realizado', 'checkin_realizado')
                         .addSelect('ht.id_turma_de', 'id_turma_de')
                         .addSelect('turmaDe.edicao_turma', 'turma_de_edicao')
                         .addSelect('treinoDe.sigla_treinamento', 'turma_de_sigla_treinamento')
@@ -3358,6 +3390,8 @@ export class TurmasService {
                         email: row.email,
                         telefone: row.telefone,
                         status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+                        confirmacao_realizada: row.confirmacao_realizada === true || row.confirmacao_realizada === 'true',
+                        checkin_realizado: row.checkin_realizado === true || row.checkin_realizado === 'true',
                         transferencia_direcao: 'Transferido De',
                         transferencia_turma_relacionada: formatTurmaRelacionada(
                             row.turma_de_sigla_treinamento,
@@ -3391,6 +3425,8 @@ export class TurmasService {
                         .addSelect('aluno.email', 'email')
                         .addSelect('aluno.telefone_um', 'telefone')
                         .addSelect('taDe.status_aluno_turma', 'status_aluno_turma')
+                        .addSelect('taDe.confirmacao_realizada', 'confirmacao_realizada')
+                        .addSelect('taDe.checkin_realizado', 'checkin_realizado')
                         .addSelect('ht.id_turma_para', 'id_turma_para')
                         .addSelect('turmaPara.edicao_turma', 'turma_para_edicao')
                         .addSelect('treinoPara.sigla_treinamento', 'turma_para_sigla_treinamento')
@@ -3407,6 +3443,8 @@ export class TurmasService {
                         email: row.email,
                         telefone: row.telefone,
                         status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+                        confirmacao_realizada: row.confirmacao_realizada === true || row.confirmacao_realizada === 'true',
+                        checkin_realizado: row.checkin_realizado === true || row.checkin_realizado === 'true',
                         transferencia_direcao: 'Transferido Para',
                         transferencia_turma_relacionada: formatTurmaRelacionada(
                             row.turma_para_sigla_treinamento,
@@ -3476,6 +3514,8 @@ export class TurmasService {
             email: row.email,
             telefone: row.telefone,
             status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
+            confirmacao_realizada: row.confirmacao_realizada === true || row.confirmacao_realizada === 'true',
+            checkin_realizado: row.checkin_realizado === true || row.checkin_realizado === 'true',
         }));
 
         return {
@@ -3535,6 +3575,9 @@ export class TurmasService {
                 }
                 turmaAluno.presenca_turma = updateAlunoDto.presenca_turma as EPresencaTurmas;
             }
+            const flagsDerivadas = this.buildConfirmacaoCheckinFlags(turmaAluno.status_aluno_turma, turmaAluno.presenca_turma);
+            turmaAluno.confirmacao_realizada = flagsDerivadas.confirmacao_realizada;
+            turmaAluno.checkin_realizado = flagsDerivadas.checkin_realizado;
             if (updateAlunoDto.atualizado_por !== undefined) {
                 turmaAluno.atualizado_por = updateAlunoDto.atualizado_por;
             }
@@ -3542,72 +3585,36 @@ export class TurmasService {
             const solicitouCancelamento = novoStatusAlunoTurma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
 
             if (solicitouCancelamento) {
-                const turmaOrigem = turmaAluno.id_turma_fk;
-                const edicaoOrigem = String(turmaOrigem?.edicao_turma ?? '')
-                    .trim()
-                    .toUpperCase();
+                turmaAluno.presenca_turma = null;
+                await this.softDeleteAlunoTurmaCascade(id_turma_aluno, turmaAluno);
 
-                if (turmaOrigem && edicaoOrigem !== 'CANCELADA') {
-                    const turmasMesmoTreinamento = await this.uow.turmasRP.find({
-                        where: {
-                            id_treinamento: turmaOrigem.id_treinamento,
-                            deletado_em: null,
-                        },
-                    });
-
-                    const turmaCancelada = turmasMesmoTreinamento.find(
-                        (turma) =>
-                            Number(turma.id) !== Number(turmaOrigem.id) &&
-                            String(turma.edicao_turma ?? '')
-                                .trim()
-                                .toUpperCase() === 'CANCELADA',
-                    );
-
-                    if (!turmaCancelada) {
-                        throw new BadRequestException(
-                            `Não foi encontrada turma com edição CANCELADA para o treinamento ${turmaOrigem.id_treinamento}. Crie essa turma antes de cancelar o aluno.`,
-                        );
-                    }
-
-                    const idMatriculaDestino = await this.transferirCancelamentoParaTurmaCancelada(turmaAluno, turmaCancelada);
-                    const matriculaDestinoCompleta = await this.uow.turmasAlunosRP.findOne({
-                        where: { id: idMatriculaDestino },
-                        relations: [
-                            'id_aluno_fk',
-                            'id_turma_transferencia_de_fk',
-                            'id_turma_transferencia_de_fk.id_treinamento_fk',
-                            'id_turma_transferencia_de_fk.id_polo_fk',
-                        ],
-                    });
-
-                    return {
-                        id: matriculaDestinoCompleta.id,
-                        id_turma: matriculaDestinoCompleta.id_turma,
-                        id_aluno: matriculaDestinoCompleta.id_aluno,
-                        nome_cracha: matriculaDestinoCompleta.nome_cracha,
-                        numero_cracha: matriculaDestinoCompleta.numero_cracha,
-                        vaga_bonus: matriculaDestinoCompleta.vaga_bonus,
-                        origem_aluno: matriculaDestinoCompleta.origem_aluno,
-                        status_aluno_turma: matriculaDestinoCompleta.status_aluno_turma,
-                        presenca_turma: matriculaDestinoCompleta.presenca_turma,
-                        url_comprovante_pgto: matriculaDestinoCompleta.url_comprovante_pgto,
-                        pendencia_pagamento: matriculaDestinoCompleta.pendencia_pagamento,
-                        quantidade_inscricoes: matriculaDestinoCompleta.quantidade_inscricoes ?? 1,
-                        outros_clientes: matriculaDestinoCompleta.outros_clientes ?? [],
-                        contrato_duplo: (matriculaDestinoCompleta.quantidade_inscricoes ?? 1) > 1,
-                        comprovante_pagamento_base64: matriculaDestinoCompleta.comprovante_pagamento_base64,
-                        created_at: matriculaDestinoCompleta.criado_em,
-                        transferencia_de_turma: this.mapTurmaToTransferenciaTag(matriculaDestinoCompleta.id_turma_transferencia_de_fk),
-                        aluno: matriculaDestinoCompleta.id_aluno_fk
-                            ? {
-                                  id: matriculaDestinoCompleta.id_aluno_fk.id,
-                                  nome: matriculaDestinoCompleta.id_aluno_fk.nome,
-                                  email: matriculaDestinoCompleta.id_aluno_fk.email,
-                                  nome_cracha: matriculaDestinoCompleta.id_aluno_fk.nome_cracha,
-                              }
-                            : undefined,
-                    };
-                }
+                return {
+                    id: turmaAluno.id,
+                    id_turma: turmaAluno.id_turma,
+                    id_aluno: turmaAluno.id_aluno,
+                    nome_cracha: turmaAluno.nome_cracha,
+                    numero_cracha: turmaAluno.numero_cracha,
+                    vaga_bonus: turmaAluno.vaga_bonus,
+                    origem_aluno: turmaAluno.origem_aluno,
+                    status_aluno_turma: EStatusAlunosTurmas.CANCELADO,
+                    confirmacao_realizada: false,
+                    checkin_realizado: false,
+                    presenca_turma: null,
+                    pendencia_pagamento: turmaAluno.pendencia_pagamento,
+                    quantidade_inscricoes: turmaAluno.quantidade_inscricoes ?? 1,
+                    outros_clientes: turmaAluno.outros_clientes ?? [],
+                    contrato_duplo: (turmaAluno.quantidade_inscricoes ?? 1) > 1,
+                    comprovante_pagamento_base64: turmaAluno.comprovante_pagamento_base64,
+                    created_at: turmaAluno.criado_em,
+                    aluno: turmaAluno.id_aluno_fk
+                        ? {
+                              id: turmaAluno.id_aluno_fk.id,
+                              nome: turmaAluno.id_aluno_fk.nome,
+                              email: turmaAluno.id_aluno_fk.email,
+                              nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
+                          }
+                        : undefined,
+                };
             }
 
             this.logger.debug(`turma.aluno.update | Atualizando matrícula id=${id_turma_aluno}`);
@@ -3632,6 +3639,8 @@ export class TurmasService {
                 vaga_bonus: turmaAlunoAtualizada.vaga_bonus,
                 origem_aluno: turmaAlunoAtualizada.origem_aluno,
                 status_aluno_turma: turmaAlunoAtualizada.status_aluno_turma,
+                confirmacao_realizada: turmaAlunoAtualizada.confirmacao_realizada,
+                checkin_realizado: turmaAlunoAtualizada.checkin_realizado,
                 presenca_turma: turmaAlunoAtualizada.presenca_turma,
                 pendencia_pagamento: turmaAlunoAtualizada.pendencia_pagamento,
                 quantidade_inscricoes: turmaAlunoAtualizada.quantidade_inscricoes ?? 1,

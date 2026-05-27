@@ -479,7 +479,14 @@ Vamos Prosperar! 🙌`;
 
                 if (sendResult.success) {
                     // Atualizar status do aluno para AGUARDANDO_CHECKIN
-                    await this.uow.turmasAlunosRP.update({ id: student.alunoTurmaId }, { status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN });
+                    await this.uow.turmasAlunosRP.update(
+                        { id: student.alunoTurmaId },
+                        {
+                            status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                            confirmacao_realizada: true,
+                            checkin_realizado: false,
+                        },
+                    );
 
                     results.sent++;
                 } else {
@@ -711,7 +718,14 @@ Vamos Prosperar! 🙌`;
                     // }
 
                     // Atualiza status operacional após aceite de envio do template.
-                    await this.uow.turmasAlunosRP.update({ id: student.alunoTurmaId }, { status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO });
+                    await this.uow.turmasAlunosRP.update(
+                        { id: student.alunoTurmaId },
+                        {
+                            status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+                            confirmacao_realizada: false,
+                            checkin_realizado: false,
+                        },
+                    );
 
                     console.log(
                         JSON.stringify(
@@ -805,7 +819,14 @@ Vamos Prosperar! 🙌`;
         const turmaId = alunoTurma.id_turma_fk.id;
         const alunoTurmaId = alunoTurma.id;
 
-        await this.uow.turmasAlunosRP.update({ id: alunoTurmaId }, { status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN });
+        await this.uow.turmasAlunosRP.update(
+            { id: alunoTurmaId },
+            {
+                status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                confirmacao_realizada: true,
+                checkin_realizado: false,
+            },
+        );
 
         const checkinDispatch = await this.sendCheckInLinksToStudents([
             {
@@ -1076,6 +1097,8 @@ Vamos Prosperar! 🙌`;
                     { id: decoded.alunoTurmaId },
                     {
                         status_aluno_turma: EStatusAlunosTurmas.CHECKIN_REALIZADO,
+                        confirmacao_realizada: true,
+                        checkin_realizado: true,
                         atualizado_em: new Date(),
                     },
                 );

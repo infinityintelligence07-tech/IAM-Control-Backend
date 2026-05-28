@@ -8,7 +8,6 @@ export class MailService {
     private isConfigured = false;
 
     constructor() {
-        // Verificar se as configurações SMTP estão disponíveis
         if (process.env.MAIL_HOST && process.env.MAIL_PORT && process.env.MAIL_USER && process.env.MAIL_PASS) {
             this.transporter = nodemailer.createTransport({
                 host: process.env.MAIL_HOST,

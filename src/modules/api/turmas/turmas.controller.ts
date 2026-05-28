@@ -19,6 +19,8 @@ import {
     TurmaStatusAlunosResponseDto,
     UpdateTurmaTimesDto,
     TurmaTimesResponseDto,
+    AlunoTurmaHistoricoResponseDto,
+    CreateAlunoTurmaHistoricoDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
@@ -120,6 +122,24 @@ export class TurmasController {
         }
     }
 
+    @Get('alunos/:id_turma_aluno/logs')
+    @UseGuards(JwtAuthGuard)
+    async getAlunoTurmaHistorico(@Param('id_turma_aluno') id_turma_aluno: string): Promise<AlunoTurmaHistoricoResponseDto> {
+        return this.turmasService.getAlunoTurmaHistorico(id_turma_aluno);
+    }
+
+    @Post('alunos/:id_turma_aluno/logs')
+    @UseGuards(JwtAuthGuard)
+    async createAlunoTurmaHistorico(
+        @Param('id_turma_aluno') id_turma_aluno: string,
+        @Body() dto: CreateAlunoTurmaHistoricoDto,
+        @Req() req: any,
+    ): Promise<{ message: string }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        await this.turmasService.createAlunoTurmaHistorico(id_turma_aluno, dto, userId);
+        return { message: 'Histórico registrado com sucesso.' };
+    }
+
     @Get('opcoes-transferencia/:id_turma_aluno')
     @UseGuards(JwtAuthGuard)
     async getOpcoesTransferencia(@Param('id_turma_aluno') id_turma_aluno: string): Promise<OpcoesTransferenciaResponseDto> {
@@ -128,8 +148,9 @@ export class TurmasController {
 
     @Post('transferir-aluno/:id_turma_aluno')
     @UseGuards(JwtAuthGuard)
-    async transferirAluno(@Param('id_turma_aluno') id_turma_aluno: string, @Body() dto: TransferirAlunoDto): Promise<AlunoTurmaResponseDto> {
-        return this.turmasService.transferirAluno(id_turma_aluno, dto.id_turma_destino);
+    async transferirAluno(@Param('id_turma_aluno') id_turma_aluno: string, @Body() dto: TransferirAlunoDto, @Req() req: any): Promise<AlunoTurmaResponseDto> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.transferirAluno(id_turma_aluno, dto.id_turma_destino, userId);
     }
 
     @Get('historico-transferencias/:id_aluno')
@@ -281,9 +302,10 @@ export class TurmasController {
 
     @Post(':id/alunos')
     @UseGuards(JwtAuthGuard)
-    async addAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Body() addAlunoDto: AddAlunoTurmaDto): Promise<AlunoTurmaResponseDto> {
+    async addAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Body() addAlunoDto: AddAlunoTurmaDto, @Req() req: any): Promise<AlunoTurmaResponseDto> {
         console.log('Adicionando aluno à turma:', id_turma, 'aluno:', addAlunoDto);
-        return this.turmasService.addAlunoTurma(id_turma, addAlunoDto);
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.addAlunoTurma(id_turma, addAlunoDto, userId);
     }
 
     @Put(':id/alunos/:id_turma_aluno')
@@ -301,9 +323,14 @@ export class TurmasController {
 
     @Delete(':id/alunos/:id_turma_aluno')
     @UseGuards(JwtAuthGuard)
-    async removeAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Param('id_turma_aluno') id_turma_aluno: string): Promise<{ message: string }> {
+    async removeAlunoTurma(
+        @Param('id', ParseIntPipe) id_turma: number,
+        @Param('id_turma_aluno') id_turma_aluno: string,
+        @Req() req: any,
+    ): Promise<{ message: string }> {
         console.log('Removendo aluno da turma:', id_turma_aluno);
-        await this.turmasService.removeAlunoTurma(id_turma_aluno);
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        await this.turmasService.removeAlunoTurma(id_turma_aluno, userId);
         return { message: 'Aluno removido da turma com sucesso' };
     }
 }

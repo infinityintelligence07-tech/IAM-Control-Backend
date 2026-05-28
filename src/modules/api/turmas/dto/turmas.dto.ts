@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min, IsObject } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos } from '../../../config/entities/enum';
 
@@ -743,6 +743,54 @@ export class HistoricoTransferenciasResponseDto {
     data: HistoricoTransferenciaItemDto[];
 }
 
+export class AlunoTurmaHistoricoTemplateDto {
+    key: string;
+    label: string;
+    descricao?: string;
+}
+
+export class AlunoTurmaHistoricoItemDto {
+    id: string;
+    id_turma_aluno: string;
+    id_turma: number;
+    id_aluno: string;
+    tipo_acao: string;
+    titulo: string;
+    descricao: string | null;
+    template_key: string | null;
+    detalhes?: Record<string, unknown>;
+    criado_por?: number | null;
+    nome_usuario?: string | null;
+    data_acao: Date;
+    criado_em: Date;
+}
+
+export class AlunoTurmaHistoricoResponseDto {
+    data: AlunoTurmaHistoricoItemDto[];
+    templates: AlunoTurmaHistoricoTemplateDto[];
+}
+
+export class CreateAlunoTurmaHistoricoDto {
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    template_key?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    titulo?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    descricao?: string;
+
+    @IsOptional()
+    @IsObject()
+    detalhes?: Record<string, unknown>;
+}
+
 export class AlunosTurmaListResponseDto {
     data: AlunoTurmaResponseDto[];
     total: number;
@@ -807,6 +855,7 @@ export class TurmaStatusAlunosItemDto {
     nome: string;
     email: string;
     telefone: string | null;
+    status_aluno_geral: string | null;
     status_aluno_turma: EStatusAlunosTurmas | null;
     confirmacao_realizada?: boolean;
     checkin_realizado?: boolean;

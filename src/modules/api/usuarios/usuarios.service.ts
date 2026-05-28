@@ -37,11 +37,7 @@ export class UsuariosService {
             const normalizedNome = this.normalizeTextForSearch(nome);
 
             if (normalizedNome) {
-                whereConditions.nome = Raw(
-                    (alias) =>
-                        `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedNome`,
-                    { normalizedNome: `%${normalizedNome}%` },
-                );
+                whereConditions.nome = Raw((alias) => `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedNome`, { normalizedNome: `%${normalizedNome}%` });
             }
         }
 
@@ -49,11 +45,9 @@ export class UsuariosService {
             const normalizedEmail = this.normalizeTextForSearch(email);
 
             if (normalizedEmail) {
-                whereConditions.email = Raw(
-                    (alias) =>
-                        `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedEmail`,
-                    { normalizedEmail: `%${normalizedEmail}%` },
-                );
+                whereConditions.email = Raw((alias) => `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedEmail`, {
+                    normalizedEmail: `%${normalizedEmail}%`,
+                });
             }
         }
 

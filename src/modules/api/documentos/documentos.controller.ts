@@ -228,9 +228,7 @@ export class DocumentosController {
 
         try {
             const resultado = await this.documentosService.listarContratosBanco(filtros);
-            this.logger.debug(
-                `contract.public.list | page=${filtros.page} limit=${filtros.limit} total=${resultado.total} returned=${resultado.data.length}`,
-            );
+            this.logger.debug(`contract.public.list | page=${filtros.page} limit=${filtros.limit} total=${resultado.total} returned=${resultado.data.length}`);
             return resultado;
         } catch (error) {
             this.logger.error('contract.public.list | Erro ao listar contratos do banco', error instanceof Error ? error.stack : undefined);

@@ -33,6 +33,8 @@ import { Turmas } from '@/modules/config/entities/turmas.entity';
 @Injectable()
 export class DocumentosService {
     private readonly logger = new Logger(DocumentosService.name);
+    private readonly estiloPadraoClausulas =
+        "font-size: 11px; font-family: 'Times New Roman', Times, serif; margin: 0; padding: 0;";
     private readonly opcoesOrigemCacheTtlMs = 60000;
     private readonly opcoesOrigemCacheMaxEntradas = 200;
     private readonly contratosBancoCacheTtlMs = 15000;
@@ -78,6 +80,33 @@ export class DocumentosService {
         private readonly turmasService: TurmasService,
     ) {}
 
+    private normalizarClausulasParaHtml(conteudo: string): string {
+        if (!conteudo) return '';
+        const possuiTagsHtml = /<\/?[a-z][\s\S]*>/i.test(conteudo);
+        const htmlBase = possuiTagsHtml ? conteudo : conteudo.replace(/\n/g, '<br />');
+        return htmlBase
+            .replace(/\r\n/g, '\n')
+            .replace(/<div><br\s*\/?><\/div>/gi, '<br />')
+            .replace(/<p><br\s*\/?><\/p>/gi, '<br />')
+            .replace(/<\/div>\s*<div>/gi, '<br />')
+            .replace(/<\/p>\s*<p>/gi, '<br />')
+            .replace(/<\/?(div|p)>/gi, '')
+            .trim();
+    }
+
+    private removerWrapperFonteClausulas(conteudo: string): string {
+        return conteudo
+            .trim()
+            .replace(/^<div style=["'][^"']*font-size\s*:\s*\d+px;?[^"']*["']>([\s\S]*)<\/div>$/i, '$1');
+    }
+
+    private aplicarEstiloPadraoClausulas(conteudo: string): string {
+        const htmlNormalizado = this.normalizarClausulasParaHtml(conteudo);
+        if (!htmlNormalizado) return '';
+        const htmlSemWrapperFonte = this.removerWrapperFonteClausulas(htmlNormalizado);
+        return `<div style="${this.estiloPadraoClausulas}">${htmlSemWrapperFonte}</div>`;
+    }
+
     async createDocumento(createDocumentoDto: CreateDocumentoDto, userId?: number): Promise<DocumentoResponseDto> {
         try {
             this.logger.debug('doc.repo.create | Criando documento');
@@ -86,7 +115,7 @@ export class DocumentosService {
                 documento: createDocumentoDto.documento,
                 tipo_documento: createDocumentoDto.tipo_documento,
                 campos: createDocumentoDto.campos,
-                clausulas: createDocumentoDto.clausulas,
+                clausulas: this.aplicarEstiloPadraoClausulas(createDocumentoDto.clausulas),
                 treinamentos_relacionados: createDocumentoDto.treinamentos_relacionados || [],
                 criado_por: userId,
                 atualizado_por: userId,
@@ -161,7 +190,12 @@ export class DocumentosService {
                 throw new NotFoundException('Documento não encontrado');
             }
 
-            Object.assign(documento, updateDocumentoDto);
+            const updatePayload = { ...updateDocumentoDto };
+            if (typeof updatePayload.clausulas === 'string') {
+                updatePayload.clausulas = this.aplicarEstiloPadraoClausulas(updatePayload.clausulas);
+            }
+
+            Object.assign(documento, updatePayload);
             documento.atualizado_por = userId;
             documento.atualizado_em = new Date();
 

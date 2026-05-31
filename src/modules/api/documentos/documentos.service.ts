@@ -33,8 +33,7 @@ import { Turmas } from '@/modules/config/entities/turmas.entity';
 @Injectable()
 export class DocumentosService {
     private readonly logger = new Logger(DocumentosService.name);
-    private readonly estiloPadraoClausulas =
-        "font-size: 11px; font-family: 'Times New Roman', Times, serif; margin: 0; padding: 0;";
+    private readonly estiloPadraoClausulas = "font-size: 11px; font-family: 'Times New Roman', Times, serif; margin: 0; padding: 0;";
     private readonly opcoesOrigemCacheTtlMs = 60000;
     private readonly opcoesOrigemCacheMaxEntradas = 200;
     private readonly contratosBancoCacheTtlMs = 15000;
@@ -95,9 +94,7 @@ export class DocumentosService {
     }
 
     private removerWrapperFonteClausulas(conteudo: string): string {
-        return conteudo
-            .trim()
-            .replace(/^<div style=["'][^"']*font-size\s*:\s*\d+px;?[^"']*["']>([\s\S]*)<\/div>$/i, '$1');
+        return conteudo.trim().replace(/^<div style=["'][^"']*font-size\s*:\s*\d+px;?[^"']*["']>([\s\S]*)<\/div>$/i, '$1');
     }
 
     private aplicarEstiloPadraoClausulas(conteudo: string): string {
@@ -2601,12 +2598,7 @@ export class DocumentosService {
                 .normalize('NFD')
                 .replace(/[\u0300-\u036f]/g, '')
                 .trim();
-        const treinamentosExcluidos = ['missao governar', 'liberty begin', 'liberty', 'imersao de negocios'];
         const termosTurmaInvalidos = ['cancelad', 'inadimplente', 'sem turma'];
-        const treinamentoEhExcluido = (treinamento?: string | null): boolean => {
-            const nome = normalizarComparacao(treinamento);
-            return treinamentosExcluidos.some((termo) => nome.includes(termo));
-        };
         const turmaEhInvalida = (turma?: string | null): boolean => {
             const nome = normalizarComparacao(turma);
             return !nome || termosTurmaInvalidos.some((termo) => nome.includes(termo));
@@ -2676,14 +2668,13 @@ export class DocumentosService {
                 return;
             }
 
-            if (treinamentoOrigem && !treinamentoEhExcluido(treinamentoOrigem)) {
+            if (treinamentoOrigem) {
                 treinamentos.add(treinamentoOrigem);
             }
 
             if (
                 turmaOrigem &&
                 !turmaEhInvalida(turmaOrigem) &&
-                !treinamentoEhExcluido(treinamentoOrigem) &&
                 (!treinamentoOrigemSelecionado || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemSelecionado)
             ) {
                 turmas.add(turmaOrigem);
@@ -2703,7 +2694,6 @@ export class DocumentosService {
             const edicao = String(turma?.edicao_turma || '').trim();
             const turmaFormatada = nomeTreinamento && edicao ? `${nomeTreinamento} - ${edicao}` : '';
             if (!nomeTreinamento || !edicao) return;
-            if (treinamentoEhExcluido(nomeTreinamento)) return;
             if (turmaEhInvalida(turmaFormatada)) return;
             if (treinamentoOrigemSelecionado && this.normalizarTexto(nomeTreinamento) !== treinamentoOrigemSelecionado) return;
             treinamentos.add(nomeTreinamento);

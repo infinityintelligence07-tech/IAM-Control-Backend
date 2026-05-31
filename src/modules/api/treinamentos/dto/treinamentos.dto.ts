@@ -1,5 +1,33 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, IsNotEmpty } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsBoolean, IsNotEmpty, IsObject } from 'class-validator';
 import { Transform } from 'class-transformer';
+
+export interface TreinamentoFormaPagamentoAvistaDto {
+    habilitado: boolean;
+    valor: number;
+}
+
+export interface TreinamentoFormaPagamentoPrazoDto {
+    habilitado: boolean;
+    valor: number;
+    parcelasMin: number;
+    parcelasSemLiberacao: number;
+    parcelasMaximasComLiberacao: number | null;
+}
+
+export interface TreinamentoConfiguracaoPagamentosDto {
+    avista: {
+        cartaoCredito: TreinamentoFormaPagamentoAvistaDto;
+        cartaoDebito: TreinamentoFormaPagamentoAvistaDto;
+        pixTransferencia: TreinamentoFormaPagamentoAvistaDto;
+        especieDinheiro: TreinamentoFormaPagamentoAvistaDto;
+        link: TreinamentoFormaPagamentoAvistaDto;
+    };
+    prazo: {
+        cartaoCredito: TreinamentoFormaPagamentoPrazoDto;
+        boleto: TreinamentoFormaPagamentoPrazoDto;
+        link: TreinamentoFormaPagamentoPrazoDto;
+    };
+}
 
 export class GetTreinamentosDto {
     @IsOptional()
@@ -43,6 +71,7 @@ export class TreinamentoResponseDto {
     treinamento: string;
     sigla_treinamento?: string;
     preco_treinamento: number;
+    configuracao_pagamentos?: TreinamentoConfiguracaoPagamentosDto | null;
     url_logo_treinamento?: string;
     tipo_treinamento: boolean;
     tipo_palestra: boolean;
@@ -78,6 +107,10 @@ export class CreateTreinamentoDto {
     @IsNumber()
     @Transform(({ value }) => parseFloat(value))
     preco_treinamento: number;
+
+    @IsOptional()
+    @IsObject()
+    configuracao_pagamentos?: TreinamentoConfiguracaoPagamentosDto;
 
     @IsOptional()
     @IsString()
@@ -119,6 +152,10 @@ export class UpdateTreinamentoDto {
     @IsNumber()
     @Transform(({ value }) => parseFloat(value))
     preco_treinamento?: number;
+
+    @IsOptional()
+    @IsObject()
+    configuracao_pagamentos?: TreinamentoConfiguracaoPagamentosDto;
 
     @IsOptional()
     @IsString()

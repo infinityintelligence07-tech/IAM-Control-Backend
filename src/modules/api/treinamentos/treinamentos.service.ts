@@ -11,6 +11,7 @@ import {
 import { Equal, FindManyOptions, Like, ILike, Not, In } from 'typeorm';
 import { Treinamentos } from '../../config/entities/treinamentos.entity';
 import { EPresencaTurmas, EStatusAlunosTurmas } from '../../config/entities/enum';
+import { validateBase64ImageField } from '../shared/image-base64.validator';
 
 @Injectable()
 export class TreinamentosService {
@@ -117,6 +118,7 @@ export class TreinamentosService {
                         treinamento: treinamento.treinamento,
                         sigla_treinamento: treinamento.sigla_treinamento,
                         preco_treinamento: treinamento.preco_treinamento,
+                        configuracao_pagamentos: treinamento.configuracao_pagamentos,
                         url_logo_treinamento: treinamento.url_logo_treinamento,
                         tipo_treinamento: treinamento.tipo_treinamento,
                         tipo_palestra: treinamento.tipo_palestra,
@@ -200,6 +202,7 @@ export class TreinamentosService {
                 treinamento: treinamento.treinamento,
                 sigla_treinamento: treinamento.sigla_treinamento,
                 preco_treinamento: treinamento.preco_treinamento,
+                configuracao_pagamentos: treinamento.configuracao_pagamentos,
                 url_logo_treinamento: treinamento.url_logo_treinamento,
                 tipo_treinamento: treinamento.tipo_treinamento,
                 tipo_palestra: treinamento.tipo_palestra,
@@ -219,10 +222,12 @@ export class TreinamentosService {
 
     async create(createTreinamentoDto: CreateTreinamentoDto): Promise<TreinamentoResponseDto> {
         try {
+            validateBase64ImageField(createTreinamentoDto.url_logo_treinamento, 'Logo do treinamento');
             const novoTreinamento = new Treinamentos();
             novoTreinamento.treinamento = createTreinamentoDto.treinamento;
             novoTreinamento.sigla_treinamento = createTreinamentoDto.sigla_treinamento;
             novoTreinamento.preco_treinamento = createTreinamentoDto.preco_treinamento;
+            novoTreinamento.configuracao_pagamentos = createTreinamentoDto.configuracao_pagamentos || null;
             novoTreinamento.url_logo_treinamento = createTreinamentoDto.url_logo_treinamento;
             novoTreinamento.tipo_treinamento = createTreinamentoDto.tipo_treinamento;
             novoTreinamento.tipo_palestra = createTreinamentoDto.tipo_palestra;
@@ -237,6 +242,7 @@ export class TreinamentosService {
                 treinamento: treinamentoSalvo.treinamento,
                 sigla_treinamento: treinamentoSalvo.sigla_treinamento,
                 preco_treinamento: treinamentoSalvo.preco_treinamento,
+                configuracao_pagamentos: treinamentoSalvo.configuracao_pagamentos,
                 url_logo_treinamento: treinamentoSalvo.url_logo_treinamento,
                 tipo_treinamento: treinamentoSalvo.tipo_treinamento,
                 tipo_palestra: treinamentoSalvo.tipo_palestra,
@@ -256,6 +262,7 @@ export class TreinamentosService {
 
     async update(id: number, updateTreinamentoDto: UpdateTreinamentoDto): Promise<TreinamentoResponseDto> {
         try {
+            validateBase64ImageField(updateTreinamentoDto.url_logo_treinamento, 'Logo do treinamento');
             const treinamento = await this.uow.treinamentosRP.findOne({
                 where: {
                     id,
@@ -276,6 +283,9 @@ export class TreinamentosService {
             }
             if (updateTreinamentoDto.preco_treinamento !== undefined) {
                 treinamento.preco_treinamento = updateTreinamentoDto.preco_treinamento;
+            }
+            if (updateTreinamentoDto.configuracao_pagamentos !== undefined) {
+                treinamento.configuracao_pagamentos = updateTreinamentoDto.configuracao_pagamentos;
             }
             if (updateTreinamentoDto.url_logo_treinamento !== undefined) {
                 treinamento.url_logo_treinamento = updateTreinamentoDto.url_logo_treinamento;
@@ -334,6 +344,7 @@ export class TreinamentosService {
                 treinamento: treinamentoAtualizado.treinamento,
                 sigla_treinamento: treinamentoAtualizado.sigla_treinamento,
                 preco_treinamento: treinamentoAtualizado.preco_treinamento,
+                configuracao_pagamentos: treinamentoAtualizado.configuracao_pagamentos,
                 url_logo_treinamento: treinamentoAtualizado.url_logo_treinamento,
                 tipo_treinamento: treinamentoAtualizado.tipo_treinamento,
                 tipo_palestra: treinamentoAtualizado.tipo_palestra,

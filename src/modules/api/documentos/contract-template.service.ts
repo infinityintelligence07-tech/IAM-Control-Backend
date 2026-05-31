@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
+import { CONTRACT_DIGITAL_SIGNATURE_FALLBACK_TEXT } from './constants/contract-signature.constants';
 
 @Injectable()
 export class ContractTemplateService {
@@ -1039,6 +1040,17 @@ export class ContractTemplateService {
             `;
         };
 
+        const assinaturaTextoPadrao = CONTRACT_DIGITAL_SIGNATURE_FALLBACK_TEXT;
+        const hasSignatureImage = (signature?: string | null) =>
+            Boolean(signature && String(signature).trim().length > 0);
+
+        const renderSignatureVisual = (signature?: string | null, alt: string = 'Assinatura') => {
+            if (hasSignatureImage(signature)) {
+                return `<img src="${getAbsoluteImageUrl(signature as string)}" alt="${alt}" style="max-height: 60px; max-width: 300px; object-fit: contain;">`;
+            }
+            return `<div class="digital-signature-fallback">${assinaturaTextoPadrao}</div>`;
+        };
+
         const dadosPessoaisHTML = isIPRContract
             ? `
               <table class="table">
@@ -1113,13 +1125,7 @@ export class ContractTemplateService {
               
                 <div style="text-align: center; margin: 30px 0;">
                   <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                    ${
-                        contrato.assinatura_aluno_base64
-                            ? `
-                      <img src="${getAbsoluteImageUrl(contrato.assinatura_aluno_base64)}" alt="Assinatura do Aluno" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                    `
-                            : ''
-                    }
+                    ${renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')}
                   </div>
                   <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
                   <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
@@ -1132,13 +1138,10 @@ export class ContractTemplateService {
                 <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${
-                          contrato.assinatura_testemunha_um_base64
-                              ? `
-                        <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_um_base64)}" alt="Assinatura Testemunha 1" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                      `
-                              : ''
-                      }
+                      ${renderSignatureVisual(
+                          contrato.assinatura_testemunha_um_base64,
+                          'Assinatura Testemunha 1',
+                      )}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 1</strong><br>
@@ -1147,13 +1150,10 @@ export class ContractTemplateService {
                   </div>
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${
-                          contrato.assinatura_testemunha_dois_base64
-                              ? `
-                        <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_dois_base64)}" alt="Assinatura Testemunha 2" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                      `
-                              : ''
-                      }
+                      ${renderSignatureVisual(
+                          contrato.assinatura_testemunha_dois_base64,
+                          'Assinatura Testemunha 2',
+                      )}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 2</strong><br>
@@ -1279,13 +1279,10 @@ export class ContractTemplateService {
                         
                           <div style="text-align: center; margin: 30px 0;">
                             <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                              ${
-                                  contrato.assinatura_aluno_base64
-                                      ? `
-                                <img src="${getAbsoluteImageUrl(contrato.assinatura_aluno_base64)}" alt="Assinatura do Aluno" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                              `
-                                      : ''
-                              }
+                              ${renderSignatureVisual(
+                                  contrato.assinatura_aluno_base64,
+                                  'Assinatura do Aluno',
+                              )}
                             </div>
                             <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
                             <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
@@ -1298,13 +1295,10 @@ export class ContractTemplateService {
                 <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${
-                          contrato.assinatura_testemunha_um_base64
-                              ? `
-                        <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_um_base64)}" alt="Assinatura Testemunha 1" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                      `
-                              : ''
-                      }
+                      ${renderSignatureVisual(
+                          contrato.assinatura_testemunha_um_base64,
+                          'Assinatura Testemunha 1',
+                      )}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 1</strong><br>
@@ -1313,13 +1307,10 @@ export class ContractTemplateService {
                   </div>
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${
-                          contrato.assinatura_testemunha_dois_base64
-                              ? `
-                        <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_dois_base64)}" alt="Assinatura Testemunha 2" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                      `
-                              : ''
-                      }
+                      ${renderSignatureVisual(
+                          contrato.assinatura_testemunha_dois_base64,
+                          'Assinatura Testemunha 2',
+                      )}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 2</strong><br>
@@ -1555,6 +1546,15 @@ export class ContractTemplateService {
               .signature-line {
                 border-bottom: 1px solid #000;
                 margin-bottom: 10px;
+              }
+
+              .digital-signature-fallback {
+                font-size: 10px;
+                color: #222;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                text-align: center;
+                line-height: 1.2;
               }
               
               .clauses-section {
@@ -2222,13 +2222,7 @@ export class ContractTemplateService {
               
               <div style="text-align: center; margin: 30px 0;">
                 <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                  ${
-                      contrato.assinatura_aluno_base64
-                          ? `
-                    <img src="${getAbsoluteImageUrl(contrato.assinatura_aluno_base64)}" alt="Assinatura do Aluno" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                  `
-                          : ''
-                  }
+                  ${renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')}
                 </div>
                 <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
                 <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
@@ -2241,13 +2235,10 @@ export class ContractTemplateService {
               <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
                 <div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                    ${
-                        contrato.assinatura_testemunha_um_base64
-                            ? `
-                      <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_um_base64)}" alt="Assinatura Testemunha 1" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                    `
-                            : ''
-                    }
+                    ${renderSignatureVisual(
+                        contrato.assinatura_testemunha_um_base64,
+                        'Assinatura Testemunha 1',
+                    )}
                   </div>
                   <div class="signature-line"></div>
                   <strong>Testemunha 1</strong><br>
@@ -2256,13 +2247,10 @@ export class ContractTemplateService {
                 </div>
                 <div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                    ${
-                        contrato.assinatura_testemunha_dois_base64
-                            ? `
-                      <img src="${getAbsoluteImageUrl(contrato.assinatura_testemunha_dois_base64)}" alt="Assinatura Testemunha 2" style="max-height: 60px; max-width: 300px; object-fit: contain;">
-                    `
-                            : ''
-                    }
+                    ${renderSignatureVisual(
+                        contrato.assinatura_testemunha_dois_base64,
+                        'Assinatura Testemunha 2',
+                    )}
                   </div>
                   <div class="signature-line"></div>
                   <strong>Testemunha 2</strong><br>

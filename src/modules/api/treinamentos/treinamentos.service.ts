@@ -17,6 +17,20 @@ import { validateBase64ImageField } from '../shared/image-base64.validator';
 export class TreinamentosService {
     constructor(private readonly uow: UnitOfWorkService) {}
 
+    private async mapNomeUsuariosPorIds(ids: Array<number | null | undefined>): Promise<Map<number, string>> {
+        const idsValidos = Array.from(new Set(ids.filter((id): id is number => Number.isFinite(Number(id)))));
+        if (idsValidos.length === 0) {
+            return new Map<number, string>();
+        }
+
+        const usuarios = await this.uow.usuariosRP.find({
+            where: { id: In(idsValidos) } as any,
+            select: ['id', 'nome'],
+        });
+
+        return new Map<number, string>(usuarios.map((usuario) => [usuario.id, usuario.nome]));
+    }
+
     private async calcularEstatisticasTreinamento(treinamento: Treinamentos) {
         // Buscar turmas do treinamento
         const turmasIds = await this.uow.turmasRP.find({
@@ -65,7 +79,7 @@ export class TreinamentosService {
     }
 
     async findAll(filters: GetTreinamentosDto): Promise<TreinamentosListResponseDto> {
-        const { page = 1, limit = 12, treinamento, preco_treinamento, tipo_treinamento, tipo_palestra, tipo_online } = filters;
+        const { page = 1, limit = 12, treinamento, preco_treinamento, tipo_treinamento, tipo_palestra, tipo_online, tipo_mentoria, tipo_presencial } = filters;
 
         // Construir condições de busca
         const whereConditions: any = {};
@@ -90,6 +104,14 @@ export class TreinamentosService {
             whereConditions.tipo_online = tipo_online;
         }
 
+        if (tipo_mentoria !== undefined) {
+            whereConditions.tipo_mentoria = tipo_mentoria;
+        }
+
+        if (tipo_presencial !== undefined) {
+            whereConditions.tipo_presencial = tipo_presencial;
+        }
+
         // Adicionar condição para excluir registros deletados
         whereConditions.deletado_em = null;
 
@@ -107,6 +129,9 @@ export class TreinamentosService {
         try {
             // Buscar treinamentos com paginação
             const [treinamentos, total] = await this.uow.treinamentosRP.findAndCount(findOptions);
+            const nomesAtualizadores = await this.mapNomeUsuariosPorIds(
+                treinamentos.map((item) => item.atualizado_por),
+            );
 
             // Buscar contagem de turmas e alunos para cada treinamento
             const treinamentosWithCount = await Promise.all(
@@ -122,13 +147,16 @@ export class TreinamentosService {
                         url_logo_treinamento: treinamento.url_logo_treinamento,
                         tipo_treinamento: treinamento.tipo_treinamento,
                         tipo_palestra: treinamento.tipo_palestra,
+                        tipo_mentoria: treinamento.tipo_mentoria,
                         tipo_online: treinamento.tipo_online,
+                        tipo_presencial: treinamento.tipo_presencial,
                         total_turmas: stats.totalTurmas,
                         total_alunos: stats.totalAlunos,
                         capacidade_total: stats.capacidadeTotal,
                         alunos_presentes: stats.alunosPresentes,
                         created_at: treinamento.criado_em,
                         updated_at: treinamento.atualizado_em,
+                        atualizado_por_nome: nomesAtualizadores.get(Number(treinamento.atualizado_por)) || null,
                     };
                 }),
             );
@@ -196,6 +224,7 @@ export class TreinamentosService {
                 },
                 relations: ['id_turma_aluno_fk'],
             });
+            const nomeAtualizadorMap = await this.mapNomeUsuariosPorIds([treinamento.atualizado_por]);
 
             return {
                 id: treinamento.id,
@@ -206,13 +235,16 @@ export class TreinamentosService {
                 url_logo_treinamento: treinamento.url_logo_treinamento,
                 tipo_treinamento: treinamento.tipo_treinamento,
                 tipo_palestra: treinamento.tipo_palestra,
+                tipo_mentoria: treinamento.tipo_mentoria,
                 tipo_online: treinamento.tipo_online,
+                tipo_presencial: treinamento.tipo_presencial,
                 total_turmas: totalTurmas,
                 total_alunos: totalAlunos,
                 capacidade_total: capacidadeTotal,
                 alunos_presentes: alunosPresentes,
                 created_at: treinamento.criado_em instanceof Date ? treinamento.criado_em.toISOString() : treinamento.criado_em,
                 updated_at: treinamento.atualizado_em instanceof Date ? treinamento.atualizado_em.toISOString() : treinamento.atualizado_em,
+                atualizado_por_nome: nomeAtualizadorMap.get(Number(treinamento.atualizado_por)) || null,
             };
         } catch (error) {
             console.error('Erro ao buscar treinamento por ID:', error);
@@ -231,11 +263,14 @@ export class TreinamentosService {
             novoTreinamento.url_logo_treinamento = createTreinamentoDto.url_logo_treinamento;
             novoTreinamento.tipo_treinamento = createTreinamentoDto.tipo_treinamento;
             novoTreinamento.tipo_palestra = createTreinamentoDto.tipo_palestra;
+            novoTreinamento.tipo_mentoria = createTreinamentoDto.tipo_mentoria;
             novoTreinamento.tipo_online = createTreinamentoDto.tipo_online;
+            novoTreinamento.tipo_presencial = createTreinamentoDto.tipo_presencial;
             novoTreinamento.criado_por = createTreinamentoDto.criado_por;
 
             const treinamentoSalvo = await this.uow.treinamentosRP.save(novoTreinamento);
             console.log('Treinamento criado com sucesso:', treinamentoSalvo);
+            const nomeAtualizadorMap = await this.mapNomeUsuariosPorIds([treinamentoSalvo.atualizado_por]);
 
             return {
                 id: treinamentoSalvo.id,
@@ -246,13 +281,16 @@ export class TreinamentosService {
                 url_logo_treinamento: treinamentoSalvo.url_logo_treinamento,
                 tipo_treinamento: treinamentoSalvo.tipo_treinamento,
                 tipo_palestra: treinamentoSalvo.tipo_palestra,
+                tipo_mentoria: treinamentoSalvo.tipo_mentoria,
                 tipo_online: treinamentoSalvo.tipo_online,
+                tipo_presencial: treinamentoSalvo.tipo_presencial,
                 total_turmas: 0,
                 total_alunos: 0,
                 capacidade_total: 0,
                 alunos_presentes: 0,
                 created_at: treinamentoSalvo.criado_em instanceof Date ? treinamentoSalvo.criado_em.toISOString() : treinamentoSalvo.criado_em,
                 updated_at: treinamentoSalvo.atualizado_em instanceof Date ? treinamentoSalvo.atualizado_em.toISOString() : treinamentoSalvo.atualizado_em,
+                atualizado_por_nome: nomeAtualizadorMap.get(Number(treinamentoSalvo.atualizado_por)) || null,
             };
         } catch (error) {
             console.error('Erro ao criar treinamento:', error);
@@ -299,6 +337,12 @@ export class TreinamentosService {
             if (updateTreinamentoDto.tipo_online !== undefined) {
                 treinamento.tipo_online = updateTreinamentoDto.tipo_online;
             }
+            if (updateTreinamentoDto.tipo_mentoria !== undefined) {
+                treinamento.tipo_mentoria = updateTreinamentoDto.tipo_mentoria;
+            }
+            if (updateTreinamentoDto.tipo_presencial !== undefined) {
+                treinamento.tipo_presencial = updateTreinamentoDto.tipo_presencial;
+            }
             if (updateTreinamentoDto.atualizado_por !== undefined) {
                 treinamento.atualizado_por = updateTreinamentoDto.atualizado_por;
             }
@@ -338,6 +382,7 @@ export class TreinamentosService {
                 },
                 relations: ['id_turma_aluno_fk'],
             });
+            const nomeAtualizadorMap = await this.mapNomeUsuariosPorIds([treinamentoAtualizado.atualizado_por]);
 
             return {
                 id: treinamentoAtualizado.id,
@@ -348,7 +393,9 @@ export class TreinamentosService {
                 url_logo_treinamento: treinamentoAtualizado.url_logo_treinamento,
                 tipo_treinamento: treinamentoAtualizado.tipo_treinamento,
                 tipo_palestra: treinamentoAtualizado.tipo_palestra,
+                tipo_mentoria: treinamentoAtualizado.tipo_mentoria,
                 tipo_online: treinamentoAtualizado.tipo_online,
+                tipo_presencial: treinamentoAtualizado.tipo_presencial,
                 total_turmas: totalTurmas,
                 total_alunos: totalAlunos,
                 capacidade_total: capacidadeTotal,
@@ -356,6 +403,7 @@ export class TreinamentosService {
                 created_at: treinamentoAtualizado.criado_em instanceof Date ? treinamentoAtualizado.criado_em.toISOString() : treinamentoAtualizado.criado_em,
                 updated_at:
                     treinamentoAtualizado.atualizado_em instanceof Date ? treinamentoAtualizado.atualizado_em.toISOString() : treinamentoAtualizado.atualizado_em,
+                atualizado_por_nome: nomeAtualizadorMap.get(Number(treinamentoAtualizado.atualizado_por)) || null,
             };
         } catch (error) {
             console.error('Erro ao atualizar treinamento:', error);

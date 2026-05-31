@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
-import { CONTRACT_DIGITAL_SIGNATURE_FALLBACK_TEXT } from './constants/contract-signature.constants';
+import {
+    CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT,
+    CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT,
+} from './constants/contract-signature.constants';
+import { getContractDestinationProfile, IAM_LOGO_PATH, LIBERTY_LOGO_PATH } from '@shared/contracts/contract-destination-profile';
 
 @Injectable()
 export class ContractTemplateService {
@@ -50,9 +54,6 @@ export class ContractTemplateService {
                   .replace(/\n/g, '<br>')
             : '';
 
-        // Obter a URL absoluta da logo
-        const logoUrl = `${process.env.FRONTEND_URL || 'http://iamcontrol.com.br'}/images/logo/logo-escuro.png`;
-
         // Função para converter URLs do Google Drive para formato de visualização
         const convertGoogleDriveUrl = (url: string): string => {
             if (!url) return '';
@@ -98,10 +99,15 @@ export class ContractTemplateService {
             padding: 0;
             box-sizing: border-box;
         }
+
+        @page {
+            size: A4;
+            margin: 3cm 2cm 2cm 3cm;
+        }
         
         body {
             font-family: 'Figtree', Arial, sans-serif;
-            padding: 3cm 2cm 2cm 3cm;
+            padding: 0;
             font-size: 11px;
             line-height: 1.55;
             color: #000;
@@ -308,53 +314,53 @@ export class ContractTemplateService {
         }
         
         .clause {
-            margin-bottom: 10px;
+            margin-bottom: 6px;
             text-align: justify;
             page-break-inside: avoid;
         }
         
         .clause-title {
             font-weight: 700;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
             page-break-after: avoid;
             text-transform: none;
-            line-height: 1.35;
+            line-height: 1.28;
         }
         
         .clause-text {
-            line-height: 1.38;
+            line-height: 1.3;
             font-weight: 500;
             text-indent: 0;
         }
 
         .clauses-page-content {
-            margin-top: 18px;
-            margin-bottom: 20px;
+            margin-top: 14px;
+            margin-bottom: 14px;
         }
 
         .clauses-wrapper {
-            margin-top: 10px;
-            margin-bottom: 16px;
-            padding-top: 10px;
-            padding-bottom: 12px;
+            margin-top: 8px;
+            margin-bottom: 10px;
+            padding-top: 6px;
+            padding-bottom: 8px;
         }
 
         .clauses-wrapper p,
         .clauses-wrapper div {
-            line-height: 1.38;
+            line-height: 1.3;
             font-weight: 500;
         }
 
         .clauses-wrapper p {
-            margin: 0 0 5px 0;
+            margin: 0 0 3px 0;
             text-align: justify;
             text-indent: 0;
         }
 
         .paragraph {
             margin-left: 0;
-            margin-top: 6px;
-            margin-bottom: 6px;
+            margin-top: 4px;
+            margin-bottom: 4px;
             text-indent: 0;
         }
         
@@ -384,7 +390,7 @@ export class ContractTemplateService {
 
         @media print {
             body {
-                padding: 3cm 2cm 2cm 3cm;
+                padding: 0;
             }
 
             .clause,
@@ -607,30 +613,10 @@ export class ContractTemplateService {
                     `;
                 }
 
-                const inserirQuebrasPaginaPorClausula = (html: string): string => {
-                    let clauseIndex = 0;
-                    const cabecalhoRegex = /(<(?:p|div|h[1-6])[^>]*>\s*(?:<[^>]+>\s*)*(?:cl[aá]usula)\b[\s\S]*?<\/(?:p|div|h[1-6])>)/gi;
-
-                    const comQuebras = html.replace(cabecalhoRegex, (match: string) => {
-                        const precisaQuebra = clauseIndex > 0 && clauseIndex % 3 === 0;
-                        clauseIndex += 1;
-                        return `${precisaQuebra ? '<div class="clause-page-break"></div>' : ''}${match}`;
-                    });
-
-                    if (clauseIndex > 0) return comQuebras;
-
-                    let fallbackClauseIndex = 0;
-                    return html.replace(/(<strong[^>]*>\s*cl[aá]usula\b[\s\S]*?<\/strong>)/gi, (match: string) => {
-                        const precisaQuebra = fallbackClauseIndex > 0 && fallbackClauseIndex % 3 === 0;
-                        fallbackClauseIndex += 1;
-                        return `${precisaQuebra ? '<div class="clause-page-break"></div>' : ''}${match}`;
-                    });
-                };
-
                 const possuiTagsHtml = /<\/?[a-z][\s\S]*>/i.test(texto);
                 if (possuiTagsHtml) {
-                    // Mantém a formatação original e inclui quebras de página entre blocos de cláusulas.
-                    return inserirQuebrasPaginaPorClausula(texto);
+                    // Mantém a formatação original sem forçar quebra fixa por quantidade de cláusulas.
+                    return texto;
                 }
 
                 // Fallback para texto puro: preserva parágrafos e quebras de linha.
@@ -639,17 +625,13 @@ export class ContractTemplateService {
                     .map((bloco) => bloco.trim())
                     .filter(Boolean);
 
-                let indiceClausula = 0;
                 return blocos
                     .map((bloco) => {
                         const blocoEscapado = escapeHtml(bloco).replace(/\n/g, '<br>');
                         const ehTituloClausula = /^cl[aá]usula\s+/i.test(bloco);
 
                         if (ehTituloClausula) {
-                            const quebraPagina = indiceClausula > 0 && indiceClausula % 3 === 0 ? '<div class="clause-page-break"></div>' : '';
-                            indiceClausula += 1;
                             return `
-                              ${quebraPagina}
                               <div class="clause">
                                 <div class="clause-title">${blocoEscapado}</div>
                               </div>
@@ -826,7 +808,22 @@ export class ContractTemplateService {
             const dataImersao = campos_variaveis?.['Data do Imersão Prosperar'] || '___/___/___';
             const bonusOutrosDescricao = campos_variaveis?.['Descrição do Outro Bônus'] || '_________________';
             const nomeTreinamento = treinamento?.nome || treinamento?.treinamento || campos_variaveis?.['Nome do Treinamento Contratado'] || '_________________';
-            const quantidadeInscricoesBonus = campos_variaveis?.['Quantidade de Inscrições'] || '1';
+            const quantidadeInscricoesContrato =
+                campos_variaveis?.['Quantidade de Inscrições'] ||
+                campos_variaveis?.['Quantidade de Inscricoes'] ||
+                pagamento?.valores_formas_pagamento?.quantidade_inscricoes ||
+                '1';
+            const destinationProfile = getContractDestinationProfile(nomeTreinamento);
+            const normalizedTrainingName = normalizeString(nomeTreinamento);
+            const isMentoriaLiberty =
+                destinationProfile.brand === 'LIBERTY' && destinationProfile.treinamentoLabel === 'MENTORIA' && normalizedTrainingName.includes('LIBERTY');
+            const trainingLogoPath = destinationProfile.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH;
+            const trainingLogoUrl = getAbsoluteImageUrl(trainingLogoPath);
+            const trainingDataLabel = destinationProfile.dataLabel || 'DATA';
+            const trainingDataValue =
+                destinationProfile.dataLabel === 'DATA DA REALIZAÇÃO'
+                    ? campos_variaveis?.['Data da Realização'] || campos_variaveis?.['Data da Mentoria'] || dataInicio
+                    : dataInicio;
 
             const bonusDetalhesHtml = (() => {
                 const tipoBonus = new Set((bonusTipos || []).map((tipo: string) => normalizeString(tipo).toLowerCase()));
@@ -857,7 +854,7 @@ export class ContractTemplateService {
                     },
                     {
                         checked: temIPR,
-                        text: `${escapeAndFallback(quantidadeInscricoesBonus, '1')} inscrição(ões) do Imersão Prosperar<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${escapeAndFallback(dataIPR, '___/___/___')}`,
+                        text: `${escapeAndFallback(quantidadeInscricoesContrato, '1')} inscrição(ões) do Imersão Prosperar<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${escapeAndFallback(dataIPR, '___/___/___')}`,
                     },
                     {
                         checked: temOutros,
@@ -925,19 +922,24 @@ export class ContractTemplateService {
                 </label>`,
                 ].join('');
 
-                const parceladoHtml = `
-                <label class="checkbox-item">
-                    <input type="checkbox" class="checkbox" ${cartaoCreditoParcelado.checked ? 'checked' : ''} disabled>
-                    CARTÃO DE CRÉDITO - ${formatCurrencyBRL(cartaoCreditoParcelado.valorTotal)}<br>
-                    ${cartaoCreditoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaCartao)}
-                </label>
+                const boletoParceladoHtml = destinationProfile.allowBoletoParcelado
+                    ? `
                 <label class="checkbox-item">
                     <input type="checkbox" class="checkbox" ${boletoParcelado.checked ? 'checked' : ''} disabled>
                     BOLETO - ${formatCurrencyBRL(boletoParcelado.valorTotal)}<br>
                     ${boletoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaBoleto)}<br>
                     Melhor dia de vencimento: ${escapeAndFallback(melhorDiaBoleto, '___')}<br>
                     1º boleto para: ${escapeAndFallback(dataPrimeiroBoleto, '___/___/___')}
+                </label>`
+                    : '';
+
+                const parceladoHtml = `
+                <label class="checkbox-item">
+                    <input type="checkbox" class="checkbox" ${cartaoCreditoParcelado.checked ? 'checked' : ''} disabled>
+                    CARTÃO DE CRÉDITO - ${formatCurrencyBRL(cartaoCreditoParcelado.valorTotal)}<br>
+                    ${cartaoCreditoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaCartao)}
                 </label>
+                ${boletoParceladoHtml}
                 <label class="checkbox-item">
                     <input type="checkbox" class="checkbox" ${outrosPorTipo.PARCELADO.length > 0 ? 'checked' : ''} disabled>
                     OUTROS: ${
@@ -979,7 +981,7 @@ export class ContractTemplateService {
                 ALUNO_CEP: aluno?.endereco?.cep || '____________',
                 TREINAMENTO_NOME: nomeTreinamento,
                 TREINAMENTO_CIDADE: campos_variaveis?.['Cidade do Treinamento'] || 'Local a definir',
-                TREINAMENTO_DATA_INICIO: dataInicio,
+                TREINAMENTO_DATA_INICIO: trainingDataValue,
                 TREINAMENTO_DATA_FIM: dataFim,
                 TREINAMENTO_PRECO: totalContrato > 0 ? this.formatCurrency(totalContrato) : 'R$ _________________',
                 BONUS_NAO_APLICA: naoSeAplicaBonus ? 'checked' : '',
@@ -1005,8 +1007,8 @@ export class ContractTemplateService {
                 TESTEMUNHA_1_CPF: testemunhas?.testemunha_um?.cpf || '_________________',
                 TESTEMUNHA_2_NOME: testemunhas?.testemunha_dois?.nome || '_________________',
                 TESTEMUNHA_2_CPF: testemunhas?.testemunha_dois?.cpf || '_________________',
-                IAM_LOGO_URL: logoUrl,
-                TREINAMENTO_LOGO_URL: treinamento?.url_logo_treinamento ? getAbsoluteImageUrl(treinamento.url_logo_treinamento) : logoUrl,
+                IAM_LOGO_URL: trainingLogoUrl,
+                TREINAMENTO_LOGO_URL: trainingLogoUrl,
                 CLAUSULAS_HTML: formatarClausulasHtml(clausulasOriginais),
             };
 
@@ -1022,33 +1024,104 @@ export class ContractTemplateService {
                 renderedTemplate = renderedTemplate.replace(/<strong>Endereço:<\/strong>[^<]*/g, '<strong>Endereço:</strong> _________________');
             }
 
+            renderedTemplate = renderedTemplate.replace(/<strong>Treinamento:<\/strong>/g, `<strong>${destinationProfile.treinamentoLabel}:</strong>`);
+            renderedTemplate = renderedTemplate.replace(/<strong>Data Prevista:<\/strong>/g, `<strong>${trainingDataLabel}:</strong>`);
+
+            if (destinationProfile.showQuantidadeInscricoes) {
+                const trainingLineRegex = /(<strong>(?:TREINAMENTO|EVENTO|MENTORIA|TREINAMENTO ONLINE):<\/strong>[\s\S]*?<br><br>)/i;
+                renderedTemplate = renderedTemplate.replace(
+                    trainingLineRegex,
+                    `$1<strong>Quantidade de Inscrições:</strong> ${quantidadeInscricoesContrato}<br><br>`,
+                );
+            } else {
+                renderedTemplate = renderedTemplate.replace(/<strong>Quantidade de Inscri[cç][oõ]es:<\/strong>[\s\S]*?<br><br>/gi, '');
+            }
+
+            if (isMentoriaLiberty) {
+                renderedTemplate = renderedTemplate.replace(
+                    /O presente instrumento tem como objetivo realizar a inscri[cç][aã]o da pessoa abaixo nominada no seguinte treinamento:/i,
+                    'Pelo presente instrumento, fica formalizada a contratação da mentoria ora pactuada, conforme dados abaixo:',
+                );
+            }
+
+            if (!destinationProfile.showBonus) {
+                renderedTemplate = renderedTemplate.replace(
+                    /<td class="half-width" style="vertical-align: top;">\s*<strong>B[oô]nus:<\/strong><br>[\s\S]*?<\/td>/i,
+                    '',
+                );
+            }
+
+            if (!destinationProfile.showPayment) {
+                renderedTemplate = renderedTemplate.replace(
+                    /<table>\s*<tr>\s*<td class="payment-header" colspan="2">[\s\S]*?<strong>FORMA DE PAGAMENTO<\/strong>[\s\S]*?<\/table>/i,
+                    '',
+                );
+            }
+
+            if (!destinationProfile.showTestemunhas) {
+                renderedTemplate = renderedTemplate.replace(/<div class="witnesses-section"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/i, '</div></div>');
+                renderedTemplate = renderedTemplate.replace(/na presença de 2 testemunhas\./gi, 'na forma digital.');
+                renderedTemplate = renderedTemplate.replace(/na presença das testemunhas abaixo\./gi, 'na forma digital.');
+            }
+
             return renderedTemplate;
         }
 
         // Função para gerar footer com logo
+        const destinationTrainingName = treinamento?.nome || treinamento?.treinamento || campos_variaveis?.['Nome do Treinamento Contratado'] || '';
+        const destinationProfileEmbedded = getContractDestinationProfile(destinationTrainingName);
+        const normalizedDestinationTrainingName = String(destinationTrainingName)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toUpperCase()
+            .trim();
+        const isMentoriaLibertyEmbedded =
+            destinationProfileEmbedded.brand === 'LIBERTY' &&
+            destinationProfileEmbedded.treinamentoLabel === 'MENTORIA' &&
+            normalizedDestinationTrainingName.includes('LIBERTY');
+        const trainingLogoUrlEmbedded = getAbsoluteImageUrl(destinationProfileEmbedded.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH);
+        const dataTreinamentoLabelEmbedded = destinationProfileEmbedded.dataLabel || 'DATA PREVISTA';
+        const clauseTypographyByBrand =
+            destinationProfileEmbedded.brand === 'LIBERTY'
+                ? {
+                      sectionLineHeight: 1.27,
+                      clauseGapPx: 4,
+                      titleLineHeight: 1.25,
+                      contentLineHeight: 1.27,
+                      paragraphGapPt: 3.5,
+                      pageDensityFactor: 1.08,
+                  }
+                : {
+                      sectionLineHeight: 1.3,
+                      clauseGapPx: 5,
+                      titleLineHeight: 1.28,
+                      contentLineHeight: 1.3,
+                      paragraphGapPt: 4,
+                      pageDensityFactor: 1.0,
+                  };
+
         const generateFooter = (showLogo: boolean = true) => {
             return `
               <div class="footer">
                 ${
-                    showLogo && treinamento?.url_logo_treinamento
-                        ? `<img src="${getAbsoluteImageUrl(treinamento.url_logo_treinamento)}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 5px;" onerror="this.style.display='none';">`
-                        : showLogo
-                          ? `<div class="footer-text-fallback"><div class="footer-logo">IMERSÃO PROSPERAR</div><div class="footer-subtitle">ACORDE SUA MENTE</div></div>`
-                          : '<div style="height: 40px;"></div>'
+                    showLogo
+                        ? `<img src="${trainingLogoUrlEmbedded}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 5px;" onerror="this.style.display='none';">`
+                        : '<div style="height: 40px;"></div>'
                 }
               </div>
             `;
         };
 
-        const assinaturaTextoPadrao = CONTRACT_DIGITAL_SIGNATURE_FALLBACK_TEXT;
-        const hasSignatureImage = (signature?: string | null) =>
-            Boolean(signature && String(signature).trim().length > 0);
+        const assinaturaTextoPadrao = destinationProfileEmbedded.showTestemunhas
+            ? CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT
+            : CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT;
+        const hasSignatureImage = (signature?: string | null) => Boolean(signature && String(signature).trim().length > 0);
 
         const renderSignatureVisual = (signature?: string | null, alt: string = 'Assinatura') => {
             if (hasSignatureImage(signature)) {
-                return `<img src="${getAbsoluteImageUrl(signature as string)}" alt="${alt}" style="max-height: 60px; max-width: 300px; object-fit: contain;">`;
+                return `<div style="height: 100%; display: flex; align-items: flex-end; justify-content: center;"><img src="${getAbsoluteImageUrl(signature || '')}" alt="${alt}" style="max-height: 44px; max-width: 280px; object-fit: contain; display: block; margin: 0 auto 2px auto;"></div>`;
             }
-            return `<div class="digital-signature-fallback">${assinaturaTextoPadrao}</div>`;
+            return `<div style="height: 100%; display: flex; align-items: flex-end; justify-content: center;"><div class="digital-signature-fallback">${assinaturaTextoPadrao}</div></div>`;
         };
 
         const dadosPessoaisHTML = isIPRContract
@@ -1138,10 +1211,7 @@ export class ContractTemplateService {
                 <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${renderSignatureVisual(
-                          contrato.assinatura_testemunha_um_base64,
-                          'Assinatura Testemunha 1',
-                      )}
+                      ${renderSignatureVisual(contrato.assinatura_testemunha_um_base64, 'Assinatura Testemunha 1')}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 1</strong><br>
@@ -1150,10 +1220,7 @@ export class ContractTemplateService {
                   </div>
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${renderSignatureVisual(
-                          contrato.assinatura_testemunha_dois_base64,
-                          'Assinatura Testemunha 2',
-                      )}
+                      ${renderSignatureVisual(contrato.assinatura_testemunha_dois_base64, 'Assinatura Testemunha 2')}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 2</strong><br>
@@ -1209,8 +1276,8 @@ export class ContractTemplateService {
             // Configurações para página A4
             // A4: 29,7cm x 21cm com margens de 1,27cm = área útil de 27,16cm x 18,46cm
             // Considerando fonte de 11px e line-height de 1.0, aproximadamente 45-50 linhas por página
-            const maxCharactersPerPage = 6200; // Caracteres máximos por página (estimativa baseada em A4)
-            const footerThreshold = 5000; // Limite para decidir se o footer fica na mesma página
+            const maxCharactersPerPage = Math.floor(6800 * clauseTypographyByBrand.pageDensityFactor); // Ajuste fino por perfil da marca
+            const footerThreshold = Math.floor(5600 * clauseTypographyByBrand.pageDensityFactor); // Mantém espaço seguro considerando densidade por marca
 
             // Função para estimar o tamanho do conteúdo
             const estimateContentSize = (content: string) => {
@@ -1279,10 +1346,7 @@ export class ContractTemplateService {
                         
                           <div style="text-align: center; margin: 30px 0;">
                             <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                              ${renderSignatureVisual(
-                                  contrato.assinatura_aluno_base64,
-                                  'Assinatura do Aluno',
-                              )}
+                              ${renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')}
                             </div>
                             <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
                             <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
@@ -1295,10 +1359,7 @@ export class ContractTemplateService {
                 <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${renderSignatureVisual(
-                          contrato.assinatura_testemunha_um_base64,
-                          'Assinatura Testemunha 1',
-                      )}
+                      ${renderSignatureVisual(contrato.assinatura_testemunha_um_base64, 'Assinatura Testemunha 1')}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 1</strong><br>
@@ -1307,10 +1368,7 @@ export class ContractTemplateService {
                   </div>
                   <div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                      ${renderSignatureVisual(
-                          contrato.assinatura_testemunha_dois_base64,
-                          'Assinatura Testemunha 2',
-                      )}
+                      ${renderSignatureVisual(contrato.assinatura_testemunha_dois_base64, 'Assinatura Testemunha 2')}
                     </div>
                     <div class="signature-line"></div>
                     <strong>Testemunha 2</strong><br>
@@ -1413,13 +1471,13 @@ export class ContractTemplateService {
               
               /* Páginas individuais */
               .page {
-                height: auto; /* Evita corte de conteúdo no fim da página */
+                height: 27.16cm; /* Altura fixa da área útil da página A4 */
                 min-height: 27.16cm;
                 padding: 1.27cm;
                 padding-bottom: 80px; /* Reduzido de 100px para 80px para dar mais espaço */
                 box-sizing: border-box;
                 position: relative;
-                overflow: visible; /* Não recorta conteúdo em páginas longas */
+                overflow: hidden; /* Impede vazamento para página seguinte sem nova margem */
                 page-break-after: always; /* Força quebra de página após cada página */
                 break-after: page; /* Suporte moderno para quebra de página */
               }
@@ -1554,21 +1612,23 @@ export class ContractTemplateService {
                 text-transform: uppercase;
                 letter-spacing: 0.3px;
                 text-align: center;
-                line-height: 1.2;
+                line-height: 1.15;
+                max-width: 280px;
+                margin: 0 auto 2px auto;
               }
               
               .clauses-section {
-                margin-top: 26px;
-                margin-bottom: 22px;
+                margin-top: 18px;
+                margin-bottom: 14px;
                 padding: 0;
                 background: white;
                 font-size: 11px;
-                line-height: 1.38;
+                line-height: ${clauseTypographyByBrand.sectionLineHeight};
                 font-weight: 500;
               }
                
               .clause {
-                margin-bottom: 8px; /* Espaço controlado entre cláusulas */
+                margin-bottom: ${clauseTypographyByBrand.clauseGapPx}px; /* Espaço controlado entre cláusulas */
                 padding: 0;
                 background: white;
               }
@@ -1578,13 +1638,13 @@ export class ContractTemplateService {
                 color: #000;
                 font-size: 11px;
                 text-decoration: none;
-                margin-bottom: 4px;
-                line-height: 1.35;
+                margin-bottom: 2px;
+                line-height: ${clauseTypographyByBrand.titleLineHeight};
               }
                 
               .clause-content {
                 color: #000;
-                line-height: 1.38;
+                line-height: ${clauseTypographyByBrand.contentLineHeight};
                 text-align: justify;
                 font-size: 11px;
                 font-weight: 500;
@@ -1593,7 +1653,7 @@ export class ContractTemplateService {
               .clause-paragraph {
                 margin-left: 0;
                 display: block;
-                margin-bottom: 6pt; /* 6pt de espaço após parágrafo */
+                margin-bottom: ${clauseTypographyByBrand.paragraphGapPt}pt; /* espaço reduzido para aumentar densidade */
               }
                 
               .clause-paragraph-title {
@@ -1605,49 +1665,37 @@ export class ContractTemplateService {
               }
                 
                 .clause-paragraph-text {
-                  line-height: 1.38;
+                  line-height: ${clauseTypographyByBrand.contentLineHeight};
                   text-align: justify;
                   font-size: 11px;
                   display: inline;
                   font-weight: 500;
                 }
                 
-                /* Garantir que tags strong dentro das cláusulas mantenham o negrito na impressão */
-                .clauses-section strong {
-                  font-weight: bold !important;
-                  color: #000 !important;
-                  font-size: 11px !important;
-                }
-                
-                .clause strong {
-                  font-weight: bold !important;
-                  color: #000 !important;
-                  font-size: 11px !important;
-                }
-                
-                /* Regras mais específicas para garantir negrito na impressão */
-                .clauses-section * strong {
-                  font-weight: bold !important;
-                  color: #000 !important;
-                  font-size: 11px !important;
-                }
-                
-                .clauses-section strong,
-                .clauses-section b {
-                  font-weight: bold !important;
-                  color: #000 !important;
-                  font-size: 11px !important;
+                /* Regras unificadas para manter negrito em títulos e trechos importantes das cláusulas */
+                .clauses-section {
+                  font-weight: normal;
+                  position: relative;
                 }
 
-                /* Garantir que todos os elementos dentro das cláusulas usem fonte 11px */
                 .clauses-section * {
+                  font-weight: inherit;
                   font-size: 11px !important;
-                  line-height: 1.38 !important;
+                  line-height: ${clauseTypographyByBrand.contentLineHeight} !important;
+                }
+
+                .clauses-section strong,
+                .clauses-section b,
+                .clauses-section strong *,
+                .clauses-section b * {
+                  font-weight: bold !important;
+                  color: #000 !important;
+                  font-size: 11px !important;
                 }
 
                 .clauses-section p {
-                  margin-bottom: 6pt !important;
-                  line-height: 1.38 !important;
+                  margin-bottom: ${clauseTypographyByBrand.paragraphGapPt}pt !important;
+                  line-height: ${clauseTypographyByBrand.contentLineHeight} !important;
                   font-size: 11px !important;
                 }
               
@@ -1819,12 +1867,16 @@ export class ContractTemplateService {
               <div class="page">
               <div class="header">
                 <div class="logo-container">
-                  <img src="${logoUrl}" alt="IAM Treinamentos" class="logo-image" onerror="this.style.display='none';">
+                  <img src="${trainingLogoUrlEmbedded}" alt="Logo da Empresa" class="logo-image" onerror="this.style.display='none';">
                 </div>
               </div>
               
               <p class="intro-text">
-                O presente instrumento tem como objetivo realizar a inscrição da pessoa abaixo nominada no seguinte treinamento:
+                ${
+                    isMentoriaLibertyEmbedded
+                        ? 'Pelo presente instrumento, fica formalizada a contratação da mentoria ora pactuada, conforme dados abaixo:'
+                        : `O presente instrumento tem como objetivo realizar a inscrição da pessoa abaixo nominada no seguinte ${destinationProfileEmbedded.treinamentoLabel.toLowerCase()}:`
+                }
               </p>
               
               <!-- Dados Pessoais -->
@@ -1834,20 +1886,37 @@ export class ContractTemplateService {
               <table class="table">
                 <tr class="table-row">
                   <td class="table-cell ${possuiBonusRelevante ? 'half-width' : ''}" ${possuiBonusRelevante ? '' : 'colspan="2"'} style="vertical-align: top;">
-                    <strong>Treinamento:</strong> ${treinamento?.nome || '_________________'}<br><br>
+                    <strong>${destinationProfileEmbedded.treinamentoLabel}:</strong> ${treinamento?.nome || '_________________'}<br><br>
                     <strong>Cidade:</strong> ${campos_variaveis?.['Cidade do Treinamento'] || 'Local a definir'}<br><br>
-                    <strong>Data Prevista:</strong> ${(() => {
-                        const dataInicio = campos_variaveis?.['Data Prevista do Treinamento'];
-                        const dataFinal = campos_variaveis?.['Data Final do Treinamento'];
+                    ${
+                        destinationProfileEmbedded.dataLabel
+                            ? `<strong>${dataTreinamentoLabelEmbedded}:</strong> ${(() => {
+                                  const dataInicio = campos_variaveis?.['Data Prevista do Treinamento'];
+                                  const dataFinal = campos_variaveis?.['Data Final do Treinamento'];
+                                  const dataRealizacao = campos_variaveis?.['Data da Realização'] || campos_variaveis?.['Data da Mentoria'];
 
-                        if (dataInicio && dataFinal) {
-                            return `${dataInicio} à ${dataFinal}`;
-                        } else if (dataInicio) {
-                            return dataInicio;
-                        } else {
-                            return '___/___/___';
-                        }
-                    })()}<br><br>
+                                  if (destinationProfileEmbedded.dataLabel === 'DATA DA REALIZAÇÃO' && dataRealizacao) {
+                                      return dataRealizacao;
+                                  } else if (dataInicio && dataFinal) {
+                                      return `${dataInicio} à ${dataFinal}`;
+                                  } else if (dataInicio) {
+                                      return dataInicio;
+                                  } else {
+                                      return '___/___/___';
+                                  }
+                              })()}<br><br>`
+                            : ''
+                    }
+                    ${
+                        destinationProfileEmbedded.showQuantidadeInscricoes
+                            ? `<strong>Quantidade de Inscrições:</strong> ${
+                                  campos_variaveis?.['Quantidade de Inscrições'] ||
+                                  campos_variaveis?.['Quantidade de Inscricoes'] ||
+                                  pagamento?.valores_formas_pagamento?.quantidade_inscricoes ||
+                                  '1'
+                              }<br><br>`
+                            : ''
+                    }
                     <strong>Preço do Contrato:</strong> ${(() => {
                         // Calcular o somatório de todos os valores pagos agrupando por forma e tipo
                         if (pagamento?.formas_pagamento && pagamento.formas_pagamento.length > 0) {
@@ -1878,7 +1947,7 @@ export class ContractTemplateService {
                     })()}
                   </td>
                   ${
-                      possuiBonusRelevante
+                      destinationProfileEmbedded.showBonus
                           ? `<td class="table-cell half-width" style="vertical-align: top;">
                     <strong>Bônus:</strong><br>
                           ${(() => {
@@ -1964,6 +2033,9 @@ export class ContractTemplateService {
               </table>
               
               <!-- Formas de Pagamento -->
+              ${
+                  destinationProfileEmbedded.showPayment
+                      ? `
               <table class="table">
                 <tr class="table-row">
                   <td class="table-cell" colspan="2" style="text-align: center; background: #f0f0f0;"><strong>FORMA DE PAGAMENTO</strong></td>
@@ -2075,7 +2147,8 @@ export class ContractTemplateService {
                           const mostrarCartaoCredito = configCartaoCredito !== undefined ? configCartaoCredito : true; // Padrão: sempre permitir cartão de crédito
 
                           const mostrarBoleto =
-                              configBoleto !== undefined ? configBoleto : !nomeTreinamento.includes('ipr') && !nomeTreinamento.includes('imersão prosperar'); // Padrão: não permitir boleto para IPR
+                              destinationProfileEmbedded.allowBoletoParcelado &&
+                              (configBoleto !== undefined ? configBoleto : !nomeTreinamento.includes('ipr') && !nomeTreinamento.includes('imersão prosperar')); // Padrão: não permitir boleto para IPR
 
                           // Agrupar formas de pagamento parceladas por tipo e forma
                           const formasParceladasAgrupadas: { [key: string]: { valor: number; forma: string; tipo: string; parcelas: number } } = {};
@@ -2193,6 +2266,9 @@ export class ContractTemplateService {
                   </td>
                 </tr>
               </table>
+              `
+                      : ''
+              }
               
               <!-- Observações -->
               <table class="table">
@@ -2206,7 +2282,11 @@ export class ContractTemplateService {
               
               <!-- Assinaturas -->
               <p style="margin-bottom: 5px; margin-top: 5px; font-size: 12px; text-align: justify; line-height: 1;">
-                Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.
+                ${
+                    destinationProfileEmbedded.showTestemunhas
+                        ? 'Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.'
+                        : 'Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo.'
+                }
               </p>
               
               <table class="table" style="border: none; margin-bottom: 0px!important;">
@@ -2235,10 +2315,7 @@ export class ContractTemplateService {
               <div style="display: flex; justify-content: space-between; gap: 40px; line-height: 1;">
                 <div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                    ${renderSignatureVisual(
-                        contrato.assinatura_testemunha_um_base64,
-                        'Assinatura Testemunha 1',
-                    )}
+                    ${renderSignatureVisual(contrato.assinatura_testemunha_um_base64, 'Assinatura Testemunha 1')}
                   </div>
                   <div class="signature-line"></div>
                   <strong>Testemunha 1</strong><br>
@@ -2247,10 +2324,7 @@ export class ContractTemplateService {
                 </div>
                 <div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
-                    ${renderSignatureVisual(
-                        contrato.assinatura_testemunha_dois_base64,
-                        'Assinatura Testemunha 2',
-                    )}
+                    ${renderSignatureVisual(contrato.assinatura_testemunha_dois_base64, 'Assinatura Testemunha 2')}
                   </div>
                   <div class="signature-line"></div>
                   <strong>Testemunha 2</strong><br>
@@ -2263,11 +2337,7 @@ export class ContractTemplateService {
               
               <!-- Footer da Primeira Página com Logo -->
               <div class="footer">
-                ${
-                    treinamento?.url_logo_treinamento
-                        ? `<img src="${getAbsoluteImageUrl(treinamento.url_logo_treinamento)}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 10px;" onerror="this.style.display='none';">`
-                        : ``
-                }
+                ${`<img src="${trainingLogoUrlEmbedded}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 10px;" onerror="this.style.display='none';">`}
               </div>
               </div>
               

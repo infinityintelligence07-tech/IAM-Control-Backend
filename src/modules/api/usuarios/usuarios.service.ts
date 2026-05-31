@@ -24,9 +24,9 @@ export class UsuariosService {
     }
 
     async findAll(filters: GetUsuariosDto): Promise<UsuariosListResponseDto> {
-        const { page = 1, limit = 10, nome, email, setor, funcao } = filters;
+        const { page = 1, limit = 10, nome, email, setor, funcao, aprovado } = filters;
 
-        console.log('Filtros recebidos:', filters);
+        console.log('[usuarios-url-debug][backend][service] filtros recebidos:', filters);
 
         // Construir condições de busca
         const whereConditions: any = {
@@ -35,6 +35,10 @@ export class UsuariosService {
 
         if (nome) {
             const normalizedNome = this.normalizeTextForSearch(nome);
+            console.log('[usuarios-url-debug][backend][service] nome normalizado:', {
+                original: nome,
+                normalized: normalizedNome,
+            });
 
             if (normalizedNome) {
                 whereConditions.nome = Raw((alias) => `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedNome`, { normalizedNome: `%${normalizedNome}%` });
@@ -43,6 +47,10 @@ export class UsuariosService {
 
         if (email) {
             const normalizedEmail = this.normalizeTextForSearch(email);
+            console.log('[usuarios-url-debug][backend][service] email normalizado:', {
+                original: email,
+                normalized: normalizedEmail,
+            });
 
             if (normalizedEmail) {
                 whereConditions.email = Raw((alias) => `${this.buildNormalizedContainsQuery(alias)} LIKE :normalizedEmail`, {
@@ -59,6 +67,20 @@ export class UsuariosService {
             whereConditions.funcao = ArrayContains([funcao]);
         }
 
+        if (aprovado !== undefined) {
+            whereConditions.aprovado = aprovado;
+        }
+
+        console.log('[usuarios-url-debug][backend][service] resumo das condições aplicadas:', {
+            page,
+            limit,
+            hasNomeFilter: Boolean(nome),
+            hasEmailFilter: Boolean(email),
+            setor: setor ?? null,
+            funcao: funcao ?? null,
+            aprovado: aprovado ?? null,
+        });
+
         try {
             // Buscar usuários com paginação
             const [usuarios, total] = await this.uow.usuariosRP.findAndCount({
@@ -71,7 +93,12 @@ export class UsuariosService {
                 take: limit,
             });
 
-            console.log(`Encontrados ${usuarios.length} usuários de um total de ${total}`);
+            console.log('[usuarios-url-debug][backend][service] resultado da consulta:', {
+                encontradosNaPagina: usuarios.length,
+                total,
+                page,
+                limit,
+            });
 
             // Transformar dados para o formato de resposta
             const usuariosResponse: UsuarioResponseDto[] = usuarios.map((usuario) => ({
@@ -85,13 +112,20 @@ export class UsuariosService {
                 setor: usuario.setor,
                 funcao: usuario.funcao,
                 url_foto: usuario.url_foto,
+                aprovado: usuario.aprovado,
+                aprovado_em: usuario.aprovado_em,
+                aprovado_por: usuario.aprovado_por,
                 criado_em: usuario.criado_em,
                 atualizado_em: usuario.atualizado_em,
             }));
 
             const totalPages = Math.ceil(total / limit);
 
-            console.log(`Retornando ${usuariosResponse.length} usuários para a página ${page}`);
+            console.log('[usuarios-url-debug][backend][service] resposta montada:', {
+                dataLength: usuariosResponse.length,
+                page,
+                totalPages,
+            });
 
             return {
                 data: usuariosResponse,
@@ -133,6 +167,9 @@ export class UsuariosService {
                 setor: usuario.setor,
                 funcao: usuario.funcao,
                 url_foto: usuario.url_foto,
+                aprovado: usuario.aprovado,
+                aprovado_em: usuario.aprovado_em,
+                aprovado_por: usuario.aprovado_por,
                 criado_em: usuario.criado_em,
                 atualizado_em: usuario.atualizado_em,
             };
@@ -224,6 +261,9 @@ export class UsuariosService {
                 setor: usuarioAtualizado.setor,
                 funcao: usuarioAtualizado.funcao,
                 url_foto: usuarioAtualizado.url_foto,
+                aprovado: usuarioAtualizado.aprovado,
+                aprovado_em: usuarioAtualizado.aprovado_em,
+                aprovado_por: usuarioAtualizado.aprovado_por,
                 criado_em: usuarioAtualizado.criado_em,
                 atualizado_em: usuarioAtualizado.atualizado_em,
             };
@@ -283,6 +323,48 @@ export class UsuariosService {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao deletar usuário');
+        }
+    }
+
+    async approve(id: number, aprovadoPor: number): Promise<UsuarioResponseDto> {
+        try {
+            const usuario = await this.uow.usuariosRP.findOne({
+                where: { id, deletado_em: IsNull() },
+            });
+
+            if (!usuario) {
+                throw new NotFoundException('Usuário não encontrado');
+            }
+
+            usuario.aprovado = true;
+            usuario.aprovado_em = new Date();
+            usuario.aprovado_por = aprovadoPor;
+
+            await this.uow.usuariosRP.save(usuario);
+
+            return {
+                id: usuario.id,
+                nome: usuario.nome,
+                primeiro_nome: usuario.primeiro_nome,
+                sobrenome: usuario.sobrenome,
+                email: usuario.email,
+                cpf: usuario.cpf,
+                telefone: usuario.telefone,
+                setor: usuario.setor,
+                funcao: usuario.funcao,
+                url_foto: usuario.url_foto,
+                aprovado: usuario.aprovado,
+                aprovado_em: usuario.aprovado_em,
+                aprovado_por: usuario.aprovado_por,
+                criado_em: usuario.criado_em,
+                atualizado_em: usuario.atualizado_em,
+            };
+        } catch (error) {
+            console.error('Erro ao aprovar usuário:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao aprovar usuário');
         }
     }
 }

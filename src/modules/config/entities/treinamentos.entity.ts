@@ -16,7 +16,7 @@ export interface TreinamentoFormaPagamentoPrazoConfig {
     valor: number;
     parcelasMin: number;
     parcelasSemLiberacao: number;
-    parcelasMaximasComLiberacao: number | null;
+    parcelasMaximasComLiberacao?: number | null;
 }
 
 export interface TreinamentoConfiguracaoPagamentos {
@@ -60,8 +60,14 @@ export class Treinamentos extends BaseEntity {
     @Column({ type: 'boolean', name: 'tipo_palestra', nullable: false })
     tipo_palestra: boolean;
 
+    @Column({ type: 'boolean', name: 'tipo_mentoria', nullable: false })
+    tipo_mentoria: boolean;
+
     @Column({ type: 'boolean', name: 'tipo_online', nullable: false })
     tipo_online: boolean;
+
+    @Column({ type: 'boolean', name: 'tipo_presencial', nullable: false })
+    tipo_presencial: boolean;
 
     @OneToMany(() => Turmas, (turmas) => turmas.id_polo_fk)
     turmas: Turmas[];

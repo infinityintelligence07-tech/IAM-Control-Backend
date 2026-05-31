@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Put, Query, Req, Res, UseGuards, UseInterceptors, ClassSerializerInterceptor } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Query, Req, Res, UseGuards, UseInterceptors, ClassSerializerInterceptor, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt.guard';
 import { GoogleAuthGuard } from './guards/google.guard';
@@ -87,6 +87,12 @@ export class AuthController {
         } catch (error) {
             console.error('Erro no Google OAuth:', error);
             const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
+
+            if (error instanceof UnauthorizedException) {
+                res.redirect(`${frontendUrl}/signin?error=pending_approval`);
+                return;
+            }
+
             res.redirect(`${frontendUrl}/signin?error=google_auth_failed`);
         }
     }

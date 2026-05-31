@@ -9,9 +9,9 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
-    "start:dev": "nest start --watch",
+    "start:dev": "npm run start:dev:nodewatch",
     "start:dev:nodewatch": "node --watch --watch-path=src -r ts-node/register -r tsconfig-paths/register src/main.ts",
-    "start:debug": "nest start --debug --watch",
+    "start:debug": "npm run start:debug:nodewatch",
     "start:debug:nodewatch": "node --inspect --watch --watch-path=src -r ts-node/register -r tsconfig-paths/register src/main.ts",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
@@ -24,6 +24,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:contracts:regression": "node -r ts-node/register -r tsconfig-paths/register scripts/contract-pdf-regression.ts",
     "typeorm": " ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js -d ./src/modules/config/database/typeORM.provider.ts"
   },
   "dependencies": {

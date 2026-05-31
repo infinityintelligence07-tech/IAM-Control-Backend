@@ -11,7 +11,7 @@ export interface TreinamentoFormaPagamentoPrazoDto {
     valor: number;
     parcelasMin: number;
     parcelasSemLiberacao: number;
-    parcelasMaximasComLiberacao: number | null;
+    parcelasMaximasComLiberacao?: number | null;
 }
 
 export interface TreinamentoConfiguracaoPagamentosDto {
@@ -56,6 +56,16 @@ export class GetTreinamentosDto {
     tipo_online?: boolean;
 
     @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_mentoria?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_presencial?: boolean;
+
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value, 10))
     page?: number = 1;
@@ -75,13 +85,16 @@ export class TreinamentoResponseDto {
     url_logo_treinamento?: string;
     tipo_treinamento: boolean;
     tipo_palestra: boolean;
+    tipo_mentoria: boolean;
     tipo_online: boolean;
+    tipo_presencial: boolean;
     total_turmas: number;
     total_alunos: number;
     capacidade_total: number;
     alunos_presentes: number;
     created_at: string;
     updated_at: string;
+    atualizado_por_nome?: string | null;
 }
 
 export class TreinamentosListResponseDto {
@@ -132,6 +145,16 @@ export class CreateTreinamentoDto {
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_online: boolean;
 
+    @IsNotEmpty()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_mentoria: boolean;
+
+    @IsNotEmpty()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_presencial: boolean;
+
     @IsOptional()
     @IsNumber()
     criado_por?: number;
@@ -176,6 +199,16 @@ export class UpdateTreinamentoDto {
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_online?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_mentoria?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_presencial?: boolean;
 
     @IsOptional()
     @IsNumber()

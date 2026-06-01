@@ -290,16 +290,22 @@ export class WhatsAppService {
     /**
      * Envia links de check-in para múltiplos alunos
      */
-    async sendCheckInLinksToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
+    async sendCheckInLinksToStudents(
+        students: CheckInStudentDto[],
+    ): Promise<{ success: boolean; sent: number; skipped: number; skippedStudents: string[]; errors: string[] }> {
         const results = {
             success: true,
             sent: 0,
+            skipped: 0,
+            skippedStudents: [] as string[],
             errors: [] as string[],
         };
 
-        for (const student of students) {
+        const configuredConcurrency = Number(process.env.CHECKIN_BULK_CONCURRENCY || 5);
+        const concurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0 ? Math.min(Math.floor(configuredConcurrency), 20) : 5;
+
+        const processStudent = async (student: CheckInStudentDto): Promise<void> => {
             try {
-                // Buscar dados do aluno na turma
                 const alunoTurma = await this.uow.turmasAlunosRP.findOne({
                     where: { id: student.alunoTurmaId },
                     relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_endereco_evento_fk'],
@@ -307,10 +313,21 @@ export class WhatsAppService {
 
                 if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                     results.errors.push(`Aluno não encontrado: ${student.alunoNome}`);
-                    continue;
+                    return;
                 }
 
-                // Gerar token JWT para o link de check-in
+                const statusAtual = alunoTurma.status_aluno_turma;
+                const jaRecebeuCheckin =
+                    alunoTurma.checkin_realizado ||
+                    statusAtual === EStatusAlunosTurmas.AGUARDANDO_CHECKIN ||
+                    statusAtual === EStatusAlunosTurmas.CHECKIN_REALIZADO;
+
+                if (jaRecebeuCheckin) {
+                    results.skipped++;
+                    results.skippedStudents.push(`${student.alunoNome} (${student.alunoTurmaId})`);
+                    return;
+                }
+
                 const checkInToken = jwt.sign(
                     {
                         alunoTurmaId: student.alunoTurmaId,
@@ -318,19 +335,13 @@ export class WhatsAppService {
                         timestamp: Date.now(),
                     },
                     this.jwtSecret,
-                    { expiresIn: '7d' }, // Link expira em 7 dias
+                    { expiresIn: '7d' },
                 );
 
-                // Gerar URL de check-in - link para formulário de preenchimento de dados
                 const checkInUrl = `${this.frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
-
-                // Obter dados da turma para data, local e endereço
                 const turma = alunoTurma.id_turma_fk;
-                const polo = turma?.id_polo_fk;
                 const enderecoEvento = turma?.id_endereco_evento_fk;
 
-                // DATA: usar exatamente o valor do banco (YYYY-MM-DD), sem fuso horário
-                // Ex: "2026-03-10" e "2026-03-12" -> "10/03/2026 à 12/03/2026"
                 const formatDateOnly = (dateStr: string): string => {
                     if (!dateStr || typeof dateStr !== 'string') return 'A confirmar';
                     const datePart = dateStr.trim().split('T')[0];
@@ -341,21 +352,16 @@ export class WhatsAppService {
                     const y = parts[0];
                     return `${d}/${m}/${y}`;
                 };
+
                 const dataInicioStr = turma?.data_inicio;
                 const dataFinalStr = turma?.data_final;
                 let dataStr = 'A confirmar';
                 if (dataInicioStr) {
-                    if (dataFinalStr && dataInicioStr !== dataFinalStr) {
-                        dataStr = `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`;
-                    } else {
-                        dataStr = formatDateOnly(dataInicioStr);
-                    }
+                    dataStr = dataFinalStr && dataInicioStr !== dataFinalStr ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}` : formatDateOnly(dataInicioStr);
                 }
 
-                // LOCAL: nome do local do evento ou do polo (se não houver, mantém vazio)
                 const localStr = enderecoEvento?.local_evento?.trim() || '';
 
-                // ENDEREÇO: logradouro, numero - bairro - cep, cidade - estado
                 const buildEndereco = (
                     e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null,
                 ): string => {
@@ -368,6 +374,7 @@ export class WhatsAppService {
                     if (e.estado) partes.push(e.estado);
                     return partes.length ? partes.join(' - ') : 'A confirmar';
                 };
+
                 const enderecoStr =
                     buildEndereco(enderecoEvento) !== 'A confirmar'
                         ? buildEndereco(enderecoEvento)
@@ -384,53 +391,49 @@ export class WhatsAppService {
                                   : null,
                           );
 
-                // Preparar parâmetros do template (novo template Gupshup: {{1}} a {{6}})
-                // {{1}} = nome, {{2}} = treinamento, {{3}} = DATA, {{4}} = LOCAL, {{5}} = ENDEREÇO, {{6}} = link
-                const templateParams = [
-                    student.alunoNome, // {{1}}
-                    student.treinamentoNome, // {{2}}
-                    dataStr, // {{3}}
-                    localStr, // {{4}}
-                    enderecoStr, // {{5}}
-                    checkInUrl, // {{6}}
-                ];
-
-                // Enviar template em vez de mensagem livre
+                const templateParams = [student.alunoNome, student.treinamentoNome, dataStr, localStr, enderecoStr, checkInUrl];
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
                 const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
 
-                // IMPORTANTE: Tenta múltiplos formatos de template ID para garantir entrega
-                // Ordem de tentativas (do mais específico para o mais genérico):
-                // 1. Nome do template se configurado via env
-                // 2. UUID do template (Gupshup)
-                // 3. Nome padrão do template
-
                 let sendResult: any = { success: false };
-
-                // Tentativa 1: Nome do template se estiver configurado via env e for diferente do UUID
                 const checkinTemplateNameFromEnv = process.env.GUPSHUP_TEMPLATE_NAME;
+
                 if (checkinTemplateNameFromEnv && checkinTemplateNameFromEnv !== this.CHECKIN_TEMPLATE_ID_GUPSHUP) {
                     console.log(`📋 Tentativa 1: Usando nome do template da variável de ambiente: ${checkinTemplateNameFromEnv}`);
                     sendResult = await this.sendTemplateMessage(phone, checkinTemplateNameFromEnv, templateParams, alunoNome);
                 }
 
-                // Tentativa 2: UUID do template (Gupshup)
                 if (!sendResult.success) {
                     console.log(`📋 Tentativa 2: Usando UUID do template: ${this.CHECKIN_TEMPLATE_NAME}`);
                     sendResult = await this.sendTemplateMessage(phone, this.CHECKIN_TEMPLATE_NAME, templateParams, alunoNome);
                 }
 
-                // Tentativa 3: Nome padrão do template (se conhecido)
-                // NOTA: Substitua 'link_checkin' pelo nome real do template na Gupshup
                 if (!sendResult.success) {
                     console.log(`📋 Tentativa 3: Usando nome padrão do template: link_checkin`);
                     sendResult = await this.sendTemplateMessage(phone, 'link_checkin', templateParams, alunoNome);
                 }
 
-                if (sendResult.success) {
-                    // Monta a mensagem de texto (redundância) no formato do novo template
-                    const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
-                    const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
+                if (!sendResult.success) {
+                    console.error(`❌ Falha ao enviar template de check-in para ${alunoNome} (${phone})`);
+                    console.error(`📄 Erro: ${sendResult.error || 'Erro desconhecido'}`);
+                    results.errors.push(`Erro ao enviar para ${student.alunoNome}: ${sendResult.error}`);
+                    return;
+                }
+
+                await this.uow.turmasAlunosRP.update(
+                    { id: student.alunoTurmaId },
+                    {
+                        status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                        confirmacao_realizada: true,
+                        checkin_realizado: false,
+                    },
+                );
+
+                results.sent++;
+
+                // Não bloqueia o fluxo principal com a mensagem de redundância.
+                const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
+                const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
 Você garantiu a sua vaga no _*${student.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
 
@@ -447,57 +450,33 @@ Para não correr o risco de esquecer ou perder o prazo, faça agora mesmo seu ch
 
 Vamos Prosperar! 🙌`;
 
-                    let redundancySuccess = false;
-                    let redundancyError: string | undefined;
-
-                    try {
-                        // Aguarda um pequeno delay antes de enviar a redundância
-                        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-                        // Envia a mensagem de texto via ChatGuru (Z-API) como redundância
-                        const redundancyResult = await this.sendMessage(phone, checkInMessage, alunoNome);
-
+                void this.sendMessage(phone, checkInMessage, alunoNome)
+                    .then((redundancyResult) => {
                         if (redundancyResult.success) {
-                            redundancySuccess = true;
                             console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
-                            console.log(`   A mensagem agora está no histórico do ChatGuru`);
-                        } else {
-                            redundancyError = redundancyResult.error;
-                            console.warn(`⚠️ Redundância via ChatGuru falhou: ${redundancyError}`);
-                            console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
-                            console.warn(`   Verifique os logs acima para mais detalhes sobre o erro`);
+                            return;
                         }
-                    } catch (redundancyErrorException: any) {
-                        redundancyError = redundancyErrorException.message;
-                        console.error(`❌ Exceção ao enviar redundância via ChatGuru: ${redundancyError}`);
-                        console.error(`   Stack: ${redundancyErrorException.stack}`);
-                        console.warn(`   O template via Gupshup foi enviado, mas a redundância falhou`);
-                    }
-                } else {
-                    console.error(`❌ Falha ao enviar template de check-in para ${alunoNome} (${phone})`);
-                    console.error(`📄 Erro: ${sendResult.error || 'Erro desconhecido'}`);
-                }
-
-                if (sendResult.success) {
-                    // Atualizar status do aluno para AGUARDANDO_CHECKIN
-                    await this.uow.turmasAlunosRP.update(
-                        { id: student.alunoTurmaId },
-                        {
-                            status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
-                            confirmacao_realizada: true,
-                            checkin_realizado: false,
-                        },
-                    );
-
-                    results.sent++;
-                } else {
-                    results.errors.push(`Erro ao enviar para ${student.alunoNome}: ${sendResult.error}`);
-                }
+                        console.warn(`⚠️ Redundância via ChatGuru falhou: ${redundancyResult.error || 'erro desconhecido'}`);
+                    })
+                    .catch((redundancyErrorException: unknown) => {
+                        const redundancyMsg =
+                            redundancyErrorException instanceof Error
+                                ? redundancyErrorException.message
+                                : typeof redundancyErrorException === 'string'
+                                  ? redundancyErrorException
+                                  : 'Erro desconhecido na redundância';
+                        console.warn(`⚠️ Exceção ao enviar redundância via ChatGuru: ${redundancyMsg}`);
+                    });
             } catch (error: unknown) {
                 console.error(`Erro ao processar aluno ${student.alunoNome}:`, error);
                 const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
                 results.errors.push(`Erro interno para ${student.alunoNome}: ${errorMessage}`);
             }
+        };
+
+        for (let i = 0; i < students.length; i += concurrency) {
+            const batch = students.slice(i, i + concurrency);
+            await Promise.all(batch.map((student) => processStudent(student)));
         }
 
         results.success = results.errors.length === 0;
@@ -549,10 +528,14 @@ Vamos Prosperar! 🙌`;
         }
     }
 
-    async sendConfirmacaoToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
-        const results = { success: true, sent: 0, errors: [] as string[] };
+    async sendConfirmacaoToStudents(
+        students: CheckInStudentDto[],
+    ): Promise<{ success: boolean; sent: number; skipped: number; skippedStudents: string[]; errors: string[] }> {
+        const results = { success: true, sent: 0, skipped: 0, skippedStudents: [] as string[], errors: [] as string[] };
+        const configuredConcurrency = Number(process.env.CONFIRMACAO_BULK_CONCURRENCY || process.env.CHECKIN_BULK_CONCURRENCY || 5);
+        const concurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0 ? Math.min(Math.floor(configuredConcurrency), 20) : 5;
 
-        for (const student of students) {
+        const processStudent = async (student: CheckInStudentDto): Promise<void> => {
             try {
                 const alunoTurma = await this.uow.turmasAlunosRP.findOne({
                     where: { id: student.alunoTurmaId },
@@ -561,15 +544,26 @@ Vamos Prosperar! 🙌`;
 
                 if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                     results.errors.push(`Aluno não encontrado: ${student.alunoNome}`);
-                    continue;
+                    return;
+                }
+
+                const statusAtual = alunoTurma.status_aluno_turma;
+                const jaRecebeuConfirmacao =
+                    statusAtual === EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO ||
+                    statusAtual === EStatusAlunosTurmas.AGUARDANDO_CHECKIN ||
+                    statusAtual === EStatusAlunosTurmas.CHECKIN_REALIZADO ||
+                    alunoTurma.confirmacao_realizada;
+
+                if (jaRecebeuConfirmacao) {
+                    results.skipped++;
+                    results.skippedStudents.push(`${student.alunoNome} (${student.alunoTurmaId})`);
+                    return;
                 }
 
                 const turma = alunoTurma.id_turma_fk;
                 const treinamento = turma?.id_treinamento_fk;
                 const treinamentoNome = treinamento?.treinamento ?? student.treinamentoNome ?? 'Treinamento';
-                // {{1}} = Nome do Treinamento
                 const param1 = treinamentoNome;
-                // {{2}} = Sigla do Treinamento (ou Nome) - Edição
                 const siglaOuNome = treinamento?.sigla_treinamento?.trim() || treinamentoNome;
                 const edicao = turma?.edicao_turma?.trim() || '';
                 const param2 = edicao ? `${siglaOuNome} - ${edicao}` : siglaOuNome;
@@ -588,13 +582,8 @@ Vamos Prosperar! 🙌`;
                 const dataFinalStr = turma?.data_final;
                 let dataStr = 'A confirmar';
                 if (dataInicioStr) {
-                    if (dataFinalStr && dataInicioStr !== dataFinalStr) {
-                        dataStr = `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`;
-                    } else {
-                        dataStr = formatDateOnly(dataInicioStr);
-                    }
+                    dataStr = dataFinalStr && dataInicioStr !== dataFinalStr ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}` : formatDateOnly(dataInicioStr);
                 }
-                // {{3}} = Data de início à data de fim
                 const param3 = dataStr;
 
                 const polo = turma?.id_polo_fk;
@@ -602,8 +591,6 @@ Vamos Prosperar! 🙌`;
                 const isEnderecoManual = !enderecoEvento?.id;
                 const localEventoPredefinido = enderecoEvento?.local_evento?.trim();
                 const complementoManual = turma?.complemento?.trim();
-                // Regra: se o endereço foi preenchido manualmente (sem endereço predefinido)
-                // e não houver nome do local, usar o "complemento" como nome do local na mensagem.
                 const localStr = localEventoPredefinido || (isEnderecoManual && complementoManual ? complementoManual : null) || polo?.polo || 'A confirmar';
                 const buildEndereco = (
                     e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null,
@@ -632,21 +619,13 @@ Vamos Prosperar! 🙌`;
                                     }
                                   : null,
                           );
-                // {{4}} = Endereço completo: Local Evento - Logradouro, Número - Bairro - CEP, Cidade - Estado
                 const param4 = enderecoParte !== 'A confirmar' ? `${localStr} - ${enderecoParte}` : localStr;
 
                 const templateParams = [param1, param2, param3, param4];
                 const phone = alunoTurma.id_aluno_fk.telefone_um;
                 const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
 
-                // IMPORTANTE: Estrutura espelhada do check-in para maximizar taxa de entrega
-                // Ordem de tentativas:
-                // 1) Template configurado via env (ID/UUID ou nome)
-                // 2) UUID do template na Gupshup
-                // 3) Facebook Template ID
-                // 4) Nome padrão do template
                 let sendResult: any = { success: false };
-
                 const confirmacaoTemplateFromEnv = process.env.GUPSHUP_CONFIRMACAO_TEMPLATE_NAME;
                 if (
                     confirmacaoTemplateFromEnv &&
@@ -673,83 +652,61 @@ Vamos Prosperar! 🙌`;
                     sendResult = await this.sendTemplateMessage(phone, this.CONFIRMACAO_TEMPLATE_NAME, templateParams, alunoNome);
                 }
 
-                if (sendResult.success) {
-                    const messageId = sendResult?.messageId;
-
-                    // Log estruturado por aluno para rastreabilidade operacional
-                    console.log(
-                        JSON.stringify(
-                            {
-                                event: 'confirmacao_template_enviado',
-                                alunoTurmaId: student.alunoTurmaId,
-                                alunoNome,
-                                telefone: phone,
-                                templateIdUsado: sendResult?.templateId || this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP,
-                                messageId: messageId || null,
-                                envioSuccess: !!sendResult.success,
-                            },
-                            null,
-                            2,
-                        ),
-                    );
-
-                    // // Redundância igual ao modelo dos outros fluxos:
-                    // // envia também a copy como mensagem livre no ChatGuru para histórico operacional.
-                    // const confirmacaoMessage = this.generateConfirmacaoMessage(param1, param2, param3, param4);
-                    // let redundancySuccess = false;
-                    // let redundancyError: string | undefined;
-
-                    // try {
-                    //     await new Promise((resolve) => setTimeout(resolve, 1000));
-                    //     const redundancyResult = await this.sendMessage(phone, confirmacaoMessage, alunoNome);
-                    //     if (redundancyResult.success) {
-                    //         redundancySuccess = true;
-                    //         console.log(`✅ Redundância de confirmação enviada com sucesso via ChatGuru (Z-API)`);
-                    //     } else {
-                    //         redundancyError = redundancyResult.error;
-                    //         console.warn(`⚠️ Redundância de confirmação falhou: ${redundancyError}`);
-                    //     }
-                    // } catch (redundancyErrorException: any) {
-                    //     redundancyError = redundancyErrorException.message;
-                    //     console.warn(`⚠️ Exceção na redundância de confirmação: ${redundancyError}`);
-                    // }
-
-                    // if (!redundancySuccess && redundancyError) {
-                    //     console.warn(`⚠️ Template de confirmação enviado, mas redundância falhou para ${alunoNome}: ${redundancyError}`);
-                    // }
-
-                    // Atualiza status operacional após aceite de envio do template.
-                    await this.uow.turmasAlunosRP.update(
-                        { id: student.alunoTurmaId },
-                        {
-                            status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
-                            confirmacao_realizada: false,
-                            checkin_realizado: false,
-                        },
-                    );
-
-                    console.log(
-                        JSON.stringify(
-                            {
-                                event: 'confirmacao_status_atualizado',
-                                alunoTurmaId: student.alunoTurmaId,
-                                alunoNome,
-                                messageId: messageId || null,
-                                novoStatusAlunoTurma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
-                            },
-                            null,
-                            2,
-                        ),
-                    );
-
-                    results.sent++;
-                } else {
+                if (!sendResult.success) {
                     results.errors.push(`Erro ao enviar confirmação para ${alunoNome}: ${sendResult.error}`);
+                    return;
                 }
+
+                const messageId = sendResult?.messageId;
+                console.log(
+                    JSON.stringify(
+                        {
+                            event: 'confirmacao_template_enviado',
+                            alunoTurmaId: student.alunoTurmaId,
+                            alunoNome,
+                            telefone: phone,
+                            templateIdUsado: sendResult?.templateId || this.CONFIRMACAO_TEMPLATE_ID_GUPSHUP,
+                            messageId: messageId || null,
+                            envioSuccess: !!sendResult.success,
+                        },
+                        null,
+                        2,
+                    ),
+                );
+
+                await this.uow.turmasAlunosRP.update(
+                    { id: student.alunoTurmaId },
+                    {
+                        status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+                        confirmacao_realizada: false,
+                        checkin_realizado: false,
+                    },
+                );
+
+                console.log(
+                    JSON.stringify(
+                        {
+                            event: 'confirmacao_status_atualizado',
+                            alunoTurmaId: student.alunoTurmaId,
+                            alunoNome,
+                            messageId: messageId || null,
+                            novoStatusAlunoTurma: EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO,
+                        },
+                        null,
+                        2,
+                    ),
+                );
+
+                results.sent++;
             } catch (error: unknown) {
                 const msg = error instanceof Error ? error.message : 'Erro desconhecido';
                 results.errors.push(`Erro interno para ${student.alunoNome}: ${msg}`);
             }
+        };
+
+        for (let i = 0; i < students.length; i += concurrency) {
+            const batch = students.slice(i, i + concurrency);
+            await Promise.all(batch.map((student) => processStudent(student)));
         }
 
         results.success = results.errors.length === 0;

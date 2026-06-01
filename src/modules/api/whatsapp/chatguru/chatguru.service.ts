@@ -36,6 +36,10 @@ export class ChatGuruService {
         this.gupshupSource = this.configService.get<string>('GUPSHUP_PHONE_NUMBER') || this.configService.get<string>('GUPSHUP_SOURCE') || '';
         // App ID da Gupshup (opcional, mas pode ser necessário)
         this.gupshupAppId = this.configService.get<string>('GUPSHUP_APP_ID') || '';
+
+        // Evita requests pendurados por muito tempo em cenários de alto volume.
+        const configuredTimeout = Number(this.configService.get<string>('WHATSAPP_HTTP_TIMEOUT_MS') || 20000);
+        this.http.axiosRef.defaults.timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
     }
 
     /**
@@ -266,6 +270,11 @@ export class ChatGuruService {
      */
     private async delay(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    private shouldCheckMessageStatusSynchronously(): boolean {
+        const flag = (this.configService.get<string>('WHATSAPP_SYNC_STATUS_CHECK') || 'false').trim().toLowerCase();
+        return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on';
     }
 
     /**
@@ -1029,49 +1038,52 @@ export class ChatGuruService {
                 this.logger.log(`\n   Verifique o status real no painel da Gupshup usando o Message ID.`);
                 this.logger.log(`${'='.repeat(80)}\n`);
 
-                // Aguarda alguns segundos e verifica o status real da mensagem
-                // NOTA: A verificação de status pode falhar, mas isso não significa que a mensagem não foi enviada
+                // Em alto volume, verificação síncrona pode estourar timeout da request.
                 if (messageId) {
-                    this.logger.log(`⏳ Aguardando 5 segundos para verificar status real da mensagem...`);
-                    await new Promise((resolve) => setTimeout(resolve, 5000));
+                    if (this.shouldCheckMessageStatusSynchronously()) {
+                        this.logger.log(`⏳ Aguardando 5 segundos para verificar status real da mensagem...`);
+                        await new Promise((resolve) => setTimeout(resolve, 5000));
 
-                    try {
-                        const statusResult = await this.checkMessageStatus(messageId);
-                        if (statusResult.success && statusResult.status) {
-                            this.logger.log(`📊 Status real da mensagem:`, JSON.stringify(statusResult.status, null, 2));
+                        try {
+                            const statusResult = await this.checkMessageStatus(messageId);
+                            if (statusResult.success && statusResult.status) {
+                                this.logger.log(`📊 Status real da mensagem:`, JSON.stringify(statusResult.status, null, 2));
 
-                            // Verifica se há erros no status
-                            const statusStr = JSON.stringify(statusResult.status).toLowerCase();
-                            if (statusStr.includes('failed') || statusStr.includes('error') || statusStr.includes('rejected')) {
-                                this.logger.warn(`\n${'!'.repeat(80)}`);
-                                this.logger.warn(`⚠️ ATENÇÃO: A mensagem foi rejeitada ou falhou!`);
-                                this.logger.warn(`⚠️ Verifique o status completo no painel da Gupshup`);
-                                this.logger.warn(`⚠️ Message ID: ${messageId}`);
-                                this.logger.warn(`⚠️ Possíveis causas:`);
-                                this.logger.warn(`⚠️   1. Template não está aprovado no WhatsApp`);
-                                this.logger.warn(`⚠️   2. Template foi rejeitado pelo WhatsApp`);
-                                this.logger.warn(`⚠️   3. Número do destinatário inválido ou bloqueado`);
-                                this.logger.warn(`⚠️   4. Conta WhatsApp Business não está ativa`);
-                                this.logger.warn(`${'!'.repeat(80)}\n`);
+                                const statusStr = JSON.stringify(statusResult.status).toLowerCase();
+                                if (statusStr.includes('failed') || statusStr.includes('error') || statusStr.includes('rejected')) {
+                                    this.logger.warn(`\n${'!'.repeat(80)}`);
+                                    this.logger.warn(`⚠️ ATENÇÃO: A mensagem foi rejeitada ou falhou!`);
+                                    this.logger.warn(`⚠️ Verifique o status completo no painel da Gupshup`);
+                                    this.logger.warn(`⚠️ Message ID: ${messageId}`);
+                                    this.logger.warn(`⚠️ Possíveis causas:`);
+                                    this.logger.warn(`⚠️   1. Template não está aprovado no WhatsApp`);
+                                    this.logger.warn(`⚠️   2. Template foi rejeitado pelo WhatsApp`);
+                                    this.logger.warn(`⚠️   3. Número do destinatário inválido ou bloqueado`);
+                                    this.logger.warn(`⚠️   4. Conta WhatsApp Business não está ativa`);
+                                    this.logger.warn(`${'!'.repeat(80)}\n`);
+                                } else {
+                                    this.logger.log(`✅ Status da mensagem verificado com sucesso`);
+                                }
                             } else {
-                                this.logger.log(`✅ Status da mensagem verificado com sucesso`);
+                                this.logger.warn(`⚠️ Não foi possível obter o status da mensagem, mas a Gupshup aceitou o envio`);
+                                this.logger.warn(`   Isso é comum - a verificação de status pode não estar disponível imediatamente`);
+                                this.logger.warn(`   Verifique manualmente no painel da Gupshup: Message ID ${messageId}`);
                             }
-                        } else {
-                            this.logger.warn(`⚠️ Não foi possível obter o status da mensagem, mas a Gupshup aceitou o envio`);
-                            this.logger.warn(`   Isso é comum - a verificação de status pode não estar disponível imediatamente`);
-                            this.logger.warn(`   Verifique manualmente no painel da Gupshup: Message ID ${messageId}`);
+                        } catch (statusError: any) {
+                            this.logger.warn(`\n${'─'.repeat(80)}`);
+                            this.logger.warn(`⚠️ Não foi possível verificar o status da mensagem: ${statusError.message}`);
+                            this.logger.warn(`⚠️ IMPORTANTE: Isso NÃO significa que a mensagem não foi enviada!`);
+                            this.logger.warn(`⚠️ A Gupshup aceitou a mensagem (status: submitted, messageId: ${messageId})`);
+                            this.logger.warn(`⚠️ Verifique manualmente no painel da Gupshup se a mensagem foi entregue`);
+                            this.logger.warn(`⚠️ Possíveis razões para o erro de verificação:`);
+                            this.logger.warn(`⚠️   - Endpoint de status pode não estar disponível para este tipo de conta`);
+                            this.logger.warn(`⚠️   - Message ID pode precisar de mais tempo para estar disponível`);
+                            this.logger.warn(`⚠️   - API de status pode ter limitações`);
+                            this.logger.warn(`${'─'.repeat(80)}\n`);
                         }
-                    } catch (statusError: any) {
-                        this.logger.warn(`\n${'─'.repeat(80)}`);
-                        this.logger.warn(`⚠️ Não foi possível verificar o status da mensagem: ${statusError.message}`);
-                        this.logger.warn(`⚠️ IMPORTANTE: Isso NÃO significa que a mensagem não foi enviada!`);
-                        this.logger.warn(`⚠️ A Gupshup aceitou a mensagem (status: submitted, messageId: ${messageId})`);
-                        this.logger.warn(`⚠️ Verifique manualmente no painel da Gupshup se a mensagem foi entregue`);
-                        this.logger.warn(`⚠️ Possíveis razões para o erro de verificação:`);
-                        this.logger.warn(`⚠️   - Endpoint de status pode não estar disponível para este tipo de conta`);
-                        this.logger.warn(`⚠️   - Message ID pode precisar de mais tempo para estar disponível`);
-                        this.logger.warn(`⚠️   - API de status pode ter limitações`);
-                        this.logger.warn(`${'─'.repeat(80)}\n`);
+                    } else {
+                        this.logger.log(`⏩ Verificação de status em background para evitar timeout da request`);
+                        this.trackMessageDeliveryInBackground(messageId, destination, templateId);
                     }
                 }
 

@@ -40,6 +40,10 @@ export interface GenerateCheckInLinkDto {
     alunoTurmaId: string;
 }
 
+export interface ResendCheckInByTurmaDto {
+    turmaId: number;
+}
+
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -81,6 +85,13 @@ export class WhatsAppController {
     async generateCheckInLink(@Body() data: GenerateCheckInLinkDto) {
         console.log('Gerando link de preenchimento por alunoTurmaId:', data.alunoTurmaId);
         return this.whatsappService.generateCheckInLink(data.alunoTurmaId);
+    }
+
+    @Post('resend-checkin-by-turma')
+    @UseGuards(JwtAuthGuard)
+    async resendCheckInByTurma(@Body() data: ResendCheckInByTurmaDto) {
+        console.log('Redisparando check-in por turma. turmaId=', data.turmaId);
+        return this.whatsappService.resendCheckInLinksByTurma(Number(data.turmaId));
     }
 
     @Get('checkin/:token')

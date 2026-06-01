@@ -29,7 +29,6 @@ import {
 } from './dto/turmas.dto';
 import { FindManyOptions, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
-import * as jwt from 'jsonwebtoken';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
 
@@ -4534,18 +4533,6 @@ export class TurmasService {
                               : null,
                       );
 
-            // Gerar token JWT para o link de check-in
-            const jwtSecret = process.env.JWT_SECRET || 'default-secret-key';
-            const checkInToken = jwt.sign(
-                {
-                    alunoTurmaId: turmaAluno.id,
-                    turmaId: turma.id,
-                    timestamp: Date.now(),
-                },
-                jwtSecret,
-                { expiresIn: '7d' }, // Link expira em 7 dias
-            );
-
             // Preparar dados para envio do link
             const checkInData = {
                 alunoTurmaId: turmaAluno.id,
@@ -4557,9 +4544,15 @@ export class TurmasService {
 
             this.logger.debug(`whatsapp.form.send | Enviando link do formulário para aluno=${aluno.nome}`);
 
-            // Gerar URL do formulário de preenchimento
-            const frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
-            const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
+            // Gerar URL pelo mesmo fluxo centralizado do WhatsAppService
+            const generatedLinkResult = await this.whatsappService.generateCheckInLink(String(turmaAluno.id));
+            if (!generatedLinkResult.success || !generatedLinkResult.link) {
+                this.logger.warn(
+                    `whatsapp.form.send | Falha ao gerar link de check-in para ${aluno.nome}: ${String(generatedLinkResult.error || 'erro desconhecido')}`,
+                );
+                return;
+            }
+            const formularioUrl = generatedLinkResult.link;
 
             // Mensagem no formato do novo template Gupshup
             const message = `Olá *${aluno.nome}*, parabéns por dizer SIM a essa jornada transformadora! ✨

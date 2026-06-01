@@ -3,6 +3,7 @@ import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import { ChatGuruService } from './chatguru/chatguru.service';
 import * as jwt from 'jsonwebtoken';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 
 export interface CheckInStudentDto {
@@ -26,6 +27,7 @@ export interface SendQRCodeDto {
 export class WhatsAppService {
     private readonly frontendUrl: string;
     private readonly jwtSecret: string;
+    private readonly checkInTokenTtlSeconds: number;
     // UUID do template de check-in aprovado na Gupshup
     private readonly CHECKIN_TEMPLATE_ID_GUPSHUP = '8ebafac1-29e5-4d10-9ebc-03ae51126a80';
     private readonly CHECKIN_TEMPLATE_NAME: string;
@@ -56,12 +58,150 @@ export class WhatsAppService {
         private readonly chatGuruService: ChatGuruService,
     ) {
         this.frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
-        this.jwtSecret = process.env.JWT_SECRET;
+        this.jwtSecret = this.resolveJwtSecret();
+        this.checkInTokenTtlSeconds = Number(process.env.CHECKIN_TOKEN_TTL_SECONDS || 7 * 24 * 60 * 60);
         // UUID do template de check-in na Gupshup
         this.CHECKIN_TEMPLATE_NAME = process.env.GUPSHUP_TEMPLATE_NAME || this.CHECKIN_TEMPLATE_ID_GUPSHUP;
         // UUID do template de QR Code na Gupshup
         this.QRCODE_TEMPLATE_NAME = process.env.GUPSHUP_QRCODE_TEMPLATE_NAME || this.QRCODE_TEMPLATE_ID_GUPSHUP;
         this.CONTRATO_TEMPLATE_NAME = process.env.GUPSHUP_CONTRATO_TEMPLATE_NAME || process.env.GUPSHUP_CONTRATO_TEMPLATE_ID || '';
+    }
+
+    private resolveJwtSecret(): string {
+        const secret = process.env.JWT_SECRET?.trim();
+        if (!secret) {
+            throw new Error('JWT_SECRET não configurado para geração/validação de token de check-in');
+        }
+        return secret;
+    }
+
+    private buildCheckInLink(token: string): string {
+        return `${this.frontendUrl}/p?t=${encodeURIComponent(token)}`;
+    }
+
+    private normalizeIncomingToken(rawToken: string): string {
+        let token = String(rawToken || '').trim();
+
+        if (!token) return token;
+
+        // Alguns canais podem repassar "t=..." ou "token=..." ao copiar/colar.
+        if (token.startsWith('t=')) {
+            token = token.slice(2);
+        } else if (token.startsWith('token=')) {
+            token = token.slice(6);
+        }
+
+        // Remove wrappers comuns de formatação/copiar-colar.
+        token = token.replace(/^[\s"'`_<>()[\]{}]+|[\s"'`_<>()[\]{}]+$/g, '');
+
+        // Decodifica quando o token chega percent-encoded.
+        try {
+            token = decodeURIComponent(token);
+        } catch {
+            // Mantém token original se não estiver encoded.
+        }
+
+        return token.trim();
+    }
+
+    private generateCheckInToken(alunoTurmaId: string): string {
+        const expiresAt = Math.floor(Date.now() / 1000) + this.checkInTokenTtlSeconds;
+        // nonce garante token único por envio, sem necessidade de persistência em banco.
+        const nonce = randomBytes(6).toString('base64url');
+        const payload = `${alunoTurmaId}.${expiresAt}.${nonce}`;
+        const signature = createHmac('sha256', this.jwtSecret).update(payload).digest('base64url').slice(0, 22);
+        return `${payload}.${signature}`;
+    }
+
+    private isCompactCheckInToken(token: string): boolean {
+        // Compatível com os dois formatos:
+        // antigo: alunoTurmaId.expiresAt.signature
+        // novo:   alunoTurmaId.expiresAt.nonce.signature
+        return /^[A-Za-z0-9_-]+\.\d{10}\.[A-Za-z0-9_-]{10,}$/.test(token) || /^[A-Za-z0-9_-]+\.\d{10}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{10,}$/.test(token);
+    }
+
+    private verifyCompactCheckInToken(token: string): { alunoTurmaId: string; expiresAt: number } {
+        const parts = token.split('.');
+        const hasNonce = parts.length === 4;
+        const [alunoTurmaId, expiresAtRaw, nonceRaw, signatureRaw] = hasNonce ? parts : [parts[0], parts[1], '', parts[2]];
+
+        const providedSignature = signatureRaw || '';
+        const payload = hasNonce ? `${alunoTurmaId}.${expiresAtRaw}.${nonceRaw}` : `${alunoTurmaId}.${expiresAtRaw}`;
+        const expectedSignature = createHmac('sha256', this.jwtSecret).update(payload).digest('base64url').slice(0, 22);
+
+        const providedSignatureBuffer = Buffer.from(providedSignature || '');
+        const expectedSignatureBuffer = Buffer.from(expectedSignature);
+        const signatureIsValid =
+            providedSignatureBuffer.length === expectedSignatureBuffer.length && timingSafeEqual(providedSignatureBuffer, expectedSignatureBuffer);
+
+        if (!signatureIsValid) {
+            const invalidTokenError = new Error('Token inválido');
+            invalidTokenError.name = 'JsonWebTokenError';
+            throw invalidTokenError;
+        }
+
+        const expiresAt = Number(expiresAtRaw);
+        if (!Number.isFinite(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) {
+            const tokenExpiredError = new Error('Token expirado');
+            tokenExpiredError.name = 'TokenExpiredError';
+            throw tokenExpiredError;
+        }
+
+        return { alunoTurmaId, expiresAt };
+    }
+
+    private decodeCheckInToken(token: string): { alunoTurmaId: string } {
+        const normalizedToken = this.normalizeIncomingToken(token);
+
+        if (this.isCompactCheckInToken(normalizedToken)) {
+            const decodedCompactToken = this.verifyCompactCheckInToken(normalizedToken);
+            return { alunoTurmaId: decodedCompactToken.alunoTurmaId };
+        }
+
+        const decodedJwtToken = jwt.verify(normalizedToken, this.jwtSecret) as { alunoTurmaId?: string };
+        if (!decodedJwtToken?.alunoTurmaId) {
+            const invalidTokenError = new Error('Token inválido');
+            invalidTokenError.name = 'JsonWebTokenError';
+            throw invalidTokenError;
+        }
+
+        return { alunoTurmaId: decodedJwtToken.alunoTurmaId };
+    }
+
+    private async sortStudentsByEnrollment(students: CheckInStudentDto[]): Promise<CheckInStudentDto[]> {
+        if (students.length <= 1) {
+            return students;
+        }
+
+        const uniqueIds = Array.from(new Set(students.map((student) => String(student.alunoTurmaId)).filter(Boolean)));
+        if (uniqueIds.length === 0) {
+            return students;
+        }
+
+        const turmaAlunos = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .select(['ta.id', 'ta.criado_em'])
+            .where('ta.id IN (:...ids)', { ids: uniqueIds })
+            .getMany();
+
+        const createdAtById = new Map<string, number>();
+        for (const turmaAluno of turmaAlunos) {
+            const createdAtMs = turmaAluno.criado_em ? new Date(turmaAluno.criado_em).getTime() : Number.MAX_SAFE_INTEGER;
+            createdAtById.set(String(turmaAluno.id), createdAtMs);
+        }
+
+        return [...students].sort((a, b) => {
+            const aId = String(a.alunoTurmaId);
+            const bId = String(b.alunoTurmaId);
+            const aCreatedAt = createdAtById.get(aId) ?? Number.MAX_SAFE_INTEGER;
+            const bCreatedAt = createdAtById.get(bId) ?? Number.MAX_SAFE_INTEGER;
+
+            if (aCreatedAt !== bCreatedAt) {
+                return aCreatedAt - bCreatedAt;
+            }
+
+            return aId.localeCompare(bId, 'pt-BR', { numeric: true });
+        });
     }
 
     /**
@@ -290,14 +430,11 @@ export class WhatsAppService {
     /**
      * Envia links de check-in para múltiplos alunos
      */
-    async sendCheckInLinksToStudents(
-        students: CheckInStudentDto[],
-    ): Promise<{ success: boolean; sent: number; skipped: number; skippedStudents: string[]; errors: string[] }> {
+    async sendCheckInLinksToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
+        const orderedStudents = await this.sortStudentsByEnrollment(students);
         const results = {
             success: true,
             sent: 0,
-            skipped: 0,
-            skippedStudents: [] as string[],
             errors: [] as string[],
         };
 
@@ -316,29 +453,8 @@ export class WhatsAppService {
                     return;
                 }
 
-                const statusAtual = alunoTurma.status_aluno_turma;
-                const jaRecebeuCheckin =
-                    alunoTurma.checkin_realizado ||
-                    statusAtual === EStatusAlunosTurmas.AGUARDANDO_CHECKIN ||
-                    statusAtual === EStatusAlunosTurmas.CHECKIN_REALIZADO;
-
-                if (jaRecebeuCheckin) {
-                    results.skipped++;
-                    results.skippedStudents.push(`${student.alunoNome} (${student.alunoTurmaId})`);
-                    return;
-                }
-
-                const checkInToken = jwt.sign(
-                    {
-                        alunoTurmaId: student.alunoTurmaId,
-                        turmaId: student.turmaId,
-                        timestamp: Date.now(),
-                    },
-                    this.jwtSecret,
-                    { expiresIn: '7d' },
-                );
-
-                const checkInUrl = `${this.frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
+                const checkInToken = this.generateCheckInToken(student.alunoTurmaId);
+                const checkInUrl = this.buildCheckInLink(checkInToken);
                 const turma = alunoTurma.id_turma_fk;
                 const enderecoEvento = turma?.id_endereco_evento_fk;
 
@@ -357,7 +473,10 @@ export class WhatsAppService {
                 const dataFinalStr = turma?.data_final;
                 let dataStr = 'A confirmar';
                 if (dataInicioStr) {
-                    dataStr = dataFinalStr && dataInicioStr !== dataFinalStr ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}` : formatDateOnly(dataInicioStr);
+                    dataStr =
+                        dataFinalStr && dataInicioStr !== dataFinalStr
+                            ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`
+                            : formatDateOnly(dataInicioStr);
                 }
 
                 const localStr = enderecoEvento?.local_evento?.trim() || '';
@@ -443,7 +562,7 @@ ${localLine}📌*ENDEREÇO*: ${enderecoStr}
 Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
 Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
-_${checkInUrl}_
+${checkInUrl}
 
 Assim que finalizar, seu check-in será realizado automaticamente.
 Para não correr o risco de esquecer ou perder o prazo, faça agora mesmo seu check-in.
@@ -474,13 +593,90 @@ Vamos Prosperar! 🙌`;
             }
         };
 
-        for (let i = 0; i < students.length; i += concurrency) {
-            const batch = students.slice(i, i + concurrency);
+        for (let i = 0; i < orderedStudents.length; i += concurrency) {
+            const batch = orderedStudents.slice(i, i + concurrency);
             await Promise.all(batch.map((student) => processStudent(student)));
         }
 
         results.success = results.errors.length === 0;
         return results;
+    }
+
+    async resendCheckInLinksByTurma(turmaId: number): Promise<{
+        success: boolean;
+        turmaId: number;
+        totalAlunosNaTurma: number;
+        totalPendentes: number;
+        ignored: string[];
+        dispatch: { success: boolean; sent: number; errors: string[] } | null;
+        message: string;
+    }> {
+        if (!Number.isFinite(turmaId) || turmaId <= 0) {
+            throw new BadRequestException('turmaId inválido');
+        }
+
+        const turmaAlunos = await this.uow.turmasAlunosRP.find({
+            where: { id_turma: turmaId },
+            relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
+        });
+
+        const ignored: string[] = [];
+        const pendentes: CheckInStudentDto[] = [];
+
+        for (const registro of turmaAlunos) {
+            const aluno = registro.id_aluno_fk;
+            const alunoNome = aluno?.nome || `Aluno ${registro.id}`;
+            const telefone = aluno?.telefone_um;
+
+            if (!aluno) {
+                ignored.push(`${alunoNome} (${registro.id}) sem vínculo de aluno`);
+                continue;
+            }
+
+            if (!telefone || !String(telefone).trim()) {
+                ignored.push(`${alunoNome} (${registro.id}) sem telefone`);
+                continue;
+            }
+
+            const statusAtual = registro.status_aluno_turma;
+            const pendenteCheckin =
+                !registro.checkin_realizado && statusAtual !== EStatusAlunosTurmas.AGUARDANDO_CHECKIN && statusAtual !== EStatusAlunosTurmas.CHECKIN_REALIZADO;
+
+            if (!pendenteCheckin) {
+                ignored.push(`${alunoNome} (${registro.id}) já em fluxo de check-in`);
+                continue;
+            }
+
+            pendentes.push({
+                alunoTurmaId: String(registro.id),
+                alunoNome,
+                turmaId,
+                treinamentoNome: registro.id_turma_fk?.id_treinamento_fk?.treinamento || 'Treinamento',
+            });
+        }
+
+        if (pendentes.length === 0) {
+            return {
+                success: true,
+                turmaId,
+                totalAlunosNaTurma: turmaAlunos.length,
+                totalPendentes: 0,
+                ignored,
+                dispatch: null,
+                message: 'Nenhum aluno pendente para redisparo de check-in nesta turma',
+            };
+        }
+
+        const dispatch = await this.sendCheckInLinksToStudents(pendentes);
+        return {
+            success: dispatch.success,
+            turmaId,
+            totalAlunosNaTurma: turmaAlunos.length,
+            totalPendentes: pendentes.length,
+            ignored,
+            dispatch,
+            message: `Redisparo executado para ${pendentes.length} aluno(s) pendente(s)`,
+        };
     }
 
     async generateCheckInLink(alunoTurmaId: string): Promise<{ success: boolean; link?: string; token?: string; error?: string }> {
@@ -498,17 +694,8 @@ Vamos Prosperar! 🙌`;
                 throw new NotFoundException('Aluno não encontrado na turma');
             }
 
-            const token = jwt.sign(
-                {
-                    alunoTurmaId,
-                    turmaId: alunoTurma.id_turma_fk.id,
-                    timestamp: Date.now(),
-                },
-                this.jwtSecret,
-                { expiresIn: '7d' },
-            );
-
-            const link = `${this.frontendUrl}/preencherdadosaluno?token=${token}`;
+            const token = this.generateCheckInToken(alunoTurmaId);
+            const link = this.buildCheckInLink(token);
 
             return {
                 success: true,
@@ -528,10 +715,9 @@ Vamos Prosperar! 🙌`;
         }
     }
 
-    async sendConfirmacaoToStudents(
-        students: CheckInStudentDto[],
-    ): Promise<{ success: boolean; sent: number; skipped: number; skippedStudents: string[]; errors: string[] }> {
-        const results = { success: true, sent: 0, skipped: 0, skippedStudents: [] as string[], errors: [] as string[] };
+    async sendConfirmacaoToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
+        const orderedStudents = await this.sortStudentsByEnrollment(students);
+        const results = { success: true, sent: 0, errors: [] as string[] };
         const configuredConcurrency = Number(process.env.CONFIRMACAO_BULK_CONCURRENCY || process.env.CHECKIN_BULK_CONCURRENCY || 5);
         const concurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0 ? Math.min(Math.floor(configuredConcurrency), 20) : 5;
 
@@ -544,19 +730,6 @@ Vamos Prosperar! 🙌`;
 
                 if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                     results.errors.push(`Aluno não encontrado: ${student.alunoNome}`);
-                    return;
-                }
-
-                const statusAtual = alunoTurma.status_aluno_turma;
-                const jaRecebeuConfirmacao =
-                    statusAtual === EStatusAlunosTurmas.AGUARDANDO_CONFIRMACAO ||
-                    statusAtual === EStatusAlunosTurmas.AGUARDANDO_CHECKIN ||
-                    statusAtual === EStatusAlunosTurmas.CHECKIN_REALIZADO ||
-                    alunoTurma.confirmacao_realizada;
-
-                if (jaRecebeuConfirmacao) {
-                    results.skipped++;
-                    results.skippedStudents.push(`${student.alunoNome} (${student.alunoTurmaId})`);
                     return;
                 }
 
@@ -582,7 +755,10 @@ Vamos Prosperar! 🙌`;
                 const dataFinalStr = turma?.data_final;
                 let dataStr = 'A confirmar';
                 if (dataInicioStr) {
-                    dataStr = dataFinalStr && dataInicioStr !== dataFinalStr ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}` : formatDateOnly(dataInicioStr);
+                    dataStr =
+                        dataFinalStr && dataInicioStr !== dataFinalStr
+                            ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`
+                            : formatDateOnly(dataInicioStr);
                 }
                 const param3 = dataStr;
 
@@ -704,8 +880,8 @@ Vamos Prosperar! 🙌`;
             }
         };
 
-        for (let i = 0; i < students.length; i += concurrency) {
-            const batch = students.slice(i, i + concurrency);
+        for (let i = 0; i < orderedStudents.length; i += concurrency) {
+            const batch = orderedStudents.slice(i, i + concurrency);
             await Promise.all(batch.map((student) => processStudent(student)));
         }
 
@@ -850,9 +1026,9 @@ Vamos Prosperar! 🙌`;
     async processCheckIn(token: string, studentId?: string): Promise<{ success: boolean; message: string; redirect?: string }> {
         try {
             // Verificar e decodificar token
-            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+            const decoded = this.decodeCheckInToken(token);
 
-            if (!decoded.alunoTurmaId || !decoded.turmaId) {
+            if (!decoded.alunoTurmaId) {
                 throw new BadRequestException('Token inválido');
             }
 
@@ -889,7 +1065,7 @@ Vamos Prosperar! 🙌`;
             return {
                 success: true,
                 message: 'Redirecionando para preencher dados...',
-                redirect: `${this.frontendUrl}/preencherdadosaluno?token=${token}`,
+                redirect: this.buildCheckInLink(token),
             };
         } catch (error: unknown) {
             console.error('Erro ao processar check-in:', error);
@@ -926,9 +1102,9 @@ Vamos Prosperar! 🙌`;
     async getDadosAlunoPorToken(token: string): Promise<any> {
         try {
             // Verificar e decodificar token
-            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+            const decoded = this.decodeCheckInToken(token);
 
-            if (!decoded.alunoTurmaId || !decoded.turmaId) {
+            if (!decoded.alunoTurmaId) {
                 throw new BadRequestException('Token inválido');
             }
 
@@ -1000,9 +1176,9 @@ Vamos Prosperar! 🙌`;
         try {
             validateBase64ImageField(dados?.url_foto_aluno, 'Foto do aluno');
             // Verificar e decodificar token
-            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+            const decoded = this.decodeCheckInToken(token);
 
-            if (!decoded.alunoTurmaId || !decoded.turmaId) {
+            if (!decoded.alunoTurmaId) {
                 throw new BadRequestException('Token inválido');
             }
 
@@ -1133,7 +1309,7 @@ Vamos Prosperar! 🙌`;
         try {
             validateBase64ImageField(urlFoto, 'Foto do aluno');
             // Verificar e decodificar token
-            const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
+            const decoded = this.decodeCheckInToken(token);
 
             if (!decoded.alunoTurmaId) {
                 throw new BadRequestException('Token inválido');

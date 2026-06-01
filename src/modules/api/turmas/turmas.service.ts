@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral } from '../../config/entities/enum';
 import {
@@ -72,9 +73,33 @@ const ALUNO_TURMA_HISTORICO_TEMPLATES: AlunoTurmaHistoricoTemplateDto[] = [
     { key: 'ALUNO_SEM_RETORNO', label: 'Sem retorno do aluno' },
 ];
 
+const TURMA_STATUS_TIPOS_SNAPSHOT: string[] = [
+    'inscritos',
+    'origem_masterclass',
+    'origem_bonus',
+    'origem_cortesia_sorteio',
+    'origem_time_vendas',
+    'origem_transbordo',
+    'origem_liberty',
+    'origem_transferencia',
+    'origem_importacao',
+    'transferidos',
+    'transferidos_para_essa',
+    'transferidos_para_outra',
+    'confirmados',
+    'confirmacao_aguardando',
+    'checkin_aguardando',
+    'checkin_realizado',
+    'cancelados',
+    'inadimplentes',
+];
+
+const TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR = 'AUTO_TRANSFERENCIA_NO_SHOW_IPR';
+
 @Injectable()
 export class TurmasService {
     private readonly logger = new Logger(TurmasService.name);
+    private congelamentoMetricasCronEmExecucao = false;
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -466,6 +491,23 @@ export class TurmasService {
         }
     }
 
+    private async validarPermissaoAdministrador(userId?: number): Promise<void> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado');
+        }
+
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'funcao'] as any,
+        });
+
+        const funcoesUsuario = Array.isArray(usuario?.funcao) ? usuario?.funcao : [];
+        const isAdmin = funcoesUsuario.includes(EFuncoes.ADMINISTRADOR);
+        if (!isAdmin) {
+            throw new ForbiddenException('Somente administrador pode executar esta ação');
+        }
+    }
+
     private async getTransferidosCountByTurmas(turmaIds: number[]): Promise<Record<number, number>> {
         if (!turmaIds.length) return {};
 
@@ -658,6 +700,327 @@ export class TurmasService {
         } catch (error) {
             console.error(`Erro ao verificar status da turma ${turma.id}:`, error);
             // Não lançar erro para não interromper o fluxo principal
+        }
+    }
+
+    private formatDateToYyyyMmDd(date: Date): string {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    private normalizarTipoStatusSnapshot(tipo?: string): string {
+        const tipoNormalizado = (tipo || 'inscritos').trim().toLowerCase();
+        return TURMA_STATUS_TIPOS_SNAPSHOT.includes(tipoNormalizado) ? tipoNormalizado : 'inscritos';
+    }
+
+    private obterSnapshotMetricasTurma(id_turma: number) {
+        return this.uow.turmasMetricasSnapshotRP.findOne({
+            where: { id_turma, deletado_em: null },
+        });
+    }
+
+    private async tentarCongelarTurmaSePassouDataFinal(id_turma: number): Promise<void> {
+        const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
+        if (snapshot) {
+            return;
+        }
+
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+        if (!turma) {
+            return;
+        }
+
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const dataFinal = new Date(turma.data_final);
+        dataFinal.setHours(23, 59, 59, 999);
+        const eventoJaTerminou = hoje > dataFinal;
+
+        if (!eventoJaTerminou) {
+            return;
+        }
+
+        await this.verificarEAtualizarStatusTurma(turma);
+        await this.salvarSnapshotMetricasTurma(id_turma);
+    }
+
+    private async salvarSnapshotMetricasTurma(id_turma: number): Promise<boolean> {
+        const jaExiste = await this.obterSnapshotMetricasTurma(id_turma);
+        if (jaExiste) {
+            return false;
+        }
+
+        const resumo = await this.getTurmaStatusResumo(id_turma, { ignorarSnapshot: true });
+        const alunosPorTipo: Record<string, TurmaStatusAlunosResponseDto> = {};
+
+        for (const tipo of TURMA_STATUS_TIPOS_SNAPSHOT) {
+            alunosPorTipo[tipo] = await this.getTurmaStatusAlunos(id_turma, tipo, { ignorarSnapshot: true });
+        }
+
+        const snapshotExistente = await this.obterSnapshotMetricasTurma(id_turma);
+        if (snapshotExistente) {
+            return;
+        }
+
+        const snapshot = this.uow.turmasMetricasSnapshotRP.create({
+            id_turma,
+            snapshot_em: new Date(),
+            resumo: resumo as unknown as Record<string, unknown>,
+            alunos_por_tipo: alunosPorTipo as unknown as Record<string, unknown>,
+        });
+
+        try {
+            await this.uow.turmasMetricasSnapshotRP.save(snapshot);
+            this.logger.log(`Snapshot de métricas salvo para turma=${id_turma}`);
+            return true;
+        } catch (error: any) {
+            const message = String(error?.message || '');
+            if (message.includes('uq_turmas_metricas_snapshot_turma') || message.includes('duplicate key')) {
+                this.logger.warn(`Snapshot de métricas já existia para turma=${id_turma}`);
+                return false;
+            }
+            throw error;
+        }
+    }
+
+    async regerarSnapshotMetricasTurma(id_turma: number, userId?: number): Promise<{ id_turma: number; snapshot_em: Date; message: string }> {
+        await this.validarPermissaoAdministrador(userId);
+
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: null },
+        });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        const resumo = await this.getTurmaStatusResumo(id_turma, { ignorarSnapshot: true });
+        const alunosPorTipo: Record<string, TurmaStatusAlunosResponseDto> = {};
+        for (const tipo of TURMA_STATUS_TIPOS_SNAPSHOT) {
+            alunosPorTipo[tipo] = await this.getTurmaStatusAlunos(id_turma, tipo, { ignorarSnapshot: true });
+        }
+
+        const snapshotExistente = await this.obterSnapshotMetricasTurma(id_turma);
+        if (snapshotExistente) {
+            snapshotExistente.snapshot_em = new Date();
+            snapshotExistente.resumo = resumo as unknown as Record<string, unknown>;
+            snapshotExistente.alunos_por_tipo = alunosPorTipo as unknown as Record<string, unknown>;
+            snapshotExistente.atualizado_por = userId;
+            const salvo = await this.uow.turmasMetricasSnapshotRP.save(snapshotExistente);
+            return {
+                id_turma,
+                snapshot_em: salvo.snapshot_em,
+                message: 'Snapshot da turma regerado com sucesso.',
+            };
+        }
+
+        const snapshot = this.uow.turmasMetricasSnapshotRP.create({
+            id_turma,
+            snapshot_em: new Date(),
+            resumo: resumo as unknown as Record<string, unknown>,
+            alunos_por_tipo: alunosPorTipo as unknown as Record<string, unknown>,
+            criado_por: userId,
+            atualizado_por: userId,
+        });
+        const salvo = await this.uow.turmasMetricasSnapshotRP.save(snapshot);
+        return {
+            id_turma,
+            snapshot_em: salvo.snapshot_em,
+            message: 'Snapshot da turma criado com sucesso.',
+        };
+    }
+
+    private async congelarMetricasTurmasFinalizadas(): Promise<void> {
+        const hoje = this.formatDateToYyyyMmDd(new Date());
+        const turmasFinalizadas = await this.uow.turmasRP
+            .createQueryBuilder('turma')
+            .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+            .where('turma.deletado_em IS NULL')
+            .andWhere('turma.data_final < :hoje', { hoje })
+            .getMany();
+
+        for (const turma of turmasFinalizadas) {
+            await this.salvarSnapshotMetricasTurma(turma.id);
+        }
+    }
+
+    async congelarSnapshotsTurmasEmLote(
+        userId?: number,
+        opts?: { incluirEmAndamento?: boolean; forcarRegeracao?: boolean },
+    ): Promise<{
+        total_turmas: number;
+        snapshots_criados: number;
+        snapshots_regerados: number;
+        snapshots_ja_existentes: number;
+        message: string;
+    }> {
+        await this.validarPermissaoAdministrador(userId);
+
+        const incluirEmAndamento = opts?.incluirEmAndamento === true;
+        const forcarRegeracao = opts?.forcarRegeracao === true;
+        const hoje = this.formatDateToYyyyMmDd(new Date());
+
+        const qb = this.uow.turmasRP.createQueryBuilder('turma').where('turma.deletado_em IS NULL');
+        if (!incluirEmAndamento) {
+            qb.andWhere('turma.data_final < :hoje', { hoje });
+        }
+
+        const turmas = await qb.orderBy('turma.id', 'ASC').getMany();
+
+        let snapshotsCriados = 0;
+        let snapshotsRegerados = 0;
+        let snapshotsJaExistentes = 0;
+
+        for (const turma of turmas) {
+            const snapshotExistente = await this.obterSnapshotMetricasTurma(turma.id);
+
+            if (forcarRegeracao && snapshotExistente) {
+                await this.regerarSnapshotMetricasTurma(turma.id, userId);
+                snapshotsRegerados++;
+                continue;
+            }
+
+            const criado = await this.salvarSnapshotMetricasTurma(turma.id);
+            if (criado) {
+                snapshotsCriados++;
+            } else {
+                snapshotsJaExistentes++;
+            }
+        }
+
+        const escopo = incluirEmAndamento ? 'todas as turmas' : 'turmas finalizadas';
+        return {
+            total_turmas: turmas.length,
+            snapshots_criados: snapshotsCriados,
+            snapshots_regerados: snapshotsRegerados,
+            snapshots_ja_existentes: snapshotsJaExistentes,
+            message: `Congelamento em lote concluído para ${escopo}.`,
+        };
+    }
+
+    private async tentarTransferenciaAutomaticaNoShowIPR(id_turma_aluno: string, userId?: number): Promise<void> {
+        const turmaAluno = await this.uow.turmasAlunosRP.findOne({
+            where: { id: id_turma_aluno, deletado_em: null },
+            relations: ['id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk', 'id_aluno_fk'],
+        });
+
+        if (!turmaAluno || !turmaAluno.id_turma_fk || !turmaAluno.id_aluno_fk) {
+            return;
+        }
+
+        if (turmaAluno.presenca_turma !== EPresencaTurmas.NO_SHOW) {
+            return;
+        }
+
+        if (turmaAluno.origem_aluno !== EOrigemAlunos.COMPROU_INGRESSO) {
+            return;
+        }
+
+        const turmaOrigem = turmaAluno.id_turma_fk;
+        const siglaTreinamento = String(turmaOrigem.id_treinamento_fk?.sigla_treinamento || '')
+            .trim()
+            .toUpperCase();
+        if (siglaTreinamento !== 'IPR') {
+            return;
+        }
+
+        const houveTransferenciaNaTurmaAtual =
+            turmaAluno.id_turma_transferencia_de != null ||
+            turmaAluno.id_turma_transferencia_para != null ||
+            (await this.uow.historicoTransferenciasRP.count({
+                where: [
+                    { id_aluno: Number(turmaAluno.id_aluno), id_turma_de: turmaOrigem.id, deletado_em: null },
+                    { id_aluno: Number(turmaAluno.id_aluno), id_turma_para: turmaOrigem.id, deletado_em: null },
+                ],
+            })) > 0;
+
+        if (houveTransferenciaNaTurmaAtual) {
+            return;
+        }
+
+        const jaTeveTransferenciaAutomaticaNoShow = await this.uow.historicoAlunosTurmasLogsRP.count({
+            where: {
+                id_aluno: turmaAluno.id_aluno as any,
+                template_key: TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR,
+                deletado_em: null,
+            },
+        });
+
+        if (jaTeveTransferenciaAutomaticaNoShow > 0) {
+            this.logger.log(`turma.aluno.no_show.auto_transfer | Aluno=${turmaAluno.id_aluno} já teve auto transferência por no-show IPR`);
+            return;
+        }
+
+        const turmasMesmaTrilha = await this.uow.turmasRP.find({
+            where: {
+                id: Not(turmaOrigem.id),
+                id_treinamento: turmaOrigem.id_treinamento,
+                id_polo: turmaOrigem.id_polo,
+                deletado_em: null,
+            },
+            relations: ['id_treinamento_fk', 'id_polo_fk'],
+            order: { data_inicio: 'ASC' },
+        });
+
+        const proximaTurmaMesmoPolo = turmasMesmaTrilha.find((turmaDestino) => {
+            if (this.isTurmaBloqueadaParaTransferencia(turmaDestino)) return false;
+            if (turmaDestino.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) return false;
+            return String(turmaDestino.data_inicio || '') > String(turmaOrigem.data_final || '');
+        });
+
+        if (!proximaTurmaMesmoPolo) {
+            this.logger.log(`turma.aluno.no_show.auto_transfer | Sem próxima turma IPR para aluno=${turmaAluno.id_aluno} turma_origem=${turmaOrigem.id}`);
+            return;
+        }
+
+        await this.tentarCongelarTurmaSePassouDataFinal(turmaOrigem.id);
+
+        await this.transferirAluno(turmaAluno.id, proximaTurmaMesmoPolo.id, userId);
+
+        await this.registrarLogAlunoTurma(
+            {
+                id_turma_aluno: turmaAluno.id,
+                id_turma: turmaOrigem.id,
+                id_aluno: turmaAluno.id_aluno,
+                tipo_acao: 'TRANSFERENCIA',
+                titulo: 'Transferência automática por no-show (IPR)',
+                descricao: `Aluno transferido automaticamente para a próxima turma do mesmo polo após no-show em IPR.`,
+                template_key: TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR,
+                detalhes: {
+                    regra: 'IPR_NO_SHOW_COMPRA_INGRESSO_UMA_VEZ',
+                    id_turma_origem: turmaOrigem.id,
+                    id_turma_destino: proximaTurmaMesmoPolo.id,
+                    id_polo: turmaOrigem.id_polo,
+                    id_treinamento: turmaOrigem.id_treinamento,
+                },
+            },
+            userId,
+        );
+
+        this.logger.log(
+            `turma.aluno.no_show.auto_transfer | Transferência automática concluída aluno=${turmaAluno.id_aluno} origem=${turmaOrigem.id} destino=${proximaTurmaMesmoPolo.id}`,
+        );
+    }
+
+    @Cron('15 1 * * *')
+    async congelarMetricasTurmasFinalizadasCron(): Promise<void> {
+        if (this.congelamentoMetricasCronEmExecucao) {
+            this.logger.warn('snapshot.turma.cron | Execução anterior ainda em andamento, pulando ciclo');
+            return;
+        }
+
+        this.congelamentoMetricasCronEmExecucao = true;
+        try {
+            await this.congelarMetricasTurmasFinalizadas();
+            this.logger.log('snapshot.turma.cron | Rotina de congelamento executada com sucesso');
+        } catch (error) {
+            this.logger.error('snapshot.turma.cron | Erro ao executar rotina de congelamento', error instanceof Error ? error.stack : undefined);
+        } finally {
+            this.congelamentoMetricasCronEmExecucao = false;
         }
     }
 
@@ -3124,7 +3487,15 @@ export class TurmasService {
         }
     }
 
-    async getTurmaStatusResumo(id_turma: number): Promise<TurmaStatusResumoResponseDto> {
+    async getTurmaStatusResumo(id_turma: number, opts?: { ignorarSnapshot?: boolean }): Promise<TurmaStatusResumoResponseDto> {
+        if (!opts?.ignorarSnapshot) {
+            await this.tentarCongelarTurmaSePassouDataFinal(id_turma);
+            const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
+            if (snapshot?.resumo) {
+                return snapshot.resumo as unknown as TurmaStatusResumoResponseDto;
+            }
+        }
+
         const turma = await this.uow.turmasRP.findOne({
             where: { id: id_turma, deletado_em: null },
         });
@@ -3343,7 +3714,18 @@ export class TurmasService {
         };
     }
 
-    async getTurmaStatusAlunos(id_turma: number, tipo: string): Promise<TurmaStatusAlunosResponseDto> {
+    async getTurmaStatusAlunos(id_turma: number, tipo: string, opts?: { ignorarSnapshot?: boolean }): Promise<TurmaStatusAlunosResponseDto> {
+        const tipoNormalizado = this.normalizarTipoStatusSnapshot(tipo);
+        if (!opts?.ignorarSnapshot) {
+            await this.tentarCongelarTurmaSePassouDataFinal(id_turma);
+            const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
+            const alunosPorTipo = (snapshot?.alunos_por_tipo || {}) as Record<string, TurmaStatusAlunosResponseDto>;
+            if (alunosPorTipo?.[tipoNormalizado]) {
+                return alunosPorTipo[tipoNormalizado];
+            }
+        }
+
+        tipo = tipoNormalizado;
         const turma = await this.uow.turmasRP.findOne({
             where: { id: id_turma, deletado_em: null },
         });
@@ -3839,6 +4221,7 @@ export class TurmasService {
 
             // Armazenar status anterior para verificar mudança
             const statusAnterior = turmaAluno.status_aluno_turma;
+            const presencaAnterior = turmaAluno.presenca_turma;
             const beforeSnapshot = {
                 nome_cracha: turmaAluno.nome_cracha,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
@@ -4004,6 +4387,11 @@ export class TurmasService {
 
                 // Enviar link do formulário via WhatsApp automaticamente
                 await this.enviarLinkFormularioWhatsApp(turmaAlunoAtualizada);
+            }
+
+            const mudouParaNoShow = presencaAnterior !== EPresencaTurmas.NO_SHOW && turmaAlunoAtualizada.presenca_turma === EPresencaTurmas.NO_SHOW;
+            if (mudouParaNoShow) {
+                await this.tentarTransferenciaAutomaticaNoShowIPR(turmaAlunoAtualizada.id, userId);
             }
 
             return {
@@ -4172,21 +4560,24 @@ export class TurmasService {
             const formularioUrl = `${frontendUrl}/preencherdadosaluno?token=${checkInToken}`;
 
             // Mensagem no formato do novo template Gupshup
-            const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
             const message = `Olá *${aluno.nome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
-
-Você garantiu a sua vaga no _*${checkInData.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
+Você garantiu a sua vaga e sua presença está confirmada no _*${checkInData.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
 
 📌*DATA*: ${dataStr}
-${localLine}📌*ENDEREÇO*: ${enderecoStr}
+📌*HORÁRIO CREDENCIAMENTO*: 8h00
+📌*ABERTURA DAS PORTAS*: 9h00
+📌*LOCAL*: ${localStr}
+📌*ENDEREÇO*: ${enderecoStr}
 
-Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
+Um novo tempo se inicia na sua vida e nos seus negócios. Permita-se viver tudo o que Deus preparou pra você nesses dias! 🙌
+
 Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
 
 _${formularioUrl}_
 
-Assim que finalizar, sua presença será confirmada automaticamente.
-Confirme agora mesmo, para não correr o risco de esquecer ou perder o prazo.
+Assim que finalizar, seu check-in estará realizado e você receberá um QR CODE para acessar o evento!
+
+*Confirme agora mesmo*
 
 Vamos Prosperar! 🙌`;
 

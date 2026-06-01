@@ -5,7 +5,11 @@ const BASE64_IMAGE_REGEX = /^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);
 
 const getBase64Payload = (value: string) => value.split(',')[1]?.replace(/\s/g, '') || '';
-const getBase64MimeType = (value: string) => value.split(';')[0]?.replace(/^data:/, '').toLowerCase() || '';
+const getBase64MimeType = (value: string) =>
+    value
+        .split(';')[0]
+        ?.replace(/^data:/, '')
+        .toLowerCase() || '';
 
 const getBase64ByteSize = (base64Payload: string) => {
     if (!base64Payload) return 0;

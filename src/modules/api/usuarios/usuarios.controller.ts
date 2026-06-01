@@ -1,4 +1,18 @@
-import { Controller, Get, Put, Delete, Query, Param, Body, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, UseGuards, Req, ForbiddenException } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Put,
+    Delete,
+    Query,
+    Param,
+    Body,
+    UseInterceptors,
+    ClassSerializerInterceptor,
+    ParseIntPipe,
+    UseGuards,
+    Req,
+    ForbiddenException,
+} from '@nestjs/common';
 import { UsuariosService } from './usuarios.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';

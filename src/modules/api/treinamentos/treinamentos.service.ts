@@ -129,9 +129,7 @@ export class TreinamentosService {
         try {
             // Buscar treinamentos com paginação
             const [treinamentos, total] = await this.uow.treinamentosRP.findAndCount(findOptions);
-            const nomesAtualizadores = await this.mapNomeUsuariosPorIds(
-                treinamentos.map((item) => item.atualizado_por),
-            );
+            const nomesAtualizadores = await this.mapNomeUsuariosPorIds(treinamentos.map((item) => item.atualizado_por));
 
             // Buscar contagem de turmas e alunos para cada treinamento
             const treinamentosWithCount = await Promise.all(

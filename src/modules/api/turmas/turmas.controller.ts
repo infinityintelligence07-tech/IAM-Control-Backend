@@ -223,6 +223,36 @@ export class TurmasController {
         }
     }
 
+    @Post('snapshot/congelar-lote')
+    @UseGuards(JwtAuthGuard)
+    async congelarSnapshotTurmasEmLote(
+        @Query('incluir_em_andamento') incluirEmAndamentoParam: string,
+        @Query('forcar_regeracao') forcarRegeracaoParam: string,
+        @Req() req: any,
+    ): Promise<{
+        total_turmas: number;
+        snapshots_criados: number;
+        snapshots_regerados: number;
+        snapshots_ja_existentes: number;
+        message: string;
+    }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        const incluirEmAndamento = ['1', 'true', 'yes', 'on'].includes(
+            String(incluirEmAndamentoParam || '')
+                .trim()
+                .toLowerCase(),
+        );
+        const forcarRegeracao = ['1', 'true', 'yes', 'on'].includes(
+            String(forcarRegeracaoParam || '')
+                .trim()
+                .toLowerCase(),
+        );
+        return this.turmasService.congelarSnapshotsTurmasEmLote(userId, {
+            incluirEmAndamento,
+            forcarRegeracao,
+        });
+    }
+
     @Get(':id')
     async findById(@Param('id', ParseIntPipe) id: number): Promise<TurmaResponseDto | null> {
         console.log('Buscando turma por ID:', id);
@@ -239,6 +269,13 @@ export class TurmasController {
     @UseGuards(JwtAuthGuard)
     async getTurmaStatusAlunos(@Param('id', ParseIntPipe) id: number, @Query('tipo') tipo: string): Promise<TurmaStatusAlunosResponseDto> {
         return this.turmasService.getTurmaStatusAlunos(id, tipo);
+    }
+
+    @Post(':id/snapshot/regerar')
+    @UseGuards(JwtAuthGuard)
+    async regerarSnapshotTurma(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<{ id_turma: number; snapshot_em: Date; message: string }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.regerarSnapshotMetricasTurma(id, userId);
     }
 
     @Get(':id/times')

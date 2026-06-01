@@ -840,6 +840,7 @@ export class TurmasService {
             .createQueryBuilder('turma')
             .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
             .where('turma.deletado_em IS NULL')
+            .andWhere('turma.status_turma = :statusEncerrada', { statusEncerrada: EStatusTurmas.ENCERRADA })
             .andWhere('turma.data_final < :hoje', { hoje })
             .getMany();
 
@@ -866,6 +867,7 @@ export class TurmasService {
 
         const qb = this.uow.turmasRP.createQueryBuilder('turma').where('turma.deletado_em IS NULL');
         if (!incluirEmAndamento) {
+            qb.andWhere('turma.status_turma = :statusEncerrada', { statusEncerrada: EStatusTurmas.ENCERRADA });
             qb.andWhere('turma.data_final < :hoje', { hoje });
         }
 

@@ -1,4 +1,18 @@
-import { Controller, Get, Put, Delete, Query, Param, Body, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, UseGuards } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Put,
+    Delete,
+    Query,
+    Param,
+    Body,
+    UseInterceptors,
+    ClassSerializerInterceptor,
+    ParseIntPipe,
+    UseGuards,
+    Req,
+    ForbiddenException,
+} from '@nestjs/common';
 import { UsuariosService } from './usuarios.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
@@ -11,8 +25,12 @@ export class UsuariosController {
 
     @Get()
     @UseGuards(JwtAuthGuard)
-    async findAll(@Query() filters: GetUsuariosDto): Promise<UsuariosListResponseDto> {
-        console.log('Buscando usuários com filtros:', filters);
+    async findAll(@Query() filters: GetUsuariosDto, @Req() req: any): Promise<UsuariosListResponseDto> {
+        console.log('[usuarios-url-debug][backend][controller] requisição recebida:', {
+            originalUrl: req?.originalUrl,
+            rawQuery: req?.query,
+            transformedFilters: filters,
+        });
         return this.usuariosService.findAll(filters);
     }
 
@@ -28,6 +46,17 @@ export class UsuariosController {
     async update(@Param('id', ParseIntPipe) id: number, @Body() updateUsuarioDto: UpdateUsuarioDto): Promise<UsuarioResponseDto> {
         console.log('Atualizando usuário ID:', id, 'Dados:', updateUsuarioDto);
         return this.usuariosService.update(id, updateUsuarioDto);
+    }
+
+    @Put(':id/aprovar')
+    @UseGuards(JwtAuthGuard, AdminGuard)
+    async approve(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<UsuarioResponseDto> {
+        const aprovadoPor = req.user?.sub;
+        if (!aprovadoPor) {
+            throw new ForbiddenException('Usuário autenticado inválido para aprovar cadastro.');
+        }
+        console.log('Aprovando usuário ID:', id, 'Aprovado por:', aprovadoPor);
+        return this.usuariosService.approve(id, aprovadoPor);
     }
 
     @Put(':id/soft-delete')

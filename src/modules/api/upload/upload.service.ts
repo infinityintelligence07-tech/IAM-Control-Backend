@@ -2056,6 +2056,21 @@ export class UploadService {
         return this.normalizeText(value).replace(/\s+/g, '_');
     }
 
+    private buildCodigoLookupAlternatives(codigoRaw: string): string[] {
+        const codigoNormalizado = this.normalizeCodeKey(codigoRaw);
+        if (!codigoNormalizado) return [];
+
+        const alternatives = new Set<string>([codigoNormalizado]);
+        const parts = codigoNormalizado.split('_').filter(Boolean);
+
+        // Regra de negócio: para IDN sem polo informado, assume AM (ex.: IDN_6 => IDN_AM_6).
+        if (parts.length === 2 && parts[0] === 'IDN') {
+            alternatives.add(`IDN_AM_${parts[1]}`);
+        }
+
+        return Array.from(alternatives);
+    }
+
     private normalizeMasterclassTurmaOrigem(origemRaw: string): {
         codigoParaLookup: string;
         descricao: string;
@@ -2161,7 +2176,8 @@ export class UploadService {
         turmaCodigoNormalizado: string;
     }> {
         const codigoRaw = (params.codigoRaw || '').trim();
-        const codigoNormalizado = this.normalizeCodeKey(codigoRaw);
+        const codigosAlternativos = this.buildCodigoLookupAlternatives(codigoRaw);
+        const codigoNormalizado = codigosAlternativos[0] || this.normalizeCodeKey(codigoRaw);
         const cacheKey = this.normalizeText(codigoRaw);
         if (!codigoRaw) {
             return { turmaId: null, matchType: 'nao_encontrada', turmaCodigoNormalizado: codigoNormalizado };
@@ -2171,11 +2187,13 @@ export class UploadService {
             return resultadoCache;
         }
 
-        const turmaByCodigo = params.turmaCodigoMap.get(codigoNormalizado) || null;
-        if (turmaByCodigo) {
-            const result = { turmaId: turmaByCodigo, matchType: 'codigo' as const, turmaCodigoNormalizado: codigoNormalizado };
-            params.cache?.set(cacheKey, result);
-            return result;
+        for (const codigoLookup of codigosAlternativos) {
+            const turmaByCodigo = params.turmaCodigoMap.get(codigoLookup) || null;
+            if (turmaByCodigo) {
+                const result = { turmaId: turmaByCodigo, matchType: 'codigo' as const, turmaCodigoNormalizado: codigoLookup };
+                params.cache?.set(cacheKey, result);
+                return result;
+            }
         }
 
         const turmasPorEdicao = await this.uow.turmasRP.find({

@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, OneToMany } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
@@ -92,6 +92,22 @@ export class Usuarios extends BaseEntity {
 
     @Column({ type: 'timestamp', name: 'data_demissao', nullable: true })
     data_demissao?: Date;
+
+    @Column({ type: 'boolean', name: 'aprovado', nullable: false, default: false })
+    aprovado: boolean;
+
+    @Column({ type: 'timestamp', name: 'aprovado_em', nullable: true })
+    aprovado_em?: Date;
+
+    @Column({ type: 'int', name: 'aprovado_por', nullable: true })
+    aprovado_por?: number;
+
+    @ManyToOne(() => Usuarios, { nullable: true })
+    @JoinColumn({ name: 'aprovado_por', referencedColumnName: 'id', foreignKeyConstraintName: 'fk_usuarios_aprovado_por' })
+    aprovador_fk?: Usuarios;
+
+    @OneToMany(() => Usuarios, (usuarios) => usuarios.aprovador_fk)
+    aprovados: Usuarios[];
 
     @OneToMany(() => Turmas, (turmas) => turmas.lider_evento_fk)
     turmas: Turmas[];

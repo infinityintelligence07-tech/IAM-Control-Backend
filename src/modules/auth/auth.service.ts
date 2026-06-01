@@ -11,6 +11,9 @@ import { EFuncoes, ESetores } from '../config/entities/enum';
 
 @Injectable()
 export class AuthService {
+    private readonly pendingApprovalMessage = 'Seu cadastro está aguardando aprovação de um administrador.';
+    private readonly invalidGoogleAuthFlowMessage = 'Fluxo de autenticação Google inválido.';
+
     constructor(
         private readonly jwtService: JwtService,
         private readonly uow: UnitOfWorkService,
@@ -33,7 +36,7 @@ export class AuthService {
         provider: 'google' | 'credentials' = 'credentials',
         providerId?: string,
         picture?: string,
-    ) {
+    ): Promise<never> {
         const exists = await this.uow.usuariosRP.findOne({ where: { email } });
 
         if (exists) throw new BadRequestException('E-mail já cadastrado');
@@ -68,26 +71,30 @@ export class AuthService {
         });
         await this.uow.usuariosRP.save(user);
 
-        const token = await this.signToken(user.id, user.email, user.nome);
-        return {
-            success: true,
-            token,
-            user: {
-                id: user.id,
-                nome: user.nome,
-                email: user.email,
-                primeiro_nome: user.primeiro_nome,
-                sobrenome: user.sobrenome,
-                telefone: user.telefone,
-                setor: user.setor,
-                funcao: user.funcao,
-                url_foto: user.url_foto,
-                provider: user.provider || provider,
-            },
-        };
+        throw new UnauthorizedException(this.pendingApprovalMessage);
     }
 
-    async googleAuth(primeiro_nome: string, sobrenome: string, email: string, providerId: string, picture?: string) {
+    async googleAuth(
+        primeiro_nome: string,
+        sobrenome: string,
+        email: string,
+        providerId: string,
+        picture?: string,
+    ): Promise<{
+        success: true;
+        token: string;
+        user: {
+            id: number;
+            nome: string;
+            email: string;
+            primeiro_nome: string;
+            sobrenome: string;
+            telefone: string;
+            setor: ESetores;
+            url_foto?: string;
+            provider: string;
+        };
+    }> {
         const exists = await this.uow.usuariosRP.findOne({ where: { email } });
 
         if (exists) {
@@ -101,6 +108,7 @@ export class AuthService {
                 exists.url_foto = picture;
             }
             await this.uow.usuariosRP.save(exists);
+            this.ensureUserApproved(exists.aprovado);
 
             const token = await this.signToken(exists.id, exists.email, exists.nome);
             return {
@@ -120,7 +128,7 @@ export class AuthService {
             };
         } else {
             // Usuário não existe, registra
-            return this.register(
+            await this.register(
                 primeiro_nome,
                 sobrenome,
                 email,
@@ -132,6 +140,8 @@ export class AuthService {
                 providerId,
                 picture,
             );
+
+            throw new UnauthorizedException(this.invalidGoogleAuthFlowMessage);
         }
     }
 
@@ -145,6 +155,7 @@ export class AuthService {
         // Compara a senha fornecida com a hash armazenada
         const match = await bcrypt.compare(providedSecret, user.senha);
         if (!match) throw new UnauthorizedException('Credenciais inválidas');
+        this.ensureUserApproved(user.aprovado);
 
         const token = await this.signToken(user.id, user.email, user.nome);
         return {
@@ -193,8 +204,11 @@ export class AuthService {
                 'tipo_colaborador',
                 'data_nascimento',
                 'data_admissao',
+                'aprovado',
             ] as any,
         });
+        this.ensureUserApproved(user?.aprovado);
+
         return user;
     }
 
@@ -505,5 +519,11 @@ export class AuthService {
 
     private async signToken(id: number, email: string, nome: string) {
         return this.jwtService.signAsync({ sub: id, email, nome });
+    }
+
+    private ensureUserApproved(aprovado?: boolean) {
+        if (!aprovado) {
+            throw new UnauthorizedException(this.pendingApprovalMessage);
+        }
     }
 }

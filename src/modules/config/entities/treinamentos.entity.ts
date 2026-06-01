@@ -6,6 +6,34 @@ import { Turmas } from './turmas.entity';
 import { TurmasAlunosTreinamentos } from './turmasAlunosTreinamentos.entity';
 import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.entity';
 
+export interface TreinamentoFormaPagamentoAvistaConfig {
+    habilitado: boolean;
+    valor: number;
+}
+
+export interface TreinamentoFormaPagamentoPrazoConfig {
+    habilitado: boolean;
+    valor: number;
+    parcelasMin: number;
+    parcelasSemLiberacao: number;
+    parcelasMaximasComLiberacao?: number | null;
+}
+
+export interface TreinamentoConfiguracaoPagamentos {
+    avista: {
+        cartaoCredito: TreinamentoFormaPagamentoAvistaConfig;
+        cartaoDebito: TreinamentoFormaPagamentoAvistaConfig;
+        pixTransferencia: TreinamentoFormaPagamentoAvistaConfig;
+        especieDinheiro: TreinamentoFormaPagamentoAvistaConfig;
+        link: TreinamentoFormaPagamentoAvistaConfig;
+    };
+    prazo: {
+        cartaoCredito: TreinamentoFormaPagamentoPrazoConfig;
+        boleto: TreinamentoFormaPagamentoPrazoConfig;
+        link: TreinamentoFormaPagamentoPrazoConfig;
+    };
+}
+
 @Entity('treinamentos', { schema: type_schema })
 export class Treinamentos extends BaseEntity {
     @PrimaryGeneratedColumn('increment', { type: 'int', name: 'id', primaryKeyConstraintName: 'pk_treinamentos' })
@@ -20,7 +48,10 @@ export class Treinamentos extends BaseEntity {
     @Column({ type: 'float', name: 'preco_treinamento', nullable: false })
     preco_treinamento: number;
 
-    @Column({ type: 'varchar', name: 'url_logo_treinamento', nullable: true })
+    @Column({ type: 'jsonb', name: 'configuracao_pagamentos', nullable: true })
+    configuracao_pagamentos: TreinamentoConfiguracaoPagamentos | null;
+
+    @Column({ type: 'text', name: 'url_logo_treinamento', nullable: true })
     url_logo_treinamento: string;
 
     @Column({ type: 'boolean', name: 'tipo_treinamento', nullable: false })
@@ -29,8 +60,14 @@ export class Treinamentos extends BaseEntity {
     @Column({ type: 'boolean', name: 'tipo_palestra', nullable: false })
     tipo_palestra: boolean;
 
+    @Column({ type: 'boolean', name: 'tipo_mentoria', nullable: false })
+    tipo_mentoria: boolean;
+
     @Column({ type: 'boolean', name: 'tipo_online', nullable: false })
     tipo_online: boolean;
+
+    @Column({ type: 'boolean', name: 'tipo_presencial', nullable: false })
+    tipo_presencial: boolean;
 
     @OneToMany(() => Turmas, (turmas) => turmas.id_polo_fk)
     turmas: Turmas[];

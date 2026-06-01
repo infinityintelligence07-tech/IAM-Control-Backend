@@ -22,6 +22,10 @@ export class GetUsuariosDto {
     funcao?: EFuncoes;
 
     @IsOptional()
+    @Transform(({ value }) => (value === undefined ? undefined : value === 'true' || value === true))
+    aprovado?: boolean;
+
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value))
     page?: number = 1;
@@ -43,6 +47,9 @@ export class UsuarioResponseDto {
     setor: ESetores;
     funcao: EFuncoes[];
     url_foto?: string;
+    aprovado: boolean;
+    aprovado_em?: Date;
+    aprovado_por?: number;
     criado_em: Date;
     atualizado_em: Date;
 }
@@ -98,4 +105,10 @@ export class SoftDeleteUsuarioDto {
     @IsOptional()
     @IsNumber()
     atualizado_por?: number;
+}
+
+export class AprovarUsuarioDto {
+    @IsOptional()
+    @Transform(({ value }) => (value === undefined ? true : value === 'true' || value === true))
+    aprovado?: boolean = true;
 }

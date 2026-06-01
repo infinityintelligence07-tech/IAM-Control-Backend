@@ -93,7 +93,7 @@ export class Alunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'desc_deficiencia', nullable: true })
     desc_deficiencia: string;
 
-    @Column({ type: 'varchar', name: 'url_foto_aluno', nullable: true })
+    @Column({ type: 'text', name: 'url_foto_aluno', nullable: true })
     url_foto_aluno: string;
 
     @Column({ type: 'int', name: 'id_aluno_vinculado', nullable: true })

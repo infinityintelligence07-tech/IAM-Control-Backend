@@ -1,5 +1,33 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, IsNotEmpty } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsBoolean, IsNotEmpty, IsObject } from 'class-validator';
 import { Transform } from 'class-transformer';
+
+export interface TreinamentoFormaPagamentoAvistaDto {
+    habilitado: boolean;
+    valor: number;
+}
+
+export interface TreinamentoFormaPagamentoPrazoDto {
+    habilitado: boolean;
+    valor: number;
+    parcelasMin: number;
+    parcelasSemLiberacao: number;
+    parcelasMaximasComLiberacao?: number | null;
+}
+
+export interface TreinamentoConfiguracaoPagamentosDto {
+    avista: {
+        cartaoCredito: TreinamentoFormaPagamentoAvistaDto;
+        cartaoDebito: TreinamentoFormaPagamentoAvistaDto;
+        pixTransferencia: TreinamentoFormaPagamentoAvistaDto;
+        especieDinheiro: TreinamentoFormaPagamentoAvistaDto;
+        link: TreinamentoFormaPagamentoAvistaDto;
+    };
+    prazo: {
+        cartaoCredito: TreinamentoFormaPagamentoPrazoDto;
+        boleto: TreinamentoFormaPagamentoPrazoDto;
+        link: TreinamentoFormaPagamentoPrazoDto;
+    };
+}
 
 export class GetTreinamentosDto {
     @IsOptional()
@@ -28,6 +56,16 @@ export class GetTreinamentosDto {
     tipo_online?: boolean;
 
     @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_mentoria?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_presencial?: boolean;
+
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value, 10))
     page?: number = 1;
@@ -43,16 +81,20 @@ export class TreinamentoResponseDto {
     treinamento: string;
     sigla_treinamento?: string;
     preco_treinamento: number;
+    configuracao_pagamentos?: TreinamentoConfiguracaoPagamentosDto | null;
     url_logo_treinamento?: string;
     tipo_treinamento: boolean;
     tipo_palestra: boolean;
+    tipo_mentoria: boolean;
     tipo_online: boolean;
+    tipo_presencial: boolean;
     total_turmas: number;
     total_alunos: number;
     capacidade_total: number;
     alunos_presentes: number;
     created_at: string;
     updated_at: string;
+    atualizado_por_nome?: string | null;
 }
 
 export class TreinamentosListResponseDto {
@@ -80,6 +122,10 @@ export class CreateTreinamentoDto {
     preco_treinamento: number;
 
     @IsOptional()
+    @IsObject()
+    configuracao_pagamentos?: TreinamentoConfiguracaoPagamentosDto;
+
+    @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
     url_logo_treinamento?: string;
@@ -98,6 +144,16 @@ export class CreateTreinamentoDto {
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_online: boolean;
+
+    @IsNotEmpty()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_mentoria: boolean;
+
+    @IsNotEmpty()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_presencial: boolean;
 
     @IsOptional()
     @IsNumber()
@@ -121,6 +177,10 @@ export class UpdateTreinamentoDto {
     preco_treinamento?: number;
 
     @IsOptional()
+    @IsObject()
+    configuracao_pagamentos?: TreinamentoConfiguracaoPagamentosDto;
+
+    @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
     url_logo_treinamento?: string;
@@ -139,6 +199,16 @@ export class UpdateTreinamentoDto {
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_online?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_mentoria?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    tipo_presencial?: boolean;
 
     @IsOptional()
     @IsNumber()

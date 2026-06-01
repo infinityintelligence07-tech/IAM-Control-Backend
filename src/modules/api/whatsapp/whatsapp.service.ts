@@ -3,6 +3,7 @@ import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import { ChatGuruService } from './chatguru/chatguru.service';
 import * as jwt from 'jsonwebtoken';
+import { validateBase64ImageField } from '../shared/image-base64.validator';
 
 export interface CheckInStudentDto {
     alunoTurmaId: string;
@@ -1040,6 +1041,7 @@ Vamos Prosperar! 🙌`;
      */
     async preencherDadosAluno(token: string, dados: any): Promise<{ success: boolean; message: string }> {
         try {
+            validateBase64ImageField(dados?.url_foto_aluno, 'Foto do aluno');
             // Verificar e decodificar token
             const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
 
@@ -1172,6 +1174,7 @@ Vamos Prosperar! 🙌`;
      */
     async atualizarFotoAluno(token: string, urlFoto: string): Promise<any> {
         try {
+            validateBase64ImageField(urlFoto, 'Foto do aluno');
             // Verificar e decodificar token
             const decoded = jwt.verify(token, this.jwtSecret) as { alunoTurmaId: string; turmaId: number; timestamp: number };
 

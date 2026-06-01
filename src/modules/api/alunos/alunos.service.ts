@@ -14,6 +14,7 @@ import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
 import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
 import { EProfissao } from '../../config/entities/enum';
+import { validateBase64ImageField } from '../shared/image-base64.validator';
 
 @Injectable()
 export class AlunosService {
@@ -200,6 +201,7 @@ export class AlunosService {
 
     async create(createAlunoDto: CreateAlunoDto): Promise<AlunoResponseDto> {
         try {
+            validateBase64ImageField(createAlunoDto.url_foto_aluno, 'Foto do aluno');
             // Verificar se já existe um aluno com esse email (incluindo deletados)
             // Usar query SQL direta para garantir que busca incluindo deletados
             const queryRunner = this.uow.alunosRP.manager.connection.createQueryRunner();
@@ -417,6 +419,7 @@ export class AlunosService {
 
     async update(id: number, updateAlunoDto: UpdateAlunoDto): Promise<AlunoResponseDto> {
         try {
+            validateBase64ImageField(updateAlunoDto.url_foto_aluno, 'Foto do aluno');
             const aluno = await this.uow.alunosRP.findOne({
                 where: {
                     id,

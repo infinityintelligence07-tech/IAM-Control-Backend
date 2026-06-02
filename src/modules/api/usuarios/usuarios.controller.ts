@@ -17,6 +17,7 @@ import { UsuariosService } from './usuarios.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { AdminGuard } from '@/modules/auth/guards/admin.guard';
+import { LiderGuard } from '@/modules/auth/guards/lider.guard';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('usuarios')
@@ -49,7 +50,7 @@ export class UsuariosController {
     }
 
     @Put(':id/aprovar')
-    @UseGuards(JwtAuthGuard, AdminGuard)
+    @UseGuards(JwtAuthGuard, LiderGuard)
     async approve(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<UsuarioResponseDto> {
         const aprovadoPor = req.user?.sub;
         if (!aprovadoPor) {

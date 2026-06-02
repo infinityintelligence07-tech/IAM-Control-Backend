@@ -30,6 +30,12 @@ import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 
+const parsePositiveIntEnv = (value: string | undefined, fallback: number): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.floor(parsed);
+};
+
 @Injectable()
 export class DocumentosService {
     private readonly logger = new Logger(DocumentosService.name);
@@ -40,6 +46,8 @@ export class DocumentosService {
     private readonly contratosBancoCacheMaxEntradas = 40;
     private readonly janelaCronSincronizacaoDias = 7;
     private sincronizacaoStatusCronEmExecucao = false;
+    private readonly zapsignCronMaxTentativas = parsePositiveIntEnv(process.env.ZAPSIGN_CRON_MAX_TENTATIVAS, 2);
+    private readonly zapsignCronRetryDelayMs = parsePositiveIntEnv(process.env.ZAPSIGN_CRON_RETRY_DELAY_MS, 2000);
     private readonly opcoesOrigemCache = new Map<
         string,
         {
@@ -4436,7 +4444,7 @@ export class DocumentosService {
         this.sincronizacaoStatusCronEmExecucao = true;
 
         try {
-            const resultado = await this.sincronizarStatusContratosPendentesRecentesZapSign(this.janelaCronSincronizacaoDias);
+            const resultado = await this.executarSincronizacaoZapSignCronComRetry(this.janelaCronSincronizacaoDias);
             this.logger.log(
                 `zapsign.sync.cron | Concluído em janela=${this.janelaCronSincronizacaoDias}d sincronizados=${resultado.sincronizados} erros=${resultado.erros}`,
             );
@@ -4445,6 +4453,44 @@ export class DocumentosService {
         } finally {
             this.sincronizacaoStatusCronEmExecucao = false;
         }
+    }
+
+    private isErroConexaoTransitorio(error: unknown): boolean {
+        const message = String((error as any)?.message || '').toLowerCase();
+        return (
+            message.includes('connection terminated unexpectedly') ||
+            message.includes('terminating connection') ||
+            message.includes('connection reset') ||
+            message.includes('econnreset') ||
+            message.includes('timeout') ||
+            message.includes('connection not open')
+        );
+    }
+
+    private async aguardar(ms: number): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    private async executarSincronizacaoZapSignCronComRetry(janelaDias: number): Promise<{ sincronizados: number; erros: number }> {
+        for (let tentativa = 1; tentativa <= this.zapsignCronMaxTentativas; tentativa++) {
+            try {
+                return await this.sincronizarStatusContratosPendentesRecentesZapSign(janelaDias);
+            } catch (error) {
+                const erroTransitorio = this.isErroConexaoTransitorio(error);
+                const ultimaTentativa = tentativa >= this.zapsignCronMaxTentativas;
+
+                if (!erroTransitorio || ultimaTentativa) {
+                    throw error;
+                }
+
+                this.logger.warn(
+                    `zapsign.sync.cron | Falha transitória de conexão na tentativa ${tentativa}/${this.zapsignCronMaxTentativas}; retry em ${this.zapsignCronRetryDelayMs}ms`,
+                );
+                await this.aguardar(this.zapsignCronRetryDelayMs);
+            }
+        }
+
+        return { sincronizados: 0, erros: 0 };
     }
 
     private async sincronizarStatusContratosPendentesRecentesZapSign(janelaDias: number): Promise<{

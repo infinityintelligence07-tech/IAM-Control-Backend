@@ -2,11 +2,7 @@ import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EFuncoes } from '../../config/entities/enum';
 
-const LIDER_ESPECIAL_FUNCTIONS = [
-    EFuncoes.LIDER_DE_EVENTOS,
-    EFuncoes.LIDER_DE_MASTERCLASS,
-    EFuncoes.LIDER_DE_CONFRONTO,
-];
+const LIDER_ESPECIAL_FUNCTIONS = [EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
 
 @Injectable()
 export class LiderGuard implements CanActivate {
@@ -35,9 +31,7 @@ export class LiderGuard implements CanActivate {
             }
 
             const hasLider = usuario.funcao.includes(EFuncoes.LIDER);
-            const hasLiderEspecial = LIDER_ESPECIAL_FUNCTIONS.some((funcao) =>
-                usuario.funcao.includes(funcao),
-            );
+            const hasLiderEspecial = LIDER_ESPECIAL_FUNCTIONS.some((funcao) => usuario.funcao.includes(funcao));
 
             if (!hasLider || hasLiderEspecial) {
                 throw new ForbiddenException(

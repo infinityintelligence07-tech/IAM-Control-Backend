@@ -1320,10 +1320,7 @@ export class TurmasService {
                         return turma.id_treinamento_fk.tipo_mentoria === true;
                     } else if (tipo_treinamento === 'treinamento') {
                         // Mentorias saem da aba de treinamentos e ficam na aba própria.
-                        return (
-                            turma.id_treinamento_fk.tipo_treinamento === true &&
-                            turma.id_treinamento_fk.tipo_mentoria !== true
-                        );
+                        return turma.id_treinamento_fk.tipo_treinamento === true && turma.id_treinamento_fk.tipo_mentoria !== true;
                     }
                     return false;
                 });

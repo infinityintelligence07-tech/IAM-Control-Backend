@@ -862,7 +862,12 @@ export class UploadService {
             const isTurmaDestinoConfronto = turmaConfrontoMap.get(turmaDestinoId) === true;
 
             const origemMasterclass = this.normalizeMasterclassTurmaOrigem(row.turmaOrigemCodigo);
-            const isBonusOrigemMasterclass = origemMasterclass.isBonusOrigem;
+            // Regra: quando a origem é uma Masterclass (código MC_*), todas as
+            // inscrições são compra de ingresso (COMPROU_INGRESSO), mesmo quando
+            // NÚMERO DE INSCRIÇÕES > 1. Os demais inscritos da mesma linha entram
+            // como compradores — nunca como bônus/convidado.
+            const origemEhMasterclass = this.normalizeCodeKey(row.turmaOrigemCodigo).startsWith('MC_');
+            const isBonusOrigemMasterclass = origemMasterclass.isBonusOrigem && !origemEhMasterclass;
             const codigoOrigem = this.normalizeCodeKey(origemMasterclass.codigoParaLookup || row.turmaOrigemCodigo);
             const origemVenda = origemMasterclass.isTimeDeVendas;
             const origemRaw = String(row.turmaOrigemCodigo || '').trim();

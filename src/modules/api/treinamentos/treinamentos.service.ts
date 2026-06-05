@@ -265,9 +265,7 @@ export class TreinamentosService {
             novoTreinamento.tipo_palestra = createTreinamentoDto.tipo_palestra;
             novoTreinamento.tipo_mentoria = createTreinamentoDto.tipo_mentoria;
             // Mentorias têm duração configurável (padrão 12 meses). Treinamentos/palestras não têm duração.
-            novoTreinamento.duracao_meses = createTreinamentoDto.tipo_mentoria
-                ? (createTreinamentoDto.duracao_meses ?? 12)
-                : null;
+            novoTreinamento.duracao_meses = createTreinamentoDto.tipo_mentoria ? (createTreinamentoDto.duracao_meses ?? 12) : null;
             novoTreinamento.tipo_online = createTreinamentoDto.tipo_online;
             novoTreinamento.tipo_presencial = createTreinamentoDto.tipo_presencial;
             novoTreinamento.criado_por = createTreinamentoDto.criado_por;

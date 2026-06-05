@@ -266,6 +266,31 @@ export class DocumentosService {
         }
     }
 
+    /**
+     * Calcula o período individual da mentoria para o mentorado.
+     * Para mentorias, a duração (em meses, configurada no cadastro do treinamento)
+     * passa a contar a partir da assinatura/finalização do contrato (data de início = hoje).
+     * Para treinamentos/palestras retorna nulos (a data vem da turma).
+     */
+    private calcularPeriodoMentoria(treinamento: { tipo_mentoria?: boolean; duracao_meses?: number | null } | null): {
+        data_inicio_mentoria: string | null;
+        data_fim_mentoria: string | null;
+    } {
+        if (!treinamento || !treinamento.tipo_mentoria) {
+            return { data_inicio_mentoria: null, data_fim_mentoria: null };
+        }
+        const duracaoMeses = Number(treinamento.duracao_meses) > 0 ? Number(treinamento.duracao_meses) : 12;
+        const inicio = new Date();
+        inicio.setHours(0, 0, 0, 0);
+        const fim = new Date(inicio);
+        fim.setMonth(fim.getMonth() + duracaoMeses);
+        const toIsoDate = (data: Date) => data.toISOString().slice(0, 10);
+        return {
+            data_inicio_mentoria: toIsoDate(inicio),
+            data_fim_mentoria: toIsoDate(fim),
+        };
+    }
+
     async criarContratoZapSign(criarContratoDto: CriarContratoZapSignDto, userId?: number): Promise<RespostaContratoZapSignDto> {
         try {
             this.logger.debug('zapsign.create.contract | Iniciando criação de contrato ZapSign');
@@ -309,6 +334,9 @@ export class DocumentosService {
             const idTurmaOrigemContrato = idTurmaReferencia ?? idTurmaOrigemPadrao;
 
             const idTurmaDestino = criarContratoDto.id_turma_destino ? criarContratoDto.id_turma_destino : null;
+
+            // Período da mentoria (início na assinatura/finalização + duração configurada).
+            const periodoMentoria = this.calcularPeriodoMentoria(treinamento);
 
             // Buscar ou criar registro de TurmasAlunos primeiro
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({
@@ -359,6 +387,10 @@ export class DocumentosService {
                     registroDeletado.deletado_em = null;
                     registroDeletado.id_turma_destino = idTurmaDestino;
                     registroDeletado.atualizado_em = new Date();
+                    if (periodoMentoria.data_inicio_mentoria) {
+                        registroDeletado.data_inicio_mentoria = periodoMentoria.data_inicio_mentoria;
+                        registroDeletado.data_fim_mentoria = periodoMentoria.data_fim_mentoria;
+                    }
                     if (userId) {
                         registroDeletado.atualizado_por = userId;
                     }
@@ -373,6 +405,8 @@ export class DocumentosService {
                             preco_treinamento: treinamento.preco_treinamento || 0,
                             forma_pgto: [],
                             preco_total_pago: 0,
+                            data_inicio_mentoria: periodoMentoria.data_inicio_mentoria,
+                            data_fim_mentoria: periodoMentoria.data_fim_mentoria,
                         });
                         turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
                     } catch (error: any) {
@@ -395,6 +429,8 @@ export class DocumentosService {
                                     preco_treinamento: treinamento.preco_treinamento || 0,
                                     forma_pgto: [],
                                     preco_total_pago: 0,
+                                    data_inicio_mentoria: periodoMentoria.data_inicio_mentoria,
+                                    data_fim_mentoria: periodoMentoria.data_fim_mentoria,
                                 });
 
                                 // Tentar novamente
@@ -414,6 +450,10 @@ export class DocumentosService {
                                     registroExistente.deletado_em = null;
                                     registroExistente.id_turma_destino = idTurmaDestino;
                                     registroExistente.atualizado_em = new Date();
+                                    if (periodoMentoria.data_inicio_mentoria) {
+                                        registroExistente.data_inicio_mentoria = periodoMentoria.data_inicio_mentoria;
+                                        registroExistente.data_fim_mentoria = periodoMentoria.data_fim_mentoria;
+                                    }
                                     if (userId) {
                                         registroExistente.atualizado_por = userId;
                                     }

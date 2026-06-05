@@ -63,6 +63,13 @@ export class Treinamentos extends BaseEntity {
     @Column({ type: 'boolean', name: 'tipo_mentoria', nullable: false })
     tipo_mentoria: boolean;
 
+    /**
+     * Duração da mentoria em meses (ex.: 12 = 1 ano, 6 = Liberty Begin).
+     * NULL para treinamentos/palestras (que têm data definida pela turma).
+     */
+    @Column({ type: 'int', name: 'duracao_meses', nullable: true })
+    duracao_meses: number | null;
+
     @Column({ type: 'boolean', name: 'tipo_online', nullable: false })
     tipo_online: boolean;
 

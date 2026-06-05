@@ -86,6 +86,7 @@ export class TreinamentoResponseDto {
     tipo_treinamento: boolean;
     tipo_palestra: boolean;
     tipo_mentoria: boolean;
+    duracao_meses?: number | null;
     tipo_online: boolean;
     tipo_presencial: boolean;
     total_turmas: number;
@@ -150,6 +151,15 @@ export class CreateTreinamentoDto {
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_mentoria: boolean;
 
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    })
+    duracao_meses?: number | null;
+
     @IsNotEmpty()
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
@@ -204,6 +214,15 @@ export class UpdateTreinamentoDto {
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_mentoria?: boolean;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    })
+    duracao_meses?: number | null;
 
     @IsOptional()
     @IsBoolean()

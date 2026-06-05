@@ -133,27 +133,33 @@ export class CreateTurmaDto {
     })
     id_turma_bonus?: number;
 
+    // Mentorias não têm capacidade de sala definida.
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => {
         if (value === '' || value === null || value === undefined) return null;
         const n = typeof value === 'string' ? parseInt(value, 10) : value;
         return isNaN(n) ? null : n;
     })
-    capacidade_turma: number;
+    capacidade_turma?: number | null;
 
+    @IsOptional()
     @IsNumber()
     @Transform(({ value }) => {
         if (value === '' || value === null || value === undefined) return null;
         const n = typeof value === 'string' ? parseInt(value, 10) : value;
         return isNaN(n) ? null : n;
     })
-    meta: number;
+    meta?: number | null;
 
+    // Mentorias não têm data de evento (período por mentorado, a partir da assinatura).
+    @IsOptional()
     @IsString()
-    data_inicio: string;
+    data_inicio?: string | null;
 
+    @IsOptional()
     @IsString()
-    data_final: string;
+    data_final?: string | null;
 
     @IsOptional()
     @IsBoolean()
@@ -596,6 +602,7 @@ export class TurmaResponseDto {
         id: number;
         nome: string;
         tipo: string;
+        tipo_mentoria?: boolean;
         sigla_treinamento?: string;
         treinamento?: string;
         url_logo_treinamento?: string;
@@ -641,6 +648,10 @@ export class AlunoTurmaResponseDto {
     confirmacao_realizada?: boolean;
     checkin_realizado?: boolean;
     presenca_turma?: string;
+    /** Mentorias: início do período do mentorado (data da assinatura/finalização do contrato). */
+    data_inicio_mentoria?: string | null;
+    /** Mentorias: fim do período do mentorado (início + duração configurada). */
+    data_fim_mentoria?: string | null;
     ficha_preenchida?: boolean;
     url_comprovante_pgto?: string;
     pendencia_pagamento?: boolean;
@@ -847,6 +858,10 @@ export class TurmaStatusResumoResponseDto {
     cancelados: number;
     inadimplentes: number;
     status_counts: Record<string, number>;
+    /** Indica que os números vêm de um snapshot congelado (turma encerrada e D+1 da data final). */
+    congelado?: boolean;
+    /** Momento em que o snapshot foi congelado (apenas quando congelado=true). */
+    snapshot_em?: Date | string;
 }
 
 export class TurmaStatusAlunosItemDto {

@@ -31,6 +31,7 @@ import { FindManyOptions, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
+import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
 
 export interface PresenteSorteioPayload {
     descricao: string;
@@ -99,6 +100,7 @@ const TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR = 'AUTO_TRANSFERENCIA_NO_SHOW_IPR'
 export class TurmasService {
     private readonly logger = new Logger(TurmasService.name);
     private congelamentoMetricasCronEmExecucao = false;
+    private periodosMentoriaCronEmExecucao = false;
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -1025,6 +1027,89 @@ export class TurmasService {
         }
     }
 
+    @Cron('30 1 * * *')
+    async sincronizarPeriodosMentoriaCron(): Promise<void> {
+        if (this.periodosMentoriaCronEmExecucao) {
+            this.logger.warn('mentoria.periodos.cron | Execução anterior ainda em andamento, pulando ciclo');
+            return;
+        }
+
+        this.periodosMentoriaCronEmExecucao = true;
+        try {
+            const resultado = await this.sincronizarPeriodosMentoria();
+            this.logger.log(
+                `mentoria.periodos.cron | Datas preenchidas: ${resultado.datasPreenchidas} | Mentorados encerrados (soft delete): ${resultado.matriculasEncerradas}`,
+            );
+        } catch (error) {
+            this.logger.error('mentoria.periodos.cron | Erro ao sincronizar períodos de mentoria', error instanceof Error ? error.stack : undefined);
+        } finally {
+            this.periodosMentoriaCronEmExecucao = false;
+        }
+    }
+
+    /**
+     * Regras de mentoria por mentorado:
+     * 1) data_inicio_mentoria = data de criação do aluno na turma (turmas_alunos.criado_em);
+     * 2) data_fim_mentoria = data_inicio_mentoria + duração (em meses) configurada no treinamento;
+     * 3) ao atingir D+1 da data de encerramento, a matrícula do mentorado sofre soft delete.
+     * É idempotente: só preenche datas faltantes e só encerra matrículas vencidas ainda ativas.
+     */
+    async sincronizarPeriodosMentoria(): Promise<{ datasPreenchidas: number; matriculasEncerradas: number }> {
+        // 1) Preenche início (created_at) e fim (início + duração) para linhas de mentoria sem data definida.
+        const updateDatas = await this.uow.turmasAlunosTreinamentosRP.query(`
+            UPDATE turmas_alunos_treinamentos AS tat
+            SET data_inicio_mentoria = ta.criado_em::date,
+                data_fim_mentoria = CASE
+                    WHEN tr.duracao_meses IS NOT NULL
+                    THEN (ta.criado_em::date + (tr.duracao_meses || ' months')::interval)::date
+                    ELSE NULL
+                END
+            FROM turmas_alunos AS ta, treinamentos AS tr
+            WHERE tat.id_turma_aluno = ta.id
+              AND tat.id_treinamento = tr.id
+              AND tr.tipo_mentoria = true
+              AND ta.deletado_em IS NULL
+              AND tat.data_inicio_mentoria IS NULL
+            RETURNING tat.id
+        `);
+
+        // 2a) Encerra (soft delete) mentorados matriculados diretamente em turmas de mentoria,
+        // usando a regra padrão (created_at + duração do treinamento), ao passar de D+1.
+        const updateEncerramentoTurma = await this.uow.turmasAlunosRP.query(`
+            UPDATE turmas_alunos AS ta
+            SET deletado_em = now()
+            FROM turmas AS t, treinamentos AS tr
+            WHERE ta.id_turma = t.id
+              AND t.id_treinamento = tr.id
+              AND tr.tipo_mentoria = true
+              AND tr.duracao_meses IS NOT NULL
+              AND CURRENT_DATE > (ta.criado_em::date + (tr.duracao_meses || ' months')::interval)::date
+              AND ta.deletado_em IS NULL
+            RETURNING ta.id
+        `);
+
+        // 2b) Encerra mentorados cujo período veio de um contrato (turmas_alunos_treinamentos) com data explícita.
+        const updateEncerramentoContrato = await this.uow.turmasAlunosRP.query(`
+            UPDATE turmas_alunos AS ta
+            SET deletado_em = now()
+            FROM turmas_alunos_treinamentos AS tat, treinamentos AS tr
+            WHERE tat.id_turma_aluno = ta.id
+              AND tat.id_treinamento = tr.id
+              AND tr.tipo_mentoria = true
+              AND tat.data_fim_mentoria IS NOT NULL
+              AND CURRENT_DATE > tat.data_fim_mentoria
+              AND ta.deletado_em IS NULL
+            RETURNING ta.id
+        `);
+
+        const contarLinhas = (resultado: unknown): number => (Array.isArray(resultado) ? resultado.length : 0);
+
+        return {
+            datasPreenchidas: contarLinhas(updateDatas),
+            matriculasEncerradas: contarLinhas(updateEncerramentoTurma) + contarLinhas(updateEncerramentoContrato),
+        };
+    }
+
     /**
      * Buscar contadores de pré-cadastrados por turmas
      */
@@ -1231,8 +1316,14 @@ export class TurmasService {
                     // Filtrar por tipo de treinamento baseado nos campos booleanos
                     if (tipo_treinamento === 'palestra') {
                         return turma.id_treinamento_fk.tipo_palestra === true;
+                    } else if (tipo_treinamento === 'mentoria') {
+                        return turma.id_treinamento_fk.tipo_mentoria === true;
                     } else if (tipo_treinamento === 'treinamento') {
-                        return turma.id_treinamento_fk.tipo_treinamento === true;
+                        // Mentorias saem da aba de treinamentos e ficam na aba própria.
+                        return (
+                            turma.id_treinamento_fk.tipo_treinamento === true &&
+                            turma.id_treinamento_fk.tipo_mentoria !== true
+                        );
                     }
                     return false;
                 });
@@ -1307,6 +1398,7 @@ export class TurmasService {
                               id: turma.id_treinamento_fk.id,
                               nome: turma.id_treinamento_fk.treinamento,
                               tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
+                              tipo_mentoria: turma.id_treinamento_fk.tipo_mentoria === true,
                               sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
                               treinamento: turma.id_treinamento_fk.treinamento,
                               url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
@@ -1409,6 +1501,7 @@ export class TurmasService {
                           id: turma.id_treinamento_fk.id,
                           nome: turma.id_treinamento_fk.treinamento,
                           tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
+                          tipo_mentoria: turma.id_treinamento_fk.tipo_mentoria === true,
                           sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
                           treinamento: turma.id_treinamento_fk.treinamento,
                           url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
@@ -2399,28 +2492,69 @@ export class TurmasService {
 
     async getAlunosTurma(id_turma: number, page: number = 1, limit: number = 10): Promise<AlunosTurmaListResponseDto> {
         try {
-            const turmaExiste = await this.uow.turmasRP.exist({
+            const turma = await this.uow.turmasRP.findOne({
                 where: { id: id_turma, deletado_em: IsNull() as any },
+                relations: ['id_treinamento_fk'],
             });
-            if (!turmaExiste) {
+            if (!turma) {
                 throw new NotFoundException('Turma não encontrada');
+            }
+
+            const isMentoria = turma.id_treinamento_fk?.tipo_mentoria === true;
+
+            const relacoesAlunos = [
+                'id_aluno_fk',
+                'id_turma_transferencia_para_fk',
+                'id_turma_transferencia_para_fk.id_treinamento_fk',
+                'id_turma_transferencia_para_fk.id_polo_fk',
+                'id_turma_transferencia_de_fk',
+                'id_turma_transferencia_de_fk.id_treinamento_fk',
+                'id_turma_transferencia_de_fk.id_polo_fk',
+            ];
+            // Mentorias: carregar os treinamentos contratados para obter as datas (início/fim) por mentorado.
+            if (isMentoria) {
+                relacoesAlunos.push('turmasAlunosTreinamentos');
             }
 
             const [turmasAlunos, total] = await this.uow.turmasAlunosRP.findAndCount({
                 where: { id_turma, deletado_em: null },
-                relations: [
-                    'id_aluno_fk',
-                    'id_turma_transferencia_para_fk',
-                    'id_turma_transferencia_para_fk.id_treinamento_fk',
-                    'id_turma_transferencia_para_fk.id_polo_fk',
-                    'id_turma_transferencia_de_fk',
-                    'id_turma_transferencia_de_fk.id_treinamento_fk',
-                    'id_turma_transferencia_de_fk.id_polo_fk',
-                ],
+                relations: relacoesAlunos,
                 order: { criado_em: 'DESC' },
                 skip: (page - 1) * limit,
                 take: limit,
             });
+
+            // Mentorias: as datas seguem a regra início = created_at do aluno na turma e
+            // fim = início + duração (meses) do treinamento. Um override explícito no contrato
+            // (turmas_alunos_treinamentos) tem prioridade quando existir.
+            const datasMentoriaPorTurmaAluno = new Map<string, { inicio: string | null; fim: string | null }>();
+            if (isMentoria) {
+                const duracaoMesesMentoria = turma.id_treinamento_fk?.duracao_meses ?? null;
+                const paraDataIso = (valor?: Date | string | null): string | null => {
+                    if (!valor) return null;
+                    const data = valor instanceof Date ? valor : new Date(valor);
+                    if (Number.isNaN(data.getTime())) return null;
+                    return data.toISOString().slice(0, 10);
+                };
+                const somarMeses = (iso: string | null, meses: number | null): string | null => {
+                    if (!iso || meses == null) return null;
+                    const [ano, mes, dia] = iso.split('-').map((n) => parseInt(n, 10));
+                    const base = new Date(Date.UTC(ano, mes - 1, dia));
+                    base.setUTCMonth(base.getUTCMonth() + meses);
+                    return base.toISOString().slice(0, 10);
+                };
+                for (const ta of turmasAlunos) {
+                    const linhas = (ta as any).turmasAlunosTreinamentos as TurmasAlunosTreinamentos[] | undefined;
+                    const linhasAtivas = Array.isArray(linhas) ? linhas.filter((l) => !(l as any).deletado_em) : [];
+                    const linhaMentoria =
+                        linhasAtivas.find((l) => String(l.id_turma_destino) === String(id_turma) && l.data_inicio_mentoria != null) ||
+                        linhasAtivas.find((l) => l.id_treinamento === turma.id_treinamento && l.data_inicio_mentoria != null) ||
+                        linhasAtivas.find((l) => l.data_inicio_mentoria != null);
+                    const inicio = linhaMentoria?.data_inicio_mentoria ?? paraDataIso(ta.criado_em);
+                    const fim = linhaMentoria?.data_fim_mentoria ?? somarMeses(inicio, duracaoMesesMentoria);
+                    datasMentoriaPorTurmaAluno.set(ta.id, { inicio: inicio ?? null, fim: fim ?? null });
+                }
+            }
 
             const turmaAlunoIds = turmasAlunos.map((item) => item.id);
             const canalIngressoPorTurmaAlunoId = new Map<string, 'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO'>();
@@ -2521,6 +2655,8 @@ export class TurmasService {
                 confirmacao_realizada: turmaAluno.confirmacao_realizada,
                 checkin_realizado: turmaAluno.checkin_realizado,
                 presenca_turma: turmaAluno.presenca_turma,
+                data_inicio_mentoria: datasMentoriaPorTurmaAluno.get(turmaAluno.id)?.inicio ?? null,
+                data_fim_mentoria: datasMentoriaPorTurmaAluno.get(turmaAluno.id)?.fim ?? null,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 pendencia_pagamento: turmaAluno.pendencia_pagamento ?? undefined,
                 quantidade_inscricoes: turmaAluno.quantidade_inscricoes ?? 1,
@@ -3493,7 +3629,11 @@ export class TurmasService {
             await this.tentarCongelarTurmaSePassouDataFinal(id_turma);
             const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
             if (snapshot?.resumo) {
-                return snapshot.resumo as unknown as TurmaStatusResumoResponseDto;
+                return {
+                    ...(snapshot.resumo as unknown as TurmaStatusResumoResponseDto),
+                    congelado: true,
+                    snapshot_em: snapshot.snapshot_em,
+                };
             }
         }
 
@@ -4157,8 +4297,8 @@ export class TurmasService {
                 break;
             case 'checkin_aguardando':
                 titulo = 'Aguardando check-in';
-                qb.andWhere('ta.status_aluno_turma IN (:...status)', {
-                    status: ['FALTA_ENVIAR_LINK_CHECKIN', EStatusAlunosTurmas.AGUARDANDO_CHECKIN],
+                qb.andWhere('ta.status_aluno_turma = :status', {
+                    status: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
                 });
                 break;
             case 'checkin_realizado':

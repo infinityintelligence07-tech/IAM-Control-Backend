@@ -69,17 +69,19 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'id_turma_bonus', nullable: true })
     id_turma_bonus: number;
 
-    @Column({ type: 'int', name: 'capacidade_turma', nullable: false })
-    capacidade_turma: number;
+    // Mentorias não têm capacidade de sala definida.
+    @Column({ type: 'int', name: 'capacidade_turma', nullable: true })
+    capacidade_turma: number | null;
 
     @Column({ type: 'int', name: 'meta', nullable: true })
     meta: number;
 
-    @Column({ type: 'date', name: 'data_inicio', nullable: false })
-    data_inicio: string;
+    // Mentorias não têm data de evento (o período é por mentorado, a partir da assinatura).
+    @Column({ type: 'date', name: 'data_inicio', nullable: true })
+    data_inicio: string | null;
 
-    @Column({ type: 'date', name: 'data_final', nullable: false })
-    data_final: string;
+    @Column({ type: 'date', name: 'data_final', nullable: true })
+    data_final: string | null;
 
     @Column({ type: 'boolean', name: 'turma_aberta', default: false, nullable: false })
     turma_aberta: boolean;

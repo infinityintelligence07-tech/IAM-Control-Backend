@@ -26,6 +26,19 @@ export class TurmasAlunosTreinamentos extends BaseEntity {
     @Column({ type: 'bigint', name: 'id_turma_destino', nullable: true })
     id_turma_destino: string | null;
 
+    /**
+     * Início do período da mentoria para este mentorado (data da assinatura/finalização
+     * do contrato). NULL quando o treinamento contratado não é uma mentoria.
+     */
+    @Column({ type: 'date', name: 'data_inicio_mentoria', nullable: true })
+    data_inicio_mentoria: string | null;
+
+    /**
+     * Fim do período da mentoria (início + duração configurada no cadastro).
+     */
+    @Column({ type: 'date', name: 'data_fim_mentoria', nullable: true })
+    data_fim_mentoria: string | null;
+
     @Column({ type: 'float', name: 'preco_treinamento', nullable: false })
     preco_treinamento: number;
 

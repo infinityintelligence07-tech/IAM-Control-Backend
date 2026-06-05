@@ -146,6 +146,7 @@ export class TreinamentosService {
                         tipo_treinamento: treinamento.tipo_treinamento,
                         tipo_palestra: treinamento.tipo_palestra,
                         tipo_mentoria: treinamento.tipo_mentoria,
+                        duracao_meses: treinamento.duracao_meses ?? null,
                         tipo_online: treinamento.tipo_online,
                         tipo_presencial: treinamento.tipo_presencial,
                         total_turmas: stats.totalTurmas,
@@ -234,6 +235,7 @@ export class TreinamentosService {
                 tipo_treinamento: treinamento.tipo_treinamento,
                 tipo_palestra: treinamento.tipo_palestra,
                 tipo_mentoria: treinamento.tipo_mentoria,
+                duracao_meses: treinamento.duracao_meses ?? null,
                 tipo_online: treinamento.tipo_online,
                 tipo_presencial: treinamento.tipo_presencial,
                 total_turmas: totalTurmas,
@@ -262,6 +264,10 @@ export class TreinamentosService {
             novoTreinamento.tipo_treinamento = createTreinamentoDto.tipo_treinamento;
             novoTreinamento.tipo_palestra = createTreinamentoDto.tipo_palestra;
             novoTreinamento.tipo_mentoria = createTreinamentoDto.tipo_mentoria;
+            // Mentorias têm duração configurável (padrão 12 meses). Treinamentos/palestras não têm duração.
+            novoTreinamento.duracao_meses = createTreinamentoDto.tipo_mentoria
+                ? (createTreinamentoDto.duracao_meses ?? 12)
+                : null;
             novoTreinamento.tipo_online = createTreinamentoDto.tipo_online;
             novoTreinamento.tipo_presencial = createTreinamentoDto.tipo_presencial;
             novoTreinamento.criado_por = createTreinamentoDto.criado_por;
@@ -280,6 +286,7 @@ export class TreinamentosService {
                 tipo_treinamento: treinamentoSalvo.tipo_treinamento,
                 tipo_palestra: treinamentoSalvo.tipo_palestra,
                 tipo_mentoria: treinamentoSalvo.tipo_mentoria,
+                duracao_meses: treinamentoSalvo.duracao_meses ?? null,
                 tipo_online: treinamentoSalvo.tipo_online,
                 tipo_presencial: treinamentoSalvo.tipo_presencial,
                 total_turmas: 0,
@@ -338,6 +345,18 @@ export class TreinamentosService {
             if (updateTreinamentoDto.tipo_mentoria !== undefined) {
                 treinamento.tipo_mentoria = updateTreinamentoDto.tipo_mentoria;
             }
+            if (updateTreinamentoDto.duracao_meses !== undefined) {
+                treinamento.duracao_meses = updateTreinamentoDto.duracao_meses;
+            }
+            // Mantém a coerência: mentoria sempre tem duração (padrão 12);
+            // treinamento/palestra não tem duração.
+            if (treinamento.tipo_mentoria) {
+                if (treinamento.duracao_meses == null) {
+                    treinamento.duracao_meses = 12;
+                }
+            } else {
+                treinamento.duracao_meses = null;
+            }
             if (updateTreinamentoDto.tipo_presencial !== undefined) {
                 treinamento.tipo_presencial = updateTreinamentoDto.tipo_presencial;
             }
@@ -392,6 +411,7 @@ export class TreinamentosService {
                 tipo_treinamento: treinamentoAtualizado.tipo_treinamento,
                 tipo_palestra: treinamentoAtualizado.tipo_palestra,
                 tipo_mentoria: treinamentoAtualizado.tipo_mentoria,
+                duracao_meses: treinamentoAtualizado.duracao_meses ?? null,
                 tipo_online: treinamentoAtualizado.tipo_online,
                 tipo_presencial: treinamentoAtualizado.tipo_presencial,
                 total_turmas: totalTurmas,

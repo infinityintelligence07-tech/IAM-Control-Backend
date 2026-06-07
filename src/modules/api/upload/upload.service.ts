@@ -907,9 +907,17 @@ export class UploadService {
             const inscricoesJaGeradas = inscricoesGeradasPorPessoa.get(dedupeKey) || 0;
 
             const quantidadeInscricoes = Math.max(1, row.quantidadeInscricoes || 1);
-            const quantidadeBonusExtraPorPessoa = Math.max(0, row.quantidadeBonusTurma || 0);
+            const quantidadeBonusExtraPlanilha = Math.max(0, row.quantidadeBonusTurma || 0);
+            // Regra: origem Masterclass (MC_*) nunca gera bônus/convidado — todas as
+            // inscrições são compra de ingresso. Ignora qualquer valor de bônus da planilha.
+            if (origemEhMasterclass && quantidadeBonusExtraPlanilha > 0) {
+                avisos.push(
+                    `Linha ${row.linha}: origem Masterclass ${origemAvisoLabel} — bônus (${quantidadeBonusExtraPlanilha}) ignorado; todas as inscrições entram como compra de ingresso.`,
+                );
+            }
+            const quantidadeBonusExtraPorPessoa = origemEhMasterclass ? 0 : quantidadeBonusExtraPlanilha;
             let turmaBonusId: number | null = null;
-            let turmaBonusCodigoFinal = row.turmaBonusCodigo || '';
+            let turmaBonusCodigoFinal = origemEhMasterclass ? '' : row.turmaBonusCodigo || '';
 
             if (quantidadeBonusExtraPorPessoa > 0) {
                 if (!turmaBonusCodigoFinal) {
@@ -2155,13 +2163,17 @@ export class UploadService {
 
     private buildInscricaoEmailFromBase(email: string, numeroInscricao: number): string {
         const normalized = (email || '').trim().toLowerCase();
+        // Marcador "_n_comp" (inscrição que NÃO é comprador próprio): a inscrição
+        // adicional não possui dados próprios e replica os dados do comprador,
+        // mas precisa de e-mail único para distinguir o cadastro do titular.
+        const marcador = `insc${numeroInscricao}_n_comp`;
         const atIndex = normalized.indexOf('@');
         if (atIndex <= 0) {
-            return `${normalized}+insc${numeroInscricao}@sememail.com`;
+            return `${normalized}+${marcador}@sememail.com`;
         }
         const local = normalized.slice(0, atIndex);
         const domain = normalized.slice(atIndex + 1);
-        return `${local}+insc${numeroInscricao}@${domain}`;
+        return `${local}+${marcador}@${domain}`;
     }
 
     private async resolveTurmaIdByCodigo(params: {

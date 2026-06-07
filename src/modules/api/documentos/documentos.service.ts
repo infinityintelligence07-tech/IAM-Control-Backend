@@ -490,15 +490,27 @@ export class DocumentosService {
                         });
                         if (jaExiste) continue;
 
-                        const novoBonus = this.uow.turmasAlunosTreinamentosBonusRP.create({
-                            id_turma_aluno: turmaAluno.id,
-                            id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
-                            id_turma_bonus: criarContratoDto.id_turma_bonus,
-                            tipo_bonus: tipo,
-                            // Coluna é jsonb[] no Postgres; '{}' representa array vazio válido.
-                            ganhadores_bonus: '{}' as unknown as any,
-                        });
-                        await this.uow.turmasAlunosTreinamentosBonusRP.save(novoBonus);
+                        // A coluna ganhadores_bonus é jsonb[] NOT NULL. O TypeORM
+                        // não serializa corretamente arrays JS para esse tipo
+                        // (tanto '{}' quanto [] geram "malformed array literal"),
+                        // então inserimos via query builder gravando o literal de
+                        // array vazio diretamente em SQL ('{}'::jsonb[]) e
+                        // preenchendo os campos de auditoria manualmente.
+                        const agoraBonus = new Date();
+                        await this.uow.turmasAlunosTreinamentosBonusRP
+                            .createQueryBuilder()
+                            .insert()
+                            .values({
+                                id_turma_aluno: turmaAluno.id,
+                                id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
+                                id_turma_bonus: criarContratoDto.id_turma_bonus,
+                                tipo_bonus: tipo,
+                                ganhadores_bonus: () => `'{}'::jsonb[]`,
+                                criado_em: agoraBonus,
+                                atualizado_em: agoraBonus,
+                                ...(userId ? { criado_por: userId, atualizado_por: userId } : {}),
+                            })
+                            .execute();
                     }
                 }
             }

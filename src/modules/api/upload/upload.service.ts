@@ -710,6 +710,9 @@ export class UploadService {
                 lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
             }
 
+            // Congela a meta no novo pico de inscritos/extras das turmas de destino da importação.
+            await this.uow.bumparPicoMetricasTurmas(turmaIdsDestino);
+
             for (const cand of candidates) {
                 if (!cand.isBonusEntry) continue;
                 const alunoBonus = alunoByEmail.get(cand.email);
@@ -776,6 +779,7 @@ export class UploadService {
         const parsedRows = this.parseMasterclassSpreadsheetRows(rows);
         const turmaCodigoMap = await this.buildTurmaCodigoMap();
         const turmaConfrontoMap = await this.buildTurmaConfrontoMap();
+        const turmaImersaoProsperarMap = await this.buildTurmaImersaoProsperarMap();
         const turmaLookupCache = new Map<
             string,
             {
@@ -820,6 +824,8 @@ export class UploadService {
             idTurmaTransferenciaDe: number | null;
             /** Coluna TURMA ORIGEM na planilha (persistido para MC sem turma cadastrada). */
             codigoTurmaOrigemPlanilha: string | null;
+            /** E-mail do titular (1ª inscrição/compra) para vincular bônus gerados por regra de evento→IPR. */
+            titularBonusEmail?: string;
         }> = [];
 
         for (const row of parsedRows) {
@@ -903,21 +909,21 @@ export class UploadService {
             }
 
             const codigoDestino = this.normalizeCodeKey(row.turmaDestinoCodigo);
-            const dedupeKey = `${nomeNormalizado}|${codigoOrigem}|${codigoDestino}`;
+            // Dois registros são tratados como o mesmo aluno (continuando a numeração de
+            // inscrições/bônus) quando nome, e-mail e telefone são iguais para a mesma
+            // origem/destino. Isso garante que o cenário "2 registros sem quantidade"
+            // gere o mesmo resultado do cenário "1 registro com mais de uma inscrição".
+            const dedupeKey = `${nomeNormalizado}|${emailNormalizado}|${telefoneNormalizado}|${codigoOrigem}|${codigoDestino}`;
             const inscricoesJaGeradas = inscricoesGeradasPorPessoa.get(dedupeKey) || 0;
 
             const quantidadeInscricoes = Math.max(1, row.quantidadeInscricoes || 1);
-            const quantidadeBonusExtraPlanilha = Math.max(0, row.quantidadeBonusTurma || 0);
-            // Regra: origem Masterclass (MC_*) nunca gera bônus/convidado — todas as
-            // inscrições são compra de ingresso. Ignora qualquer valor de bônus da planilha.
-            if (origemEhMasterclass && quantidadeBonusExtraPlanilha > 0) {
-                avisos.push(
-                    `Linha ${row.linha}: origem Masterclass ${origemAvisoLabel} — bônus (${quantidadeBonusExtraPlanilha}) ignorado; todas as inscrições entram como compra de ingresso.`,
-                );
-            }
-            const quantidadeBonusExtraPorPessoa = origemEhMasterclass ? 0 : quantidadeBonusExtraPlanilha;
+            // Regra: a coluna QUANTIDADE DE BÔNUS é respeitada para qualquer origem
+            // (inclusive Masterclass MC_*). Os bônus são alocados na turma indicada em
+            // "BÔNUS PARA QUAL TURMA?"; quando não há turma de bônus válida (vazio ou um
+            // texto/nome), o bônus é ignorado por não haver turma de destino para alocá-lo.
+            const quantidadeBonusExtraPorPessoa = Math.max(0, row.quantidadeBonusTurma || 0);
             let turmaBonusId: number | null = null;
-            let turmaBonusCodigoFinal = origemEhMasterclass ? '' : row.turmaBonusCodigo || '';
+            let turmaBonusCodigoFinal = row.turmaBonusCodigo || '';
 
             if (quantidadeBonusExtraPorPessoa > 0) {
                 if (!turmaBonusCodigoFinal) {
@@ -946,12 +952,47 @@ export class UploadService {
             const slugEvento = this.normalizeCodeKey(row.turmaDestinoCodigo || 'EVENTO').toLowerCase();
             const codigoTurmaOrigemPlanilha = origemVenda ? null : origemMasterclass.codigoTurmaOrigemPlanilha;
 
+            // Classificação de origem/destino para definir a mecânica das inscrições.
+            const destinoEhIPR = turmaImersaoProsperarMap.get(turmaDestinoId) === true;
+            const origemEhImersaoNegocios = codigoOrigem.startsWith('IDN_') || codigoOrigem === 'IDN';
+            // "Evento" = origem que não é Masterclass (MC_*), nem Imersão de Negócios
+            // (IDN_*), nem Time de Vendas, nem origem-bônus explícita, e possui código
+            // (ex.: IPR_*, CONF_*, MG_*).
+            const origemEhEvento = !origemEhMasterclass && !origemEhImersaoNegocios && !origemVenda && !isBonusOrigemMasterclass && Boolean(codigoOrigem);
+            // Regra: destino IPR (Imersão Prosperar) + origem de evento — a 1ª inscrição
+            // é compra (COMPROU_INGRESSO) e as demais entram como bônus do titular
+            // ("nome bonus N", com o mesmo complemento no e-mail). Nos demais casos
+            // (MC_*/IDN_* → IPR e qualquer origem → destino diferente de IPR) todas as
+            // inscrições permanecem como compra ("nome insc N").
+            const aplicarBonusEventoIPR = destinoEhIPR && origemEhEvento;
+            if (aplicarBonusEventoIPR && quantidadeInscricoes > 1) {
+                avisos.push(
+                    `Linha ${row.linha}: destino IPR com origem de evento ${origemAvisoLabel} — 1ª inscrição como compra e as demais (${quantidadeInscricoes - 1}) como bônus do titular.`,
+                );
+            }
+
             // Regra nova: todas as inscrições vão para a turma de destino.
             for (let i = 0; i < quantidadeInscricoes; i++) {
                 const numeroInscricao = inscricoesJaGeradas + i + 1;
                 const isPrimeiraInscricao = numeroInscricao === 1;
-                const nomeCracha = isPrimeiraInscricao ? row.nome.trim() : `${row.nome.trim()} insc ${numeroInscricao}`;
-                const emailCandidato = isPrimeiraInscricao ? emailNormalizado : this.buildInscricaoEmailFromBase(emailNormalizado, numeroInscricao);
+                // 1ª inscrição é sempre o titular/compra; as demais viram bônus apenas
+                // quando a regra evento→IPR se aplica. O índice de bônus reinicia em 1.
+                const ehBonusEventoIPR = aplicarBonusEventoIPR && !isPrimeiraInscricao;
+                const bonusIndex = numeroInscricao - 1;
+                const isBonusInscricao = isBonusOrigemMasterclass || ehBonusEventoIPR;
+
+                let nomeCracha: string;
+                let emailCandidato: string;
+                if (isPrimeiraInscricao) {
+                    nomeCracha = row.nome.trim();
+                    emailCandidato = emailNormalizado;
+                } else if (ehBonusEventoIPR) {
+                    nomeCracha = `${row.nome.trim()} bonus ${bonusIndex}`;
+                    emailCandidato = this.buildBonusEmailFromBase(emailNormalizado, bonusIndex);
+                } else {
+                    nomeCracha = `${row.nome.trim()} insc ${numeroInscricao}`;
+                    emailCandidato = this.buildInscricaoEmailFromBase(emailNormalizado, numeroInscricao);
+                }
 
                 candidates.push({
                     linha: row.linha,
@@ -971,14 +1012,15 @@ export class UploadService {
                     quantidadeBonusExtraPorPessoa,
                     turmaBonusCodigo: turmaBonusCodigoFinal || undefined,
                     isTimeDeVendas: origemVenda,
-                    isBonusEntry: isBonusOrigemMasterclass,
+                    isBonusEntry: isBonusInscricao,
                     isBonusExtraEntry: false,
                     modoConfronto: isTurmaDestinoConfronto,
                     statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
                     statusFinal: statusImportacao,
-                    origemFinal: isBonusOrigemMasterclass ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO,
+                    origemFinal: isBonusInscricao ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO,
                     idTurmaTransferenciaDe,
                     codigoTurmaOrigemPlanilha,
+                    titularBonusEmail: ehBonusEventoIPR ? emailNormalizado : undefined,
                 });
             }
 
@@ -1156,7 +1198,18 @@ export class UploadService {
                 const existeVinculo = Boolean(aluno && runtimeVinculoKeys.has(vinculoKey));
                 const vinculoPersistido = aluno ? vinculoByKey.get(vinculoKey) : undefined;
                 const isBonus = item.origemFinal === EOrigemAlunos.ALUNO_BONUS;
-                const idAlunoBonus = isBonus ? firstAlunoIdByLinha.get(item.linha) || null : null;
+                // Para bônus gerados pela regra evento→IPR, o titular pode estar em
+                // outra linha da planilha (2 registros do mesmo aluno). Nesse caso o
+                // firstAlunoIdByLinha (indexado por linha) não resolve, então usamos o
+                // e-mail do titular (1ª inscrição/compra) como fallback.
+                const idTitularViaEmail =
+                    isBonus && item.titularBonusEmail && aluno
+                        ? (() => {
+                              const titular = alunoByEmail.get(item.titularBonusEmail);
+                              return titular && String(titular.id) !== String(aluno.id) ? String(titular.id) : null;
+                          })()
+                        : null;
+                const idAlunoBonus = isBonus ? firstAlunoIdByLinha.get(item.linha) || idTitularViaEmail || null : null;
 
                 if (existeVinculo) {
                     if (!isBonus && aluno && !firstAlunoIdByLinha.has(item.linha)) {
@@ -1298,6 +1351,9 @@ export class UploadService {
                 await this.uow.turmasAlunosRP.save(entities, { chunk: vinculosChunkSize });
                 lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
             }
+
+            // Congela a meta no novo pico de inscritos/extras das turmas de destino da importação.
+            await this.uow.bumparPicoMetricasTurmas(turmaIdsDestino);
 
             const vinculosSalvos =
                 idsAlunosExistentes.length > 0 && turmaIdsDestino.length > 0
@@ -2392,6 +2448,27 @@ export class UploadService {
         for (const turma of turmas) {
             const nomeTreinamento = this.normalizeText(`${turma.id_treinamento_fk?.sigla_treinamento || ''} ${turma.id_treinamento_fk?.treinamento || ''}`);
             map.set(turma.id, nomeTreinamento.includes('CONFRONTO'));
+        }
+        return map;
+    }
+
+    /**
+     * Marca quais turmas são de Imersão Prosperar (IPR). Usado na importação de
+     * masterclass para decidir, quando a origem é um evento (IPR_*, CONF_*, MG_*,
+     * etc.), que a 1ª inscrição é compra e as demais entram como bônus do titular.
+     */
+    private async buildTurmaImersaoProsperarMap(): Promise<Map<number, boolean>> {
+        const turmas = await this.uow.turmasRP.find({
+            where: { deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+
+        const map = new Map<number, boolean>();
+        for (const turma of turmas) {
+            const sigla = this.normalizeText(turma.id_treinamento_fk?.sigla_treinamento || '');
+            const nomeTreinamento = this.normalizeText(turma.id_treinamento_fk?.treinamento || '');
+            const ehImersaoProsperar = sigla === 'IPR' || nomeTreinamento.includes('IMERSAO PROSPERAR');
+            map.set(turma.id, ehImersaoProsperar);
         }
         return map;
     }

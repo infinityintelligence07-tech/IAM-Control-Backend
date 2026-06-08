@@ -280,12 +280,7 @@ export class DocumentosController {
     @Post('salvar-assinatura')
     @UseGuards(JwtAuthGuard)
     salvarAssinatura(@Body() signatureData: any) {
-        console.log('Salvando assinatura:', signatureData);
-        // Retornar sucesso mockado para compatibilidade
-        return {
-            message: 'Endpoint temporariamente desabilitado - funcionalidade em migração',
-            success: true,
-        };
+        return this.documentosService.salvarAssinatura(signatureData);
     }
 
     // Endpoint de teste para verificar dados do contrato

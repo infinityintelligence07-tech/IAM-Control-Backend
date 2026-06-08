@@ -704,6 +704,44 @@ export class TurmasService {
         }
     }
 
+    /**
+     * Atualiza e retorna o pico (máximo histórico) de inscritos e extras de uma turma.
+     *
+     * A meta é congelada sobre esses picos: transferências/remoções não reduzem a meta,
+     * mas, quando inscritos/extras superam o pico anterior, o pico (e portanto a meta) sobe.
+     */
+    private async atualizarPicoMetricasTurma(
+        turmaId: number,
+        inscritosAtual: number,
+        extrasAtual: number,
+        picoInscritosArmazenado: number | null | undefined,
+        picoExtrasArmazenado: number | null | undefined,
+    ): Promise<{ meta_pico_inscritos: number; meta_pico_extras: number }> {
+        const inscritosBase = Math.max(0, inscritosAtual || 0);
+        const extrasBase = Math.max(0, extrasAtual || 0);
+        const picoInscritosArmazenadoNorm = Math.max(0, picoInscritosArmazenado ?? 0);
+        const picoExtrasArmazenadoNorm = Math.max(0, picoExtrasArmazenado ?? 0);
+
+        const picoInscritosEfetivo = Math.max(inscritosBase, picoInscritosArmazenadoNorm);
+        const picoExtrasEfetivo = Math.max(extrasBase, picoExtrasArmazenadoNorm);
+
+        const precisaAtualizar =
+            picoInscritosArmazenado == null ||
+            picoExtrasArmazenado == null ||
+            picoInscritosEfetivo !== picoInscritosArmazenadoNorm ||
+            picoExtrasEfetivo !== picoExtrasArmazenadoNorm;
+
+        if (precisaAtualizar) {
+            try {
+                await this.uow.turmasRP.update({ id: turmaId }, { meta_pico_inscritos: picoInscritosEfetivo, meta_pico_extras: picoExtrasEfetivo });
+            } catch (error) {
+                this.logger.warn(`Falha ao atualizar pico de métricas da turma=${turmaId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+            }
+        }
+
+        return { meta_pico_inscritos: picoInscritosEfetivo, meta_pico_extras: picoExtrasEfetivo };
+    }
+
     private formatDateToYyyyMmDd(date: Date): string {
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -1339,10 +1377,21 @@ export class TurmasService {
             ]);
 
             // Verificar e atualizar status das turmas automaticamente (usa contagens agregadas, sem carregar alunos)
+            const picosPorTurma: Record<number, { meta_pico_inscritos: number; meta_pico_extras: number }> = {};
             for (const turma of turmasFiltradas) {
                 const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
                 const inscritosParaExpectativa = isPalestra ? (preCadastrosCount[turma.id]?.total ?? 0) : (contadoresListagem[turma.id]?.alunos_total ?? 0);
                 await this.verificarEAtualizarStatusTurma(turma, { inscritosParaExpectativa });
+
+                const inscritosCount = isPalestra ? (preCadastrosCount[turma.id]?.total ?? 0) : (contadoresListagem[turma.id]?.alunos_total ?? 0);
+                const extrasCount = contadoresListagem[turma.id]?.alunos_inscricoes_extras ?? 0;
+                picosPorTurma[turma.id] = await this.atualizarPicoMetricasTurma(
+                    turma.id,
+                    inscritosCount,
+                    extrasCount,
+                    turma.meta_pico_inscritos,
+                    turma.meta_pico_extras,
+                );
             }
 
             // Transformar dados para o formato de resposta
@@ -1408,6 +1457,8 @@ export class TurmasService {
                               nome: turma.lider_evento_fk.nome,
                           }
                         : undefined,
+                    meta_pico_inscritos: picosPorTurma[turma.id]?.meta_pico_inscritos ?? null,
+                    meta_pico_extras: picosPorTurma[turma.id]?.meta_pico_extras ?? null,
                     // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, contagens agregadas
                     alunos_count: isPalestra ? preCadastrosCount[turma.id]?.total || 0 : m?.alunos_total || 0,
                     alunos_inscricoes_extras_count: m?.alunos_inscricoes_extras || 0,
@@ -1452,6 +1503,10 @@ export class TurmasService {
             }
             const transferidosCountByTurma = await this.getTransferidosCountByTurmas([turma.id]);
 
+            const alunosCountCalc = isPalestra ? preCadastrosCount[turma.id]?.total || 0 : turma.turmasAlunos?.length || 0;
+            const extrasCountCalc = turma.turmasAlunos?.filter((ta) => this.isInscricaoExtraNaTurma(ta)).length || 0;
+            const picos = await this.atualizarPicoMetricasTurma(turma.id, alunosCountCalc, extrasCountCalc, turma.meta_pico_inscritos, turma.meta_pico_extras);
+
             return {
                 id: turma.id,
                 id_polo: turma.id_polo,
@@ -1471,6 +1526,8 @@ export class TurmasService {
                 id_turma_bonus: turma.id_turma_bonus,
                 capacidade_turma: turma.capacidade_turma,
                 meta: turma.meta,
+                meta_pico_inscritos: picos.meta_pico_inscritos,
+                meta_pico_extras: picos.meta_pico_extras,
                 data_inicio: turma.data_inicio,
                 data_final: turma.data_final,
                 turma_aberta: turma.turma_aberta,
@@ -1512,13 +1569,8 @@ export class TurmasService {
                       }
                     : undefined,
                 // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
-                alunos_count: (() => {
-                    if (isPalestra) {
-                        return preCadastrosCount[turma.id]?.total || 0;
-                    }
-                    return turma.turmasAlunos?.length || 0;
-                })(),
-                alunos_inscricoes_extras_count: turma.turmasAlunos?.filter((ta) => this.isInscricaoExtraNaTurma(ta)).length || 0,
+                alunos_count: alunosCountCalc,
+                alunos_inscricoes_extras_count: extrasCountCalc,
                 alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
                 transferidos_count: transferidosCountByTurma[turma.id] || 0,
                 vindos_transferencia_count:
@@ -2797,6 +2849,9 @@ export class TurmasService {
                 await this.verificarEAtualizarStatusTurma(turmaAtualizada);
             }
 
+            // Congela a meta no novo pico de inscritos/extras, se aplicável.
+            await this.uow.bumparPicoMetricasTurmas([id_turma]);
+
             // Retornar com as relações
             const turmaAlunoCompleta = await this.uow.turmasAlunosRP.findOne({
                 where: { id: turmaAlunoSalva.id },
@@ -3086,6 +3141,9 @@ export class TurmasService {
         turmaAlunoOrigem.presenca_turma = null;
         turmaAlunoOrigem.deletado_em = new Date();
         await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
+
+        // Congela a meta no novo pico de inscritos/extras da turma de destino.
+        await this.uow.bumparPicoMetricasTurmas([id_turma_destino]);
 
         const turmaAlunoCompleta = await this.uow.turmasAlunosRP.findOne({
             where: { id: turmaAlunoDestinoSalvo.id },
@@ -4407,6 +4465,14 @@ export class TurmasService {
             if (updateAlunoDto.origem_aluno !== undefined) {
                 turmaAluno.origem_aluno = updateAlunoDto.origem_aluno;
                 turmaAluno.vaga_bonus = updateAlunoDto.origem_aluno === EOrigemAlunos.ALUNO_BONUS;
+                // Ao deixar de ser TRANSFERENCIA, limpa a turma de origem registrada.
+                if (updateAlunoDto.origem_aluno !== EOrigemAlunos.TRANSFERENCIA && updateAlunoDto.id_turma_transferencia_de === undefined) {
+                    turmaAluno.id_turma_transferencia_de = null;
+                }
+            }
+            // Turma de onde o aluno veio (origem TRANSFERENCIA editada manualmente).
+            if (updateAlunoDto.id_turma_transferencia_de !== undefined) {
+                turmaAluno.id_turma_transferencia_de = updateAlunoDto.id_turma_transferencia_de;
             }
             if (updateAlunoDto.presenca_turma !== undefined) {
                 const desmarcandoPresenca = turmaAluno.presenca_turma === EPresencaTurmas.PRESENTE && updateAlunoDto.presenca_turma === 'NO_SHOW';

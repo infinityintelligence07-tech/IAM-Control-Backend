@@ -533,6 +533,16 @@ export class UpdateAlunoTurmaDto {
     @IsEnum(EOrigemAlunos)
     origem_aluno?: EOrigemAlunos;
 
+    // Turma de onde o aluno veio (usado quando a origem é TRANSFERENCIA).
+    // Permite enviar null para limpar a referência.
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : null;
+    })
+    id_turma_transferencia_de?: number | null;
+
     @IsOptional()
     @IsString()
     presenca_turma?: string;
@@ -578,6 +588,10 @@ export class TurmaResponseDto {
     id_turma_bonus?: number;
     capacidade_turma: number;
     meta?: number;
+    /** Pico (máximo histórico) de inscritos usado para congelar a meta. */
+    meta_pico_inscritos?: number | null;
+    /** Pico (máximo histórico) de alunos extras usado para congelar a meta. */
+    meta_pico_extras?: number | null;
     data_inicio: string;
     data_final: string;
     turma_aberta: boolean;

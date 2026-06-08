@@ -362,6 +362,8 @@ export class DocumentosService {
                     numero_cracha: numeroCracha,
                 });
                 turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
+                // Congela a meta no novo pico de inscritos/extras da turma do aluno.
+                await this.uow.bumparPicoMetricasTurmas([turmaAluno.id_turma, idTurmaDestino]);
             }
 
             // Buscar ou criar registro de TurmasAlunosTreinamentos
@@ -2158,6 +2160,97 @@ export class DocumentosService {
         }
 
         return false;
+    }
+
+    /**
+     * Salva a assinatura/anexo de um contrato.
+     *
+     * Para o contrato escrito à mão (fluxo "Anexar contrato escrito à mão"), o
+     * campo `documentPhoto` recebe a(s) foto(s) OU o PDF do contrato em base64
+     * (data URL). Quando há mais de um arquivo, o frontend envia um JSON com o
+     * array de data URLs. Tudo é persistido em `foto_documento_aluno_base64`.
+     *
+     * O `contratoId` pode ser o id numérico do registro (tela de gerenciamento)
+     * ou o token do documento no ZapSign (fluxo de vendas), por isso buscamos
+     * por ambos.
+     */
+    async salvarAssinatura(signatureData: {
+        contratoId: string;
+        signer: 'aluno' | 'testemunha1' | 'testemunha2';
+        signatureType?: 'escrita' | 'nome' | null;
+        signatureData?: string | null;
+        signatureName?: string | null;
+        documentPhoto?: string | null;
+        signedAt?: string | null;
+    }): Promise<{ message: string; success: boolean }> {
+        const { contratoId, signer } = signatureData;
+
+        if (!contratoId || !signer) {
+            throw new BadRequestException('contratoId e signer são obrigatórios para salvar a assinatura');
+        }
+
+        let contrato: TurmasAlunosTreinamentosContratos | null = null;
+
+        // Quando o id é totalmente numérico tentamos pelo id do registro
+        if (/^\d+$/.test(String(contratoId))) {
+            contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: { id: String(contratoId), deletado_em: null },
+            });
+        }
+
+        // Caso não encontre (ou seja um token), buscamos pelo zapsign_document_id
+        if (!contrato) {
+            contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                where: { zapsign_document_id: String(contratoId), deletado_em: null },
+            });
+        }
+
+        if (!contrato) {
+            throw new NotFoundException('Contrato não encontrado para salvar a assinatura');
+        }
+
+        const dataAssinatura = signatureData.signedAt ? new Date(signatureData.signedAt) : new Date();
+
+        if (signer === 'aluno') {
+            if (signatureData.signatureData) {
+                contrato.assinatura_aluno_base64 = signatureData.signatureData;
+            }
+            if (signatureData.signatureType) {
+                contrato.tipo_assinatura_aluno = signatureData.signatureType;
+            }
+            // Foto(s) ou PDF do contrato escrito à mão
+            if (signatureData.documentPhoto) {
+                contrato.foto_documento_aluno_base64 = signatureData.documentPhoto;
+            }
+            contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
+            contrato.data_ass_aluno = dataAssinatura;
+        } else if (signer === 'testemunha1') {
+            if (signatureData.signatureData) {
+                contrato.assinatura_testemunha_um_base64 = signatureData.signatureData;
+            }
+            if (signatureData.signatureType) {
+                contrato.tipo_assinatura_testemunha_um = signatureData.signatureType;
+            }
+            contrato.status_ass_test_um = EStatusAssinaturasContratos.ASSINADO;
+            contrato.data_ass_test_um = dataAssinatura;
+        } else if (signer === 'testemunha2') {
+            if (signatureData.signatureData) {
+                contrato.assinatura_testemunha_dois_base64 = signatureData.signatureData;
+            }
+            if (signatureData.signatureType) {
+                contrato.tipo_assinatura_testemunha_dois = signatureData.signatureType;
+            }
+            contrato.status_ass_test_dois = EStatusAssinaturasContratos.ASSINADO;
+            contrato.data_ass_test_dois = dataAssinatura;
+        }
+
+        await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+
+        this.logger.debug(
+            `contract.signature.save | Assinatura salva | contratoId=${contrato.id} signer=${signer} hasDocument=${Boolean(signatureData.documentPhoto)}`,
+        );
+
+        return { message: 'Assinatura salva com sucesso', success: true };
     }
 
     async buscarContratoBasico(contratoId: string): Promise<any> {
@@ -4080,6 +4173,8 @@ export class DocumentosService {
                     numero_cracha: numeroCracha,
                 });
                 turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
+                // Congela a meta no novo pico de inscritos/extras da turma do aluno.
+                await this.uow.bumparPicoMetricasTurmas([turmaAluno.id_turma]);
             }
 
             // Buscar um treinamento válido ou usar um existente

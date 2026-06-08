@@ -76,6 +76,15 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'meta', nullable: true })
     meta: number;
 
+    // Pico (máximo histórico) de inscritos. A meta é congelada sobre este valor:
+    // transferências/remoções não reduzem a meta, mas novos picos a elevam.
+    @Column({ type: 'int', name: 'meta_pico_inscritos', nullable: true })
+    meta_pico_inscritos: number | null;
+
+    // Pico (máximo histórico) de alunos extras (bônus + transferência + transbordo + sorteio).
+    @Column({ type: 'int', name: 'meta_pico_extras', nullable: true })
+    meta_pico_extras: number | null;
+
     // Mentorias não têm data de evento (o período é por mentorado, a partir da assinatura).
     @Column({ type: 'date', name: 'data_inicio', nullable: true })
     data_inicio: string | null;

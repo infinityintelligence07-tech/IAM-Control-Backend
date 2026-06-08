@@ -34,6 +34,54 @@ export class UnitOfWorkService {
         return this.postgresDS.manager;
     }
 
+    /**
+     * Atualiza o pico (máximo histórico) de inscritos e de alunos extras das turmas informadas.
+     *
+     * A meta de credenciados/confirmados é congelada sobre esses picos: transferências e
+     * remoções NÃO reduzem o pico (e portanto a meta), mas novos máximos de inscritos/extras
+     * elevam o pico. Recalcula de forma atômica a partir de `turmas_alunos`, então deve ser
+     * chamado APÓS o commit da operação que inseriu/transferiu alunos (vendas, importação,
+     * transferência, inclusão manual). Falhas são apenas logadas para não interromper o fluxo.
+     *
+     * Obs.: a definição de "extras" espelha `TurmasService.getContadoresListagemPorTurmas`
+     * (bônus + transferência + sorteio + transbordo). Mantenha as duas em sincronia.
+     */
+    async bumparPicoMetricasTurmas(ids: Array<number | string | null | undefined>): Promise<void> {
+        const idsValidos = Array.from(new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)));
+        if (idsValidos.length === 0) return;
+
+        try {
+            await this.turmasRP.query(
+                `
+                UPDATE "turmas" t
+                SET "meta_pico_inscritos" = GREATEST(COALESCE(t."meta_pico_inscritos", 0), c.inscritos),
+                    "meta_pico_extras" = GREATEST(COALESCE(t."meta_pico_extras", 0), c.extras)
+                FROM (
+                    SELECT
+                        ta."id_turma" AS id_turma,
+                        COUNT(*)::int AS inscritos,
+                        SUM(
+                            CASE
+                                WHEN ta."vaga_bonus" = true
+                                    OR ta."origem_aluno" IN ('ALUNO_BONUS', 'TRANSFERENCIA', 'SORTEIO')
+                                    OR UPPER(COALESCE(ta."codigo_turma_origem_planilha", '')) = 'TRANSBORDO'
+                                THEN 1 ELSE 0
+                            END
+                        )::int AS extras
+                    FROM "turmas_alunos" ta
+                    WHERE ta."deletado_em" IS NULL
+                      AND ta."id_turma" = ANY($1)
+                    GROUP BY ta."id_turma"
+                ) c
+                WHERE t."id" = c.id_turma
+                `,
+                [idsValidos],
+            );
+        } catch (error) {
+            console.error('Falha ao atualizar pico de métricas das turmas', idsValidos, error);
+        }
+    }
+
     // Método para iniciar e gerenciar uma transação com liberação do QueryRunner
     async withTransaction<T>(operation: (queryRunner: QueryRunner) => Promise<T>): Promise<T> {
         const queryRunner = this.postgresDS.createQueryRunner();

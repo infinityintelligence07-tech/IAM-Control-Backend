@@ -4435,6 +4435,11 @@ export class TurmasService {
             // Atualizar campos fornecidos
             if (updateAlunoDto.nome_cracha !== undefined) {
                 turmaAluno.nome_cracha = updateAlunoDto.nome_cracha;
+                // Mantém o "como gostaria de ser chamado" sincronizado com o cadastro do aluno.
+                if (turmaAluno.id_aluno_fk && turmaAluno.id_aluno_fk.nome_cracha !== updateAlunoDto.nome_cracha) {
+                    turmaAluno.id_aluno_fk.nome_cracha = updateAlunoDto.nome_cracha;
+                    await this.uow.alunosRP.update({ id: turmaAluno.id_aluno_fk.id }, { nome_cracha: updateAlunoDto.nome_cracha });
+                }
             }
             if (updateAlunoDto.url_comprovante_pgto !== undefined) {
                 turmaAluno.url_comprovante_pgto = updateAlunoDto.url_comprovante_pgto;

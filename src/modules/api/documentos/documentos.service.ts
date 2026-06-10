@@ -2410,6 +2410,8 @@ export class DocumentosService {
                 zapsign_document_id: contrato.zapsign_document_id,
                 zapsign_signers_data: contrato.zapsign_signers_data,
                 zapsign_document_status: contrato.zapsign_document_status,
+                // Contrato manuscrito anexado (foto(s) ou PDF) no fluxo de venda manual.
+                foto_documento_aluno_base64: contrato.foto_documento_aluno_base64 ?? null,
                 aluno_nome: aluno?.nome,
                 treinamento_nome: treinamento?.treinamento,
                 turma_aluno: {
@@ -3274,6 +3276,20 @@ export class DocumentosService {
             const ordemIdsPagina = new Map(idsPagina.map((id, index) => [id, index]));
             contratos.sort((a, b) => (ordemIdsPagina.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (ordemIdsPagina.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
 
+            // Identifica quais contratos da página foram anexados manualmente
+            // (contrato escrito à mão) sem trafegar o base64 da(s) foto(s)/PDF.
+            const idsContratoManual = new Set<string>();
+            if (idsPagina.length > 0) {
+                const idsManuscritoRows = await this.uow.turmasAlunosTreinamentosContratosRP
+                    .createQueryBuilder('contrato')
+                    .select('contrato.id', 'id')
+                    .where('contrato.id IN (:...idsPagina)', { idsPagina })
+                    .andWhere('contrato.foto_documento_aluno_base64 IS NOT NULL')
+                    .andWhere("COALESCE(contrato.foto_documento_aluno_base64, '') <> ''")
+                    .getRawMany<{ id: string }>();
+                idsManuscritoRows.forEach((row) => idsContratoManual.add(String(row.id)));
+            }
+
             // Mapear dados para o formato esperado pelo frontend
             const cacheTurmaPorId = new Map<number, Turmas | null>();
             const cacheTurmaOrigemPorTurmaAluno = new Map<string, Turmas | null>();
@@ -3704,6 +3720,9 @@ export class DocumentosService {
                         zapsign_document_id: contrato.zapsign_document_id,
                         zapsign_signers_data: contrato.zapsign_signers_data,
                         zapsign_document_status: contrato.zapsign_document_status,
+                        // Indica que o contrato foi anexado manualmente (escrito à mão),
+                        // dispensando o envio para assinatura digital.
+                        contrato_manual: idsContratoManual.has(String(contrato.id)),
                         // Campos diretos para compatibilidade com frontend.
                         // Fallback no snapshot JSON (dados_contrato.aluno) quando a relação
                         // estiver vazia — por exemplo, matrícula soft-deleted por transferência.

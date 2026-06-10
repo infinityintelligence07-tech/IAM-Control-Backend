@@ -843,6 +843,28 @@ export class ContractTemplateService {
 
                 const dataIPR = temIPR ? formatDatePtBr(campos_variaveis?.['Data do Imersão Prosperar'] || bonus?.turma_bonus_info?.data_inicio) : '___/___/___';
 
+                // Quantidade de inscrições específica do bônus IPR (cai para a
+                // quantidade do contrato quando não informada separadamente).
+                const quantidadeInscricoesIPR =
+                    campos_variaveis?.['Quantidade de Inscrições do Imersão Prosperar'] || quantidadeInscricoesContrato;
+
+                // Detalhamento das turmas do IPR (edição, cidade, período e
+                // quantidade) — vem do fluxo de venda em "Turmas do Imersão Prosperar".
+                const turmasIPRTexto = String(campos_variaveis?.['Turmas do Imersão Prosperar'] || '').trim();
+
+                const detalhesIPRHtml = (() => {
+                    if (turmasIPRTexto) {
+                        return turmasIPRTexto
+                            .split('|')
+                            .map((parte) => parte.trim())
+                            .filter(Boolean)
+                            .map((parte) => `<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${escapeHtml(parte)}`)
+                            .join('');
+                    }
+                    const edicaoIPR = bonus?.turma_bonus_info?.edicao_turma ? ` | IPR - ${bonus.turma_bonus_info.edicao_turma}` : '';
+                    return `<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${escapeAndFallback(dataIPR, '___/___/___')}${escapeHtml(edicaoIPR)}`;
+                })();
+
                 const linhas = [
                     {
                         checked: naoSeAplica,
@@ -854,7 +876,7 @@ export class ContractTemplateService {
                     },
                     {
                         checked: temIPR,
-                        text: `${escapeAndFallback(quantidadeInscricoesContrato, '1')} inscrição(ões) do Imersão Prosperar<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${escapeAndFallback(dataIPR, '___/___/___')}`,
+                        text: `${escapeAndFallback(quantidadeInscricoesIPR, '1')} inscrição(ões) do Imersão Prosperar${detalhesIPRHtml}`,
                     },
                     {
                         checked: temOutros,
@@ -1983,19 +2005,31 @@ export class ContractTemplateService {
                                   : '';
 
                               // Obter quantidade de inscrições dos campos variáveis
-                              const quantidadeInscricoes = temIPR ? campos_variaveis?.['Quantidade de Inscrições'] || '1' : '0';
+                              // (prioriza a quantidade específica do bônus IPR).
+                              const quantidadeInscricoes = temIPR
+                                  ? campos_variaveis?.['Quantidade de Inscrições do Imersão Prosperar'] || campos_variaveis?.['Quantidade de Inscrições'] || '1'
+                                  : '0';
 
-                              // Obter sigla do evento (IPR + edição)
+                              // Detalhamento das turmas do IPR (edição, cidade, período e quantidade).
+                              const turmasIprDetalhe = String(campos_variaveis?.['Turmas do Imersão Prosperar'] || '').trim();
                               const siglaEvento = temIPR && bonus?.turma_bonus_info?.edicao_turma ? `IPR - ${bonus.turma_bonus_info.edicao_turma}` : '';
+                              const detalheIprLegacy = temIPR
+                                  ? turmasIprDetalhe
+                                      ? turmasIprDetalhe
+                                            .split('|')
+                                            .map((parte) => parte.trim())
+                                            .filter(Boolean)
+                                            .map((parte) => `<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${parte}`)
+                                            .join('')
+                                      : dataImersao
+                                        ? `<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${dataImersao}${siglaEvento ? ` | ${siglaEvento}` : ''}`
+                                        : ''
+                                  : '';
 
                               bonusItems.push(`
                               <label class="checkbox-item">
                                 <input type="checkbox" class="checkbox" ${temIPR ? 'checked' : ''} disabled>
-                                ${quantidadeInscricoes} Inscrições do Imersão Prosperar${
-                                    temIPR && dataImersao
-                                        ? `<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Data: ${dataImersao}${siglaEvento ? ` | ${siglaEvento}` : ''}`
-                                        : ''
-                                }
+                                ${quantidadeInscricoes} Inscrições do Imersão Prosperar${detalheIprLegacy}
                               </label>
                             `);
 

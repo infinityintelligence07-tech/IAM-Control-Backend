@@ -29,6 +29,7 @@ import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
+import { resolverDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
 
 const parsePositiveIntEnv = (value: string | undefined, fallback: number): number => {
     const parsed = Number(value);
@@ -272,14 +273,19 @@ export class DocumentosService {
      * passa a contar a partir da assinatura/finalização do contrato (data de início = hoje).
      * Para treinamentos/palestras retorna nulos (a data vem da turma).
      */
-    private calcularPeriodoMentoria(treinamento: { tipo_mentoria?: boolean; duracao_meses?: number | null } | null): {
+    private calcularPeriodoMentoria(treinamento: { treinamento?: string | null; tipo_mentoria?: boolean; duracao_meses?: number | null } | null): {
         data_inicio_mentoria: string | null;
         data_fim_mentoria: string | null;
     } {
         if (!treinamento || !treinamento.tipo_mentoria) {
             return { data_inicio_mentoria: null, data_fim_mentoria: null };
         }
-        const duracaoMeses = Number(treinamento.duracao_meses) > 0 ? Number(treinamento.duracao_meses) : 12;
+        // Liberty = 12 meses (1 ano) e Liberty Begin = 6 meses por regra de negócio;
+        // demais mentorias usam a duração configurada no cadastro (padrão 12).
+        const duracaoMeses = resolverDuracaoMentoriaMeses({
+            treinamento: treinamento.treinamento,
+            duracao_meses: treinamento.duracao_meses,
+        });
         const inicio = new Date();
         inicio.setHours(0, 0, 0, 0);
         const fim = new Date(inicio);

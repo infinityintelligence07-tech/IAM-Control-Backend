@@ -32,6 +32,7 @@ import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
 import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
+import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
 
 export interface PresenteSorteioPayload {
     descricao: string;
@@ -1093,15 +1094,15 @@ export class TurmasService {
      * É idempotente: só preenche datas faltantes e só encerra matrículas vencidas ainda ativas.
      */
     async sincronizarPeriodosMentoria(): Promise<{ datasPreenchidas: number; matriculasEncerradas: number }> {
+        // Duração efetiva (em meses) considerando as regras fixas por produto
+        // (Liberty = 12, Liberty Begin = 6) e, para os demais, a duração configurada.
+        const duracaoMesesSql = sqlDuracaoMentoriaMeses('tr.treinamento', 'tr.duracao_meses');
+
         // 1) Preenche início (created_at) e fim (início + duração) para linhas de mentoria sem data definida.
         const updateDatas = await this.uow.turmasAlunosTreinamentosRP.query(`
             UPDATE turmas_alunos_treinamentos AS tat
             SET data_inicio_mentoria = ta.criado_em::date,
-                data_fim_mentoria = CASE
-                    WHEN tr.duracao_meses IS NOT NULL
-                    THEN (ta.criado_em::date + (tr.duracao_meses || ' months')::interval)::date
-                    ELSE NULL
-                END
+                data_fim_mentoria = (ta.criado_em::date + ((${duracaoMesesSql}) || ' months')::interval)::date
             FROM turmas_alunos AS ta, treinamentos AS tr
             WHERE tat.id_turma_aluno = ta.id
               AND tat.id_treinamento = tr.id
@@ -1120,8 +1121,7 @@ export class TurmasService {
             WHERE ta.id_turma = t.id
               AND t.id_treinamento = tr.id
               AND tr.tipo_mentoria = true
-              AND tr.duracao_meses IS NOT NULL
-              AND CURRENT_DATE > (ta.criado_em::date + (tr.duracao_meses || ' months')::interval)::date
+              AND CURRENT_DATE > (ta.criado_em::date + ((${duracaoMesesSql}) || ' months')::interval)::date
               AND ta.deletado_em IS NULL
             RETURNING ta.id
         `);
@@ -2578,7 +2578,12 @@ export class TurmasService {
             // (turmas_alunos_treinamentos) tem prioridade quando existir.
             const datasMentoriaPorTurmaAluno = new Map<string, { inicio: string | null; fim: string | null }>();
             if (isMentoria) {
-                const duracaoMesesMentoria = turma.id_treinamento_fk?.duracao_meses ?? null;
+                // Liberty = 12 meses e Liberty Begin = 6 meses por regra de negócio;
+                // demais mentorias usam a duração configurada (padrão 12).
+                const duracaoMesesMentoria = resolverDuracaoMentoriaMeses({
+                    treinamento: turma.id_treinamento_fk?.treinamento,
+                    duracao_meses: turma.id_treinamento_fk?.duracao_meses,
+                });
                 const paraDataIso = (valor?: Date | string | null): string | null => {
                     if (!valor) return null;
                     const data = valor instanceof Date ? valor : new Date(valor);

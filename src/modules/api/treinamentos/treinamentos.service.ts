@@ -12,6 +12,7 @@ import { Equal, FindManyOptions, Like, ILike, Not, In } from 'typeorm';
 import { Treinamentos } from '../../config/entities/treinamentos.entity';
 import { EPresencaTurmas, EStatusAlunosTurmas } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
+import { resolverDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
 
 @Injectable()
 export class TreinamentosService {
@@ -264,8 +265,14 @@ export class TreinamentosService {
             novoTreinamento.tipo_treinamento = createTreinamentoDto.tipo_treinamento;
             novoTreinamento.tipo_palestra = createTreinamentoDto.tipo_palestra;
             novoTreinamento.tipo_mentoria = createTreinamentoDto.tipo_mentoria;
-            // Mentorias têm duração configurável (padrão 12 meses). Treinamentos/palestras não têm duração.
-            novoTreinamento.duracao_meses = createTreinamentoDto.tipo_mentoria ? (createTreinamentoDto.duracao_meses ?? 12) : null;
+            // Mentorias têm duração configurável (padrão 12 meses). Liberty = 12 e
+            // Liberty Begin = 6 são fixos por regra de negócio. Treinamentos/palestras não têm duração.
+            novoTreinamento.duracao_meses = createTreinamentoDto.tipo_mentoria
+                ? resolverDuracaoMentoriaMeses({
+                      treinamento: createTreinamentoDto.treinamento,
+                      duracao_meses: createTreinamentoDto.duracao_meses,
+                  })
+                : null;
             novoTreinamento.tipo_online = createTreinamentoDto.tipo_online;
             novoTreinamento.tipo_presencial = createTreinamentoDto.tipo_presencial;
             novoTreinamento.criado_por = createTreinamentoDto.criado_por;
@@ -346,12 +353,14 @@ export class TreinamentosService {
             if (updateTreinamentoDto.duracao_meses !== undefined) {
                 treinamento.duracao_meses = updateTreinamentoDto.duracao_meses;
             }
-            // Mantém a coerência: mentoria sempre tem duração (padrão 12);
+            // Mantém a coerência: mentoria sempre tem duração (Liberty = 12 e
+            // Liberty Begin = 6 são fixos; demais usam o cadastro, padrão 12);
             // treinamento/palestra não tem duração.
             if (treinamento.tipo_mentoria) {
-                if (treinamento.duracao_meses == null) {
-                    treinamento.duracao_meses = 12;
-                }
+                treinamento.duracao_meses = resolverDuracaoMentoriaMeses({
+                    treinamento: treinamento.treinamento,
+                    duracao_meses: treinamento.duracao_meses,
+                });
             } else {
                 treinamento.duracao_meses = null;
             }

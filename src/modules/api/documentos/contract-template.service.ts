@@ -845,8 +845,7 @@ export class ContractTemplateService {
 
                 // Quantidade de inscrições específica do bônus IPR (cai para a
                 // quantidade do contrato quando não informada separadamente).
-                const quantidadeInscricoesIPR =
-                    campos_variaveis?.['Quantidade de Inscrições do Imersão Prosperar'] || quantidadeInscricoesContrato;
+                const quantidadeInscricoesIPR = campos_variaveis?.['Quantidade de Inscrições do Imersão Prosperar'] || quantidadeInscricoesContrato;
 
                 // Detalhamento das turmas do IPR (edição, cidade, período e
                 // quantidade) — vem do fluxo de venda em "Turmas do Imersão Prosperar".

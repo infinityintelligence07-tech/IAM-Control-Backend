@@ -453,6 +453,28 @@ export class TurmasService {
         return edicao === 'INADIMPLENTE';
     }
 
+    /**
+     * Turma "congelada": encerrada (status ENCERRADA) ou cujo evento já terminou (após D+1 da data_final).
+     * Em turmas congeladas os registros dos alunos não saem da turma (transferência apenas replica para o destino)
+     * e remoção/cancelamento (soft delete) ficam bloqueados, preservando o histórico para a trilha do aluno.
+     */
+    private isTurmaCongelada(turma: any): boolean {
+        if (!turma) {
+            return false;
+        }
+        if (turma.status_turma === EStatusTurmas.ENCERRADA) {
+            return true;
+        }
+        if (turma.data_final) {
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
+            const dataFinal = new Date(turma.data_final);
+            dataFinal.setHours(23, 59, 59, 999);
+            return hoje > dataFinal;
+        }
+        return false;
+    }
+
     private hasValue(value: unknown): boolean {
         if (value === null || value === undefined) return false;
         if (typeof value !== 'string') return true;
@@ -1021,7 +1043,8 @@ export class TurmasService {
 
         await this.tentarCongelarTurmaSePassouDataFinal(turmaOrigem.id);
 
-        await this.transferirAluno(turmaAluno.id, proximaTurmaMesmoPolo.id, userId);
+        // No-show de ingresso comprado: o aluno NÃO sai da turma de origem, apenas é replicado para o destino.
+        await this.transferirAluno(turmaAluno.id, proximaTurmaMesmoPolo.id, userId, { manterNaOrigem: true });
 
         await this.registrarLogAlunoTurma(
             {
@@ -1904,6 +1927,11 @@ export class TurmasService {
             criado_em: Date;
             tipo: 'palestra' | 'treinamento';
             origem_label?: string;
+            origem_sigla?: string;
+            origem_edicao?: string;
+            tipo_origem_label?: string;
+            tipo_origem_detalhe?: string;
+            situacao?: 'ativo' | 'transferido' | 'cancelado';
             turma: {
                 id: number;
                 nome_evento: string;
@@ -1926,10 +1954,17 @@ export class TurmasService {
                 where: { id: id_aluno, deletado_em: null },
             });
 
-            // Buscar turmas onde o aluno está vinculado (excluir vínculos com data de deleção)
+            // Buscar TODAS as turmas onde o aluno esteve vinculado, inclusive registros soft-deleted.
+            // O registro congelado deve permanecer na trilha mesmo após transferência ou cancelamento.
             const turmasAluno = await this.uow.turmasAlunosRP.find({
-                where: { id_aluno: id_aluno as any, deletado_em: null },
-                relations: ['id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
+                where: { id_aluno: id_aluno as any },
+                relations: [
+                    'id_turma_fk',
+                    'id_turma_fk.id_treinamento_fk',
+                    'id_turma_fk.id_polo_fk',
+                    'id_turma_transferencia_de_fk',
+                    'id_turma_transferencia_de_fk.id_treinamento_fk',
+                ],
                 order: { criado_em: 'DESC' },
             });
 
@@ -2035,17 +2070,75 @@ export class TurmasService {
             };
 
             // Mapear turmas normais
-            const historicoTimeVendas = await this.uow.historicoTransferenciasRP.find({
+            const historicoTransfs = await this.uow.historicoTransferenciasRP.find({
                 where: {
                     id_aluno,
                 },
+                relations: ['id_turma_de_fk', 'id_turma_de_fk.id_treinamento_fk'],
+                order: { id: 'DESC' },
             });
+            // Venda do Time de Vendas: registrada como "transferência" da turma para ela mesma (de === para).
             const historicoTimeVendasByTurmaAluno = new Map<string, Date>();
-            historicoTimeVendas.forEach((h) => {
-                if (h.id_turma_aluno_para && h.id_turma_de === h.id_turma_para) {
-                    historicoTimeVendasByTurmaAluno.set(String(h.id_turma_aluno_para), h.criado_em);
+            // Transferência real (de uma turma diferente da de destino) por turma_aluno de destino.
+            const historicoTransferenciaByTurmaAluno = new Map<string, (typeof historicoTransfs)[number]>();
+            historicoTransfs.forEach((h) => {
+                if (!h.id_turma_aluno_para) {
+                    return;
+                }
+                const key = String(h.id_turma_aluno_para);
+                if (h.id_turma_de === h.id_turma_para) {
+                    if (!historicoTimeVendasByTurmaAluno.has(key)) {
+                        historicoTimeVendasByTurmaAluno.set(key, h.criado_em);
+                    }
+                } else if (!historicoTransferenciaByTurmaAluno.has(key)) {
+                    historicoTransferenciaByTurmaAluno.set(key, h);
                 }
             });
+
+            // Turmas de destino que receberam o aluno por auto-transferência de NO_SHOW (ingresso comprado).
+            const noShowAutoTransfLogs = await this.uow.historicoAlunosTurmasLogsRP.find({
+                where: {
+                    id_aluno: String(id_aluno),
+                    template_key: TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR,
+                    deletado_em: null,
+                },
+            });
+            const turmasDestinoNoShowAuto = new Set<number>();
+            noShowAutoTransfLogs.forEach((log) => {
+                const detalhes = log.detalhes || {};
+                const idTurmaDestino = Number(detalhes['id_turma_destino']);
+                if (idTurmaDestino) {
+                    turmasDestinoNoShowAuto.add(idTurmaDestino);
+                }
+            });
+
+            // Identifica se a turma de origem é uma Masterclass/Palestra.
+            const isMasterclassTurma = (turmaOrigem?: { id_treinamento_fk?: any; edicao_turma?: string | null } | null): boolean => {
+                if (!turmaOrigem) {
+                    return false;
+                }
+                const tr = turmaOrigem.id_treinamento_fk;
+                const edicao = (turmaOrigem.edicao_turma || '').trim().toUpperCase();
+                return Boolean(tr?.tipo_palestra) || (tr ? tr.tipo_treinamento === false : false) || edicao.startsWith('MC_');
+            };
+
+            // Rótulo do "tipo de origem" (o meio pelo qual o aluno chegou ao destino).
+            const tipoOrigemLabel = (origem?: EOrigemAlunos | null): string => {
+                switch (origem) {
+                    case EOrigemAlunos.TRANSFERENCIA:
+                        return 'Transferência';
+                    case EOrigemAlunos.ALUNO_BONUS:
+                        return 'Bônus';
+                    case EOrigemAlunos.CORTESIA:
+                        return 'Cortesia';
+                    case EOrigemAlunos.SORTEIO:
+                        return 'Sorteio';
+                    case EOrigemAlunos.ALUNO_CONVIDADO:
+                    case EOrigemAlunos.COMPROU_INGRESSO:
+                    default:
+                        return 'Comprou Ingresso';
+                }
+            };
 
             const trilhaTurmas = turmasAluno.map((ta) => {
                 const turma = ta.id_turma_fk;
@@ -2054,31 +2147,77 @@ export class TurmasService {
                 const origemTimeVendasData = historicoTimeVendasByTurmaAluno.get(String(ta.id));
                 const isTimeVendas = Boolean(origemTimeVendasData);
 
+                // Destino = a própria turma do vínculo.
                 const localParts: string[] = [];
-                if (isTimeVendas) {
-                    localParts.push('Americana');
-                } else {
-                    if (turma?.cidade) localParts.push(turma.cidade);
-                    if (turma?.estado) localParts.push(turma.estado);
-                }
+                if (turma?.cidade) localParts.push(turma.cidade);
+                if (turma?.estado) localParts.push(turma.estado);
                 const local = localParts.join(' - ');
-                const dataEventoOrigem = origemTimeVendasData ? origemTimeVendasData.toISOString().split('T')[0] : '';
+
+                // Determinar ORIGEM e TIPO DE ORIGEM.
+                const origemAluno = ta.origem_aluno || null;
+                const tipo_origem_label = tipoOrigemLabel(origemAluno);
+
+                // Turma de onde o aluno veio (transferência): prioriza FK explícita, senão histórico.
+                const histTransf = historicoTransferenciaByTurmaAluno.get(String(ta.id));
+                const turmaOrigem = ta.id_turma_transferencia_de_fk || histTransf?.id_turma_de_fk || null;
+                const treinamentoOrigem = turmaOrigem?.id_treinamento_fk;
+                const codigoOrigemPlanilha = (ta.codigo_turma_origem_planilha || '').trim().toUpperCase();
+
+                let origem_label: string | undefined;
+                let origem_sigla: string | undefined;
+                let origem_edicao: string | undefined;
+                // Para origens de turma (transferência), estrutura igual ao destino: nome + sigla · edição.
+                const aplicarOrigemTurma = () => {
+                    origem_label = (treinamentoOrigem?.treinamento || '').trim() || (treinamentoOrigem?.sigla_treinamento || '').trim() || 'Turma';
+                    origem_sigla = (treinamentoOrigem?.sigla_treinamento || '').trim() || undefined;
+                    origem_edicao = (turmaOrigem?.edicao_turma || '').trim() || undefined;
+                };
+                if (origemAluno === EOrigemAlunos.TRANSFERENCIA && turmaOrigem) {
+                    aplicarOrigemTurma();
+                } else if (isTimeVendas) {
+                    origem_label = 'Time de Vendas';
+                } else if (isMasterclassTurma(turmaOrigem)) {
+                    const cidade = (turmaOrigem?.cidade || '').trim();
+                    origem_label = cidade ? `Masterclass - ${cidade}` : 'Masterclass';
+                } else if (codigoOrigemPlanilha.startsWith('MC_')) {
+                    origem_label = 'Masterclass';
+                } else if (origemAluno === EOrigemAlunos.COMPROU_INGRESSO || origemAluno === EOrigemAlunos.ALUNO_CONVIDADO || !origemAluno) {
+                    origem_label = 'Demais Vendas';
+                } else if (turmaOrigem) {
+                    aplicarOrigemTurma();
+                } else {
+                    origem_label = undefined;
+                }
+
+                // Situação congelada do registro: transferido (replicado para destino) ou cancelado (soft delete).
+                const situacao: 'ativo' | 'transferido' | 'cancelado' = ta.id_turma_transferencia_para ? 'transferido' : ta.deletado_em ? 'cancelado' : 'ativo';
+
+                // Detalhe da transferência automática por no-show de ingresso comprado (visível ao gestor da turma).
+                let tipo_origem_detalhe: string | undefined;
+                if (origemAluno === EOrigemAlunos.TRANSFERENCIA && turma?.id && turmasDestinoNoShowAuto.has(turma.id)) {
+                    tipo_origem_detalhe = '1ª Transferência do Ingresso Comprado';
+                }
 
                 return {
                     id_turma_aluno: ta.id,
-                    status_aluno_turma: isTimeVendas ? EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO : ta.status_aluno_turma || null,
+                    status_aluno_turma: ta.status_aluno_turma || null,
                     presenca_turma: ta.presenca_turma || null,
-                    criado_em: origemTimeVendasData || ta.criado_em,
+                    criado_em: origemTimeVendasData || histTransf?.criado_em || ta.criado_em,
                     tipo: determinarTipo(treinamento),
-                    origem_label: isTimeVendas ? 'Time de Vendas - IAM' : undefined,
+                    origem_label,
+                    origem_sigla,
+                    origem_edicao,
+                    tipo_origem_label,
+                    tipo_origem_detalhe,
+                    situacao,
                     turma: {
                         id: turma?.id || 0,
-                        nome_evento: isTimeVendas ? 'Time de Vendas - IAM' : treinamento?.treinamento || '',
+                        nome_evento: treinamento?.treinamento || '',
                         sigla_evento: treinamento?.sigla_treinamento || treinamento?.treinamento || '',
                         edicao_turma: turma?.edicao_turma || undefined,
                         local,
-                        data_inicio: isTimeVendas ? dataEventoOrigem : turma?.data_inicio || '',
-                        data_final: isTimeVendas ? dataEventoOrigem : turma?.data_final || '',
+                        data_inicio: turma?.data_inicio || '',
+                        data_final: turma?.data_final || '',
                         polo: polo
                             ? {
                                   nome: polo.polo,
@@ -2959,7 +3098,7 @@ export class TurmasService {
      * Transfere o aluno para outra turma (inclusive de outro treinamento, exceto palestras).
      * Remove o vínculo ativo da turma de origem (soft delete), mantendo lastro no histórico de transferências.
      */
-    async transferirAluno(id_turma_aluno: string, id_turma_destino: number, userId?: number): Promise<AlunoTurmaResponseDto> {
+    async transferirAluno(id_turma_aluno: string, id_turma_destino: number, userId?: number, opts?: { manterNaOrigem?: boolean }): Promise<AlunoTurmaResponseDto> {
         const turmaAlunoOrigem = await this.uow.turmasAlunosRP.findOne({
             where: { id: id_turma_aluno, deletado_em: null },
             relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
@@ -3141,10 +3280,16 @@ export class TurmasService {
             userId,
         );
 
-        // Remove o aluno da turma de origem sem perder rastreabilidade.
+        // Transferência: replica o aluno para a turma de destino mantendo a rastreabilidade na origem.
         turmaAlunoOrigem.id_turma_transferencia_para = id_turma_destino;
-        turmaAlunoOrigem.presenca_turma = null;
-        turmaAlunoOrigem.deletado_em = new Date();
+        if (opts?.manterNaOrigem || this.isTurmaCongelada(turmaOrigem)) {
+            // Turma encerrada/congelada: o aluno NÃO sai da turma (registro congelado), apenas é replicado
+            // para o destino. A presença (ex.: NO_SHOW) permanece congelada.
+        } else {
+            // Turma ativa: remove da origem (soft delete) preservando o histórico de transferência.
+            turmaAlunoOrigem.presenca_turma = null;
+            turmaAlunoOrigem.deletado_em = new Date();
+        }
         await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
 
         // Congela a meta no novo pico de inscritos/extras da turma de destino.
@@ -3640,8 +3785,12 @@ export class TurmasService {
         );
 
         turmaAlunoOrigem.id_turma_transferencia_para = turmaCancelada.id;
-        turmaAlunoOrigem.presenca_turma = null;
-        turmaAlunoOrigem.deletado_em = new Date();
+        if (this.isTurmaCongelada(turmaOrigem)) {
+            // Turma congelada: mantém o registro na origem (não remove), apenas replica para a turma CANCELADA.
+        } else {
+            turmaAlunoOrigem.presenca_turma = null;
+            turmaAlunoOrigem.deletado_em = new Date();
+        }
         await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
         return String(matriculaDestino.id);
     }
@@ -3655,6 +3804,10 @@ export class TurmasService {
 
             if (!turmaAluno) {
                 throw new NotFoundException('Aluno não encontrado na turma');
+            }
+
+            if (this.isTurmaCongelada(turmaAluno.id_turma_fk)) {
+                throw new BadRequestException('Não é possível remover alunos de uma turma encerrada. O registro permanece congelado para a trilha do aluno.');
             }
 
             await this.registrarLogAlunoTurma(
@@ -4485,6 +4638,17 @@ export class TurmasService {
                 turmaAluno.id_turma_transferencia_de = updateAlunoDto.id_turma_transferencia_de;
             }
             if (updateAlunoDto.presenca_turma !== undefined) {
+                const novaPresenca = (updateAlunoDto.presenca_turma as EPresencaTurmas | null) ?? null;
+                const mudouPresenca = (turmaAluno.presenca_turma ?? null) !== novaPresenca;
+                // Presença congelada: depois que o snapshot da turma é gerado (a partir de D+1), a presença não pode mais mudar.
+                if (mudouPresenca) {
+                    const snapshotTurma = await this.obterSnapshotMetricasTurma(turmaAluno.id_turma);
+                    if (snapshotTurma) {
+                        throw new BadRequestException(
+                            'A presença desta turma está congelada (snapshot gerado). Não é possível alterar a presença após o congelamento.',
+                        );
+                    }
+                }
                 const desmarcandoPresenca = turmaAluno.presenca_turma === EPresencaTurmas.PRESENTE && updateAlunoDto.presenca_turma === 'NO_SHOW';
                 if (desmarcandoPresenca) {
                     await this.validarPermissaoDesmarcarPresenca(turmaAluno, userId);
@@ -4499,6 +4663,10 @@ export class TurmasService {
             }
 
             const solicitouCancelamento = novoStatusAlunoTurma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
+
+            if (solicitouCancelamento && this.isTurmaCongelada(turmaAluno.id_turma_fk)) {
+                throw new BadRequestException('Não é possível cancelar alunos de uma turma encerrada. O registro permanece congelado para a trilha do aluno.');
+            }
 
             if (solicitouCancelamento) {
                 const afterCancelSnapshot = {

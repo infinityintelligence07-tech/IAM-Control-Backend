@@ -2456,6 +2456,12 @@ export class ContractTemplateService {
                       }
                     : undefined,
                 campos_variaveis: {
+                    // Preserva TODOS os campos variáveis recebidos antes de aplicar os
+                    // defaults abaixo. Sem isso, campos usados pelo template (ex.: os
+                    // detalhes das turmas e a quantidade de inscrições do Imersão
+                    // Prosperar e as datas do boleto) eram descartados pela lista fixa,
+                    // fazendo o contrato exibir "Data: ___/___" e "1 inscrição(ões)".
+                    ...(data.campos_variaveis || {}),
                     'Cidade do Treinamento': data.campos_variaveis?.['Cidade do Treinamento'] || '',
                     'Data Prevista do Treinamento': data.campos_variaveis?.['Data Prevista do Treinamento'] || '',
                     'Data Final do Treinamento': data.campos_variaveis?.['Data Final do Treinamento'] || '',

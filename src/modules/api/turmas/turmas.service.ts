@@ -3224,6 +3224,7 @@ export class TurmasService {
                     id_aluno: turmaAlunoOrigem.id_aluno,
                     deletado_em: null,
                 },
+                relations: ['id_turma_fk'],
             });
 
             // Se não existe matrícula ativa na turma de destino marcada (ex.: foi soft delete),
@@ -3232,7 +3233,12 @@ export class TurmasService {
                 turmaAlunoOrigem.id_turma_transferencia_para = null;
                 await this.uow.turmasAlunosRP.save(turmaAlunoOrigem);
             } else {
-                throw new BadRequestException('Este vínculo já foi transferido desta turma. Utilize a matrícula ativa para nova transferência');
+                const turmaAtivaDestino = matriculaDestinoAtiva.id_turma_fk;
+                const edicaoAtiva = turmaAtivaDestino?.edicao_turma ? String(turmaAtivaDestino.edicao_turma).trim() : '';
+                const rotuloTurmaAtiva = edicaoAtiva ? `turma ${edicaoAtiva}` : `turma ${idTurmaDestinoMarcada}`;
+                throw new BadRequestException(
+                    `Este vínculo já foi transferido desta turma. A matrícula ativa está na ${rotuloTurmaAtiva} — transfira a partir dela.`,
+                );
             }
         }
 

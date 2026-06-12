@@ -714,32 +714,16 @@ export class TurmasService {
                 return;
             }
 
-            // Calcular expectativa real
-            const inscritos = opts?.inscritosParaExpectativa ?? turma.turmasAlunos?.length ?? 0;
-            const alunosBonus = turma.detalhamento_bonus?.length || 0;
-            const isIPR = turma.id_treinamento_fk?.sigla_treinamento === 'IPR';
-            const expectativaReal = isIPR ? Math.round(inscritos + (alunosBonus - alunosBonus * 0.5) - inscritos * 0.1) : inscritos;
-
-            // Verificar se expectativa real é maior ou igual à capacidade (turma cheia)
-            const turmaCheia = expectativaReal >= turma.capacidade_turma;
-
-            // Encerrar a turma se:
-            // 1. O evento já terminou (data atual > data_final), OU
-            // 2. O evento já começou (data atual >= data_inicio) E a turma está cheia (expectativa real >= capacidade)
-            if (eventoJaTerminou || (eventoJaComecou && turmaCheia)) {
+            // Regra: a turma só é encerrada automaticamente quando chega a D+1 da data_final
+            // (evento de fato terminou). Lotação/turma cheia NÃO encerra mais a turma — ela permanece
+            // aberta até o D+1. (`eventoJaTerminou` = hoje 00:00 > data_final 23:59:59, ou seja, D+1.)
+            if (eventoJaTerminou) {
                 turma.status_turma = EStatusTurmas.ENCERRADA;
                 turma.turma_aberta = false; // Desmarcar credenciamento quando encerrar
                 turma.atualizado_em = new Date();
                 await this.uow.turmasRP.save(turma);
 
-                let motivo = '';
-                if (eventoJaTerminou) {
-                    motivo = 'Evento já terminou';
-                } else if (turmaCheia && eventoJaComecou) {
-                    motivo = 'Turma cheia (expectativa real >= capacidade) e evento já começou';
-                }
-
-                console.log(`✅ Turma ${turma.id} atualizada automaticamente para ENCERRADA. Motivo: ${motivo}`);
+                console.log(`✅ Turma ${turma.id} atualizada automaticamente para ENCERRADA. Motivo: Evento já terminou (D+1 da data_final)`);
             }
         } catch (error) {
             console.error(`Erro ao verificar status da turma ${turma.id}:`, error);

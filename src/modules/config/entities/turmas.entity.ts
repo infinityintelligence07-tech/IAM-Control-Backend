@@ -95,6 +95,12 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'boolean', name: 'turma_aberta', default: false, nullable: false })
     turma_aberta: boolean;
 
+    // Quando true, a turma foi REABERTA manualmente após o fim do evento (status != ENCERRADA com
+    // data_final já passada). Os processos automáticos NÃO devem reencerrá-la nem regerar snapshot;
+    // ela só volta a congelar quando for marcada como ENCERRADA novamente (e estiver após D+1).
+    @Column({ type: 'boolean', name: 'reaberta_manualmente', default: false, nullable: false })
+    reaberta_manualmente: boolean;
+
     @Column({ type: 'jsonb', name: 'detalhamento_bonus', nullable: true })
     detalhamento_bonus: { id_treinamento_db: number }[];
 

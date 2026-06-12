@@ -458,21 +458,35 @@ export class TurmasService {
      * Em turmas congeladas os registros dos alunos não saem da turma (transferência apenas replica para o destino)
      * e remoção/cancelamento (soft delete) ficam bloqueados, preservando o histórico para a trilha do aluno.
      */
+    private eventoTurmaTerminou(turma: any): boolean | null {
+        if (!turma?.data_final) {
+            return null;
+        }
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const dataFinal = new Date(turma.data_final);
+        dataFinal.setHours(23, 59, 59, 999);
+        // Congelamento só vale a partir de D+1 da data_final.
+        return hoje > dataFinal;
+    }
+
     private isTurmaCongelada(turma: any): boolean {
         if (!turma) {
             return false;
         }
-        if (turma.status_turma === EStatusTurmas.ENCERRADA) {
-            return true;
+        // Congelada (bloqueia remoção/cancelamento e altera a mecânica de transferência) exige
+        // DUAS condições simultâneas:
+        //   1) status ENCERRADA; e
+        //   2) o evento já ter terminado de fato (D+1 da data_final).
+        // Assim, uma turma marcada ENCERRADA antes do fim do evento (ex.: encerramento automático
+        // por lotação) NÃO é congelada, e reabrir manualmente (status != ENCERRADA) a descongela.
+        const isEncerrada = turma.status_turma === EStatusTurmas.ENCERRADA;
+        const eventoTerminou = this.eventoTurmaTerminou(turma);
+        // Sem data_final (ex.: mentorias) não há como aferir o fim do evento: respeita só o status.
+        if (eventoTerminou === null) {
+            return isEncerrada;
         }
-        if (turma.data_final) {
-            const hoje = new Date();
-            hoje.setHours(0, 0, 0, 0);
-            const dataFinal = new Date(turma.data_final);
-            dataFinal.setHours(23, 59, 59, 999);
-            return hoje > dataFinal;
-        }
-        return false;
+        return isEncerrada && eventoTerminou;
     }
 
     private hasValue(value: unknown): boolean {
@@ -662,6 +676,12 @@ export class TurmasService {
      */
     private async verificarEAtualizarStatusTurma(turma: any, opts?: { inscritosParaExpectativa?: number }): Promise<void> {
         try {
+            // Turma reaberta manualmente após o fim do evento: respeitar a decisão do usuário e não
+            // reencerrar automaticamente. Ela só volta a congelar quando for marcada ENCERRADA de novo.
+            if (turma?.reaberta_manualmente) {
+                return;
+            }
+
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
 
@@ -783,6 +803,20 @@ export class TurmasService {
         });
     }
 
+    /**
+     * Remove (hard delete) o snapshot de métricas de uma turma. É hard delete porque a coluna
+     * id_turma possui constraint UNIQUE: um soft delete deixaria a linha e impediria a regeração
+     * do snapshot quando a turma voltar a ser congelada.
+     */
+    private async removerSnapshotMetricasTurma(id_turma: number): Promise<boolean> {
+        const resultado = await this.uow.turmasMetricasSnapshotRP.delete({ id_turma });
+        const removido = (resultado.affected ?? 0) > 0;
+        if (removido) {
+            this.logger.log(`Snapshot de métricas removido (turma descongelada) turma=${id_turma}`);
+        }
+        return removido;
+    }
+
     private async tentarCongelarTurmaSePassouDataFinal(id_turma: number): Promise<void> {
         const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
         if (snapshot) {
@@ -797,24 +831,79 @@ export class TurmasService {
             return;
         }
 
-        const hoje = new Date();
-        hoje.setHours(0, 0, 0, 0);
-        const dataFinal = new Date(turma.data_final);
-        dataFinal.setHours(23, 59, 59, 999);
-        const eventoJaTerminou = hoje > dataFinal;
+        // Turma reaberta manualmente: não reencerrar nem gerar snapshot automaticamente.
+        if (turma.reaberta_manualmente) {
+            return;
+        }
 
+        const eventoJaTerminou = this.eventoTurmaTerminou(turma) === true;
         if (!eventoJaTerminou) {
             return;
         }
 
+        // Auto-encerra a turma (se ainda não estiver) e só então congela o snapshot.
         await this.verificarEAtualizarStatusTurma(turma);
-        await this.salvarSnapshotMetricasTurma(id_turma);
+        if (this.isTurmaCongelada(turma)) {
+            await this.salvarSnapshotMetricasTurma(id_turma);
+        }
     }
 
-    private async salvarSnapshotMetricasTurma(id_turma: number): Promise<boolean> {
+    /**
+     * Regra de congelamento (D+1): ao congelar a turma, todo aluno que não teve a presença registrada
+     * passa a NO_SHOW. Atualização em lote direta (sem efeitos colaterais por aluno) para que o snapshot
+     * gerado em seguida já reflita os no-shows. Não altera quem já está PRESENTE ou já é NO_SHOW.
+     * Retorna os IDs dos alunos da turma que foram marcados (para disparar regras pós-snapshot).
+     */
+    private async marcarNoShowAlunosSemPresenca(id_turma: number): Promise<string[]> {
+        const resultado = await this.uow.turmasAlunosRP
+            .createQueryBuilder()
+            .update()
+            .set({ presenca_turma: EPresencaTurmas.NO_SHOW })
+            .where('id_turma = :id_turma', { id_turma })
+            .andWhere('presenca_turma IS NULL')
+            .andWhere('deletado_em IS NULL')
+            .returning(['id'])
+            .execute();
+        const idsMarcados: string[] = ((resultado.raw as Array<{ id: string | number }>) || []).map((row) => String(row.id));
+        if (idsMarcados.length > 0) {
+            this.logger.log(`turma.snapshot.no_show | ${idsMarcados.length} aluno(s) sem presença marcados como NO_SHOW na turma=${id_turma}`);
+        }
+        return idsMarcados;
+    }
+
+    /**
+     * Após o snapshot ser salvo, dispara a auto-transferência por no-show (IPR + compra de ingresso)
+     * para os alunos marcados em massa. Roda DEPOIS do snapshot existir para evitar recursão de congelamento
+     * (tentarCongelarTurmaSePassouDataFinal retorna cedo quando o snapshot já existe). A própria
+     * tentarTransferenciaAutomaticaNoShowIPR re-valida origem/sigla/uma-única-vez por aluno.
+     */
+    private async dispararAutoTransferenciaNoShowPosCongelamento(idsTurmaAlunos: string[], userId?: number): Promise<void> {
+        for (const id of idsTurmaAlunos) {
+            try {
+                await this.tentarTransferenciaAutomaticaNoShowIPR(id, userId);
+            } catch (error) {
+                this.logger.error(
+                    `turma.snapshot.no_show.auto_transfer | Falha ao auto-transferir aluno_turma=${id}`,
+                    error instanceof Error ? error.stack : undefined,
+                );
+            }
+        }
+    }
+
+    private async salvarSnapshotMetricasTurma(id_turma: number, userId?: number): Promise<boolean> {
         const jaExiste = await this.obterSnapshotMetricasTurma(id_turma);
         if (jaExiste) {
             return false;
+        }
+
+        // Só congela (e marca no-show) turmas realmente congeladas (ENCERRADA + após D+1 da data_final).
+        // Snapshots de turmas ainda abertas (ex.: congelamento em lote com incluirEmAndamento) não marcam no-show.
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: null },
+        });
+        let idsMarcadosNoShow: string[] = [];
+        if (turma && this.isTurmaCongelada(turma)) {
+            idsMarcadosNoShow = await this.marcarNoShowAlunosSemPresenca(id_turma);
         }
 
         const resumo = await this.getTurmaStatusResumo(id_turma, { ignorarSnapshot: true });
@@ -839,7 +928,6 @@ export class TurmasService {
         try {
             await this.uow.turmasMetricasSnapshotRP.save(snapshot);
             this.logger.log(`Snapshot de métricas salvo para turma=${id_turma}`);
-            return true;
         } catch (error: any) {
             const message = String(error?.message || '');
             if (message.includes('uq_turmas_metricas_snapshot_turma') || message.includes('duplicate key')) {
@@ -848,6 +936,12 @@ export class TurmasService {
             }
             throw error;
         }
+
+        // Snapshot salvo: agora é seguro disparar as auto-transferências por no-show (sem recursão).
+        if (idsMarcadosNoShow.length > 0) {
+            await this.dispararAutoTransferenciaNoShowPosCongelamento(idsMarcadosNoShow, userId);
+        }
+        return true;
     }
 
     async regerarSnapshotMetricasTurma(id_turma: number, userId?: number): Promise<{ id_turma: number; snapshot_em: Date; message: string }> {
@@ -948,7 +1042,7 @@ export class TurmasService {
                 continue;
             }
 
-            const criado = await this.salvarSnapshotMetricasTurma(turma.id);
+            const criado = await this.salvarSnapshotMetricasTurma(turma.id, userId);
             if (criado) {
                 snapshotsCriados++;
             } else {
@@ -2608,6 +2702,29 @@ export class TurmasService {
             // Se o usuário alterou o status explicitamente, respeitar a escolha manual
             if (turmaAtualizada && !statusFoiAlteradoManualmente) {
                 await this.verificarEAtualizarStatusTurma(turmaAtualizada);
+            }
+
+            if (turmaAtualizada) {
+                // Quando o status é alterado manualmente, marcar/desmarcar a reabertura manual:
+                // - status != ENCERRADA com o evento já encerrado => reabertura manual (não recongelar);
+                // - status ENCERRADA => limpa a reabertura (a turma poderá congelar novamente em D+1).
+                if (statusFoiAlteradoManualmente) {
+                    const eventoTerminou = this.eventoTurmaTerminou(turmaAtualizada) === true;
+                    const novaReabertura = turmaAtualizada.status_turma === EStatusTurmas.ENCERRADA ? false : eventoTerminou;
+                    if (novaReabertura !== turmaAtualizada.reaberta_manualmente) {
+                        turmaAtualizada.reaberta_manualmente = novaReabertura;
+                        await this.uow.turmasRP.update(id, { reaberta_manualmente: novaReabertura });
+                    }
+                }
+
+                // Se a turma não está congelada (ex.: status alterado de ENCERRADA para reaberta, ou
+                // evento ainda não terminou), nenhum snapshot deve persistir: ele pode ter sido criado
+                // por congelamento em lote/manual ou ter ficado órfão. Removemos para descongelar de fato
+                // (métricas ao vivo e operações como presença/cancelamento liberadas). Será regerado do
+                // zero quando a turma voltar a congelar (ENCERRADA + após D+1).
+                if (!this.isTurmaCongelada(turmaAtualizada)) {
+                    await this.removerSnapshotMetricasTurma(id);
+                }
             }
 
             // Retornar turma atualizada
@@ -4640,14 +4757,12 @@ export class TurmasService {
             if (updateAlunoDto.presenca_turma !== undefined) {
                 const novaPresenca = (updateAlunoDto.presenca_turma as EPresencaTurmas | null) ?? null;
                 const mudouPresenca = (turmaAluno.presenca_turma ?? null) !== novaPresenca;
-                // Presença congelada: depois que o snapshot da turma é gerado (a partir de D+1), a presença não pode mais mudar.
-                if (mudouPresenca) {
-                    const snapshotTurma = await this.obterSnapshotMetricasTurma(turmaAluno.id_turma);
-                    if (snapshotTurma) {
-                        throw new BadRequestException(
-                            'A presença desta turma está congelada (snapshot gerado). Não é possível alterar a presença após o congelamento.',
-                        );
-                    }
+                // Presença congelada: só bloqueia quando a turma está realmente congelada
+                // (status ENCERRADA + evento terminado, a partir de D+1 da data_final). Não basta existir
+                // um snapshot, pois ele pode ter sido criado por congelamento em lote/manual em uma turma
+                // ainda aberta. Em turma reaberta/aberta, a presença permanece editável.
+                if (mudouPresenca && this.isTurmaCongelada(turmaAluno.id_turma_fk)) {
+                    throw new BadRequestException('A presença desta turma está congelada (snapshot gerado). Não é possível alterar a presença após o congelamento.');
                 }
                 const desmarcandoPresenca = turmaAluno.presenca_turma === EPresencaTurmas.PRESENTE && updateAlunoDto.presenca_turma === 'NO_SHOW';
                 if (desmarcandoPresenca) {
@@ -4805,7 +4920,8 @@ export class TurmasService {
             };
         } catch (error) {
             this.logger.error('turma.aluno.update | Erro ao atualizar aluno na turma', error instanceof Error ? error.stack : undefined);
-            if (error instanceof NotFoundException) {
+            // Preserva as exceções de domínio (ex.: presença congelada, regras de negócio) para que o frontend exiba a mensagem amigável.
+            if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof ForbiddenException) {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao atualizar aluno na turma');

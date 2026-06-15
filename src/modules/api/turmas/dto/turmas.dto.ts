@@ -674,6 +674,8 @@ export class AlunoTurmaResponseDto {
     // Compatibilidade temporária com front legado
     contrato_duplo?: boolean;
     comprovante_pagamento_base64?: string;
+    /** Indicador leve na listagem (sem carregar o base64). */
+    tem_comprovante_pagamento?: boolean;
     created_at: Date;
     /** Tag "Transferência Para": turma para a qual o aluno foi transferido (permanece na turma atual com esta referência). */
     transferencia_para_turma?: {

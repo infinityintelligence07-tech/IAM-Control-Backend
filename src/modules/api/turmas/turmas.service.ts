@@ -27,11 +27,12 @@ import {
     CreateAlunoTurmaHistoricoDto,
     AlunoTurmaHistoricoTemplateDto,
 } from './dto/turmas.dto';
-import { FindManyOptions, ILike, Not, In, IsNull } from 'typeorm';
+import { FindManyOptions, FindOptionsSelect, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
 import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
+import { TurmasAlunos } from '../../config/entities/turmasAlunos.entity';
 import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
 
 export interface PresenteSorteioPayload {
@@ -436,6 +437,166 @@ export class TurmasService {
             origemAluno === EOrigemAlunos.SORTEIO ||
             codigoTurmaOrigemPlanilha === 'TRANSBORDO'
         );
+    }
+
+    /** Colunas carregadas na listagem de alunos — exclui comprovante_pagamento_base64 (TEXT pesado). */
+    private readonly turmaAlunoListSelect: FindOptionsSelect<TurmasAlunos> = {
+        id: true,
+        id_turma: true,
+        id_aluno: true,
+        id_aluno_bonus: true,
+        url_comprovante_pgto: true,
+        pendencia_pagamento: true,
+        quantidade_inscricoes: true,
+        outros_clientes: true,
+        origem_aluno: true,
+        status_aluno_turma: true,
+        confirmacao_realizada: true,
+        checkin_realizado: true,
+        nome_cracha: true,
+        numero_cracha: true,
+        presenca_turma: true,
+        vaga_bonus: true,
+        id_turma_transferencia_para: true,
+        id_turma_transferencia_de: true,
+        codigo_turma_origem_planilha: true,
+        criado_em: true,
+        id_aluno_fk: {
+            id: true,
+            nome: true,
+            email: true,
+            telefone_um: true,
+            telefone_dois: true,
+            nome_cracha: true,
+            cpf: true,
+            instagram: true,
+            cep: true,
+            logradouro: true,
+            complemento: true,
+            numero: true,
+            bairro: true,
+            cidade: true,
+            estado: true,
+            profissao: true,
+            genero: true,
+            data_nascimento: true,
+            status_aluno_geral: true,
+            possui_deficiencia: true,
+            desc_deficiencia: true,
+        },
+        id_turma_transferencia_para_fk: {
+            id: true,
+            edicao_turma: true,
+            data_inicio: true,
+            data_final: true,
+            id_treinamento_fk: {
+                id: true,
+                sigla_treinamento: true,
+                treinamento: true,
+            },
+            id_polo_fk: {
+                id: true,
+                polo: true,
+                cidade: true,
+                estado: true,
+            },
+        },
+        id_turma_transferencia_de_fk: {
+            id: true,
+            edicao_turma: true,
+            data_inicio: true,
+            data_final: true,
+            id_treinamento_fk: {
+                id: true,
+                sigla_treinamento: true,
+                treinamento: true,
+            },
+            id_polo_fk: {
+                id: true,
+                polo: true,
+                cidade: true,
+                estado: true,
+            },
+        },
+    };
+
+    private turmaAlunoListSelectComMentoria(): FindOptionsSelect<TurmasAlunos> {
+        return {
+            ...this.turmaAlunoListSelect,
+            turmasAlunosTreinamentos: {
+                id: true,
+                id_turma_destino: true,
+                id_treinamento: true,
+                data_inicio_mentoria: true,
+                data_fim_mentoria: true,
+                deletado_em: true,
+            },
+        };
+    }
+
+    private async contarMetricasAlunosDaTurma(id_turma: number): Promise<{
+        alunos_count: number;
+        extras_count: number;
+        confirmados_count: number;
+        vindos_transferencia_count: number;
+        presentes_count: number;
+        inadimplentes_count: number;
+    }> {
+        const baseQb = () =>
+            this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .where('ta.id_turma = :id_turma', { id_turma })
+                .andWhere('ta.deletado_em IS NULL');
+
+        const extrasCondicao = `(
+            ta.vaga_bonus = true
+            OR ta.origem_aluno IN (:...origensExtra)
+            OR UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) = 'TRANSBORDO'
+        )`;
+
+        const [
+            alunos_count,
+            extras_count,
+            confirmados_count,
+            vindos_transferencia_count,
+            presentes_count,
+            inadimplentes_count,
+        ] = await Promise.all([
+            baseQb().getCount(),
+            baseQb()
+                .andWhere(extrasCondicao, {
+                    origensExtra: [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO],
+                })
+                .getCount(),
+            baseQb()
+                .andWhere('ta.id_turma_transferencia_para IS NULL')
+                .andWhere('ta.status_aluno_turma IN (:...statusConfirmados)', {
+                    statusConfirmados: [EStatusAlunosTurmas.CHECKIN_REALIZADO, EStatusAlunosTurmas.AGUARDANDO_CHECKIN],
+                })
+                .getCount(),
+            baseQb()
+                .andWhere('ta.origem_aluno = :origemTransferencia', { origemTransferencia: EOrigemAlunos.TRANSFERENCIA })
+                .andWhere('ta.id_turma_transferencia_de IS NOT NULL')
+                .getCount(),
+            baseQb()
+                .innerJoin('ta.id_aluno_fk', 'aluno_presente')
+                .andWhere('ta.presenca_turma = :presente', { presente: EPresencaTurmas.PRESENTE })
+                .andWhere('aluno_presente.status_aluno_geral != :inadimplente', { inadimplente: EStatusAlunosGeral.INADIMPLENTE })
+                .getCount(),
+            baseQb()
+                .innerJoin('ta.id_aluno_fk', 'aluno_inad')
+                .andWhere('aluno_inad.status_aluno_geral = :inadimplente', { inadimplente: EStatusAlunosGeral.INADIMPLENTE })
+                .getCount(),
+        ]);
+
+        return {
+            alunos_count,
+            extras_count,
+            confirmados_count,
+            vindos_transferencia_count,
+            presentes_count,
+            inadimplentes_count,
+        };
     }
 
     /** Edições que não entram nas sugestões automáticas (mas podem ser destino explícito no modal). */
@@ -1589,7 +1750,7 @@ export class TurmasService {
         try {
             const turma = await this.uow.turmasRP.findOne({
                 where: { id, deletado_em: null },
-                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'turmasAlunos', 'turmasAlunos.id_aluno_fk'],
+                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk'],
             });
 
             if (!turma) {
@@ -1599,13 +1760,13 @@ export class TurmasService {
             // Buscar contadores de pré-cadastrados apenas se for palestra/masterclass
             const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
             const preCadastrosCount = isPalestra ? await this.getPreCadastrosCountByTurmas([turma.id]) : {};
-            if (Array.isArray(turma?.turmasAlunos)) {
-                turma.turmasAlunos = turma.turmasAlunos.filter((ta: any) => !ta?.deletado_em);
-            }
-            const transferidosCountByTurma = await this.getTransferidosCountByTurmas([turma.id]);
+            const [transferidosCountByTurma, metricasAlunos] = await Promise.all([
+                this.getTransferidosCountByTurmas([turma.id]),
+                isPalestra ? Promise.resolve(null) : this.contarMetricasAlunosDaTurma(turma.id),
+            ]);
 
-            const alunosCountCalc = isPalestra ? preCadastrosCount[turma.id]?.total || 0 : turma.turmasAlunos?.length || 0;
-            const extrasCountCalc = turma.turmasAlunos?.filter((ta) => this.isInscricaoExtraNaTurma(ta)).length || 0;
+            const alunosCountCalc = isPalestra ? preCadastrosCount[turma.id]?.total || 0 : metricasAlunos?.alunos_count || 0;
+            const extrasCountCalc = isPalestra ? 0 : metricasAlunos?.extras_count || 0;
             const picos = await this.atualizarPicoMetricasTurma(turma.id, alunosCountCalc, extrasCountCalc, turma.meta_pico_inscritos, turma.meta_pico_extras);
 
             return {
@@ -1672,26 +1833,12 @@ export class TurmasService {
                 // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
                 alunos_count: alunosCountCalc,
                 alunos_inscricoes_extras_count: extrasCountCalc,
-                alunos_confirmados_count: turma.turmasAlunos?.filter((ta) => this.isAlunoConfirmadoNaTurma(ta)).length || 0,
+                alunos_confirmados_count: isPalestra ? 0 : metricasAlunos?.confirmados_count || 0,
                 transferidos_count: transferidosCountByTurma[turma.id] || 0,
-                vindos_transferencia_count:
-                    turma.turmasAlunos?.filter(
-                        (ta) =>
-                            ta.origem_aluno === EOrigemAlunos.TRANSFERENCIA && ta.id_turma_transferencia_de !== null && ta.id_turma_transferencia_de !== undefined,
-                    ).length || 0,
+                vindos_transferencia_count: isPalestra ? 0 : metricasAlunos?.vindos_transferencia_count || 0,
                 pre_cadastrados_count: preCadastrosCount[turma.id]?.total || 0,
-                presentes_count:
-                    turma.turmasAlunos?.filter(
-                        (ta) => ta.presenca_turma === EPresencaTurmas.PRESENTE && ta.id_aluno_fk?.status_aluno_geral !== EStatusAlunosGeral.INADIMPLENTE,
-                    ).length || 0,
-                inadimplentes_count: (() => {
-                    const inadimplentes = turma.turmasAlunos?.filter((ta) => ta.id_aluno_fk?.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE) || [];
-                    console.log(`🔍 [DEBUG] Turma ${turma.id} - Inadimplentes encontrados: ${inadimplentes.length}`);
-                    inadimplentes.forEach((ta, index) => {
-                        console.log(`  Inadimplente ${index + 1}: ID=${ta.id_aluno}, Status=${ta.id_aluno_fk?.status_aluno_geral}, Nome=${ta.id_aluno_fk?.nome}`);
-                    });
-                    return inadimplentes.length;
-                })(),
+                presentes_count: isPalestra ? 0 : metricasAlunos?.presentes_count || 0,
+                inadimplentes_count: isPalestra ? 0 : metricasAlunos?.inadimplentes_count || 0,
             };
         } catch (error) {
             console.error('Erro ao buscar turma por ID:', error);
@@ -2800,7 +2947,6 @@ export class TurmasService {
                 'id_turma_transferencia_de_fk.id_treinamento_fk',
                 'id_turma_transferencia_de_fk.id_polo_fk',
             ];
-            // Mentorias: carregar os treinamentos contratados para obter as datas (início/fim) por mentorado.
             if (isMentoria) {
                 relacoesAlunos.push('turmasAlunosTreinamentos');
             }
@@ -2808,6 +2954,7 @@ export class TurmasService {
             const [turmasAlunos, total] = await this.uow.turmasAlunosRP.findAndCount({
                 where: { id_turma, deletado_em: null },
                 relations: relacoesAlunos,
+                select: isMentoria ? this.turmaAlunoListSelectComMentoria() : this.turmaAlunoListSelect,
                 order: { criado_em: 'DESC' },
                 skip: (page - 1) * limit,
                 take: limit,
@@ -2956,7 +3103,7 @@ export class TurmasService {
                 quantidade_inscricoes: turmaAluno.quantidade_inscricoes ?? 1,
                 outros_clientes: turmaAluno.outros_clientes ?? [],
                 contrato_duplo: (turmaAluno.quantidade_inscricoes ?? 1) > 1,
-                comprovante_pagamento_base64: turmaAluno.comprovante_pagamento_base64 ?? undefined,
+                tem_comprovante_pagamento: Boolean(turmaAluno.url_comprovante_pgto?.trim()),
                 created_at: turmaAluno.criado_em,
                 transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
                 transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),

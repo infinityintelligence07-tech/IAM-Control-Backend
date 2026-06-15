@@ -10,6 +10,7 @@ import {
     TurmasListResponseDto,
     TurmaResponseDto,
     AlunosTurmaListResponseDto,
+    AlunosTurmaExportResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
     SoftDeleteTurmaDto,
@@ -326,6 +327,13 @@ export class TurmasController {
     }
 
     // Gerenciamento de Alunos na Turma
+
+    @Get(':id/alunos/export')
+    async getAlunosTurmaExport(
+        @Param('id', ParseIntPipe) id_turma: number,
+    ): Promise<AlunosTurmaExportResponseDto> {
+        return this.turmasService.getAlunosTurmaExport(id_turma);
+    }
 
     @Get(':id/alunos')
     async getAlunosTurma(

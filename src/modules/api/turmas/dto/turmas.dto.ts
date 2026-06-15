@@ -826,6 +826,24 @@ export class AlunosTurmaListResponseDto {
     totalPages: number;
 }
 
+/** Campos mínimos para exportação XLSX (sem comprovantes, transferências ou canal de ingresso). */
+export class AlunoTurmaExportItemDto {
+    nome: string;
+    email: string;
+    telefone_um?: string;
+    telefone_dois?: string;
+    nome_cracha?: string;
+    numero_cracha?: string;
+    status_aluno_turma?: string;
+    origem_aluno?: string;
+    created_at: string;
+}
+
+export class AlunosTurmaExportResponseDto {
+    data: AlunoTurmaExportItemDto[];
+    total: number;
+}
+
 export class AlunosDisponiveis {
     id: number;
     nome: string;

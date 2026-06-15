@@ -11,6 +11,7 @@ import {
     TurmasListResponseDto,
     TurmaResponseDto,
     AlunosTurmaListResponseDto,
+    AlunosTurmaExportResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
     TurmaStatusResumoResponseDto,
@@ -3151,6 +3152,64 @@ export class TurmasService {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao buscar alunos da turma');
+        }
+    }
+
+    /** Listagem enxuta para exportação XLSX — uma query, sem comprovantes base64 nem subqueries de canal. */
+    async getAlunosTurmaExport(id_turma: number): Promise<AlunosTurmaExportResponseDto> {
+        try {
+            const turma = await this.uow.turmasRP.findOne({
+                where: { id: id_turma, deletado_em: IsNull() as any },
+                select: { id: true },
+            });
+            if (!turma) {
+                throw new NotFoundException('Turma não encontrada');
+            }
+
+            const turmasAlunos = await this.uow.turmasAlunosRP.find({
+                where: { id_turma, deletado_em: null },
+                relations: ['id_aluno_fk'],
+                select: {
+                    id: true,
+                    id_aluno: true,
+                    nome_cracha: true,
+                    numero_cracha: true,
+                    status_aluno_turma: true,
+                    origem_aluno: true,
+                    criado_em: true,
+                    id_aluno_fk: {
+                        id: true,
+                        nome: true,
+                        email: true,
+                        telefone_um: true,
+                        telefone_dois: true,
+                    },
+                },
+                order: { criado_em: 'DESC' },
+            });
+
+            const data = turmasAlunos.map((turmaAluno) => ({
+                nome: turmaAluno.id_aluno_fk?.nome ?? '',
+                email: turmaAluno.id_aluno_fk?.email ?? '',
+                telefone_um: turmaAluno.id_aluno_fk?.telefone_um ?? undefined,
+                telefone_dois: turmaAluno.id_aluno_fk?.telefone_dois ?? undefined,
+                nome_cracha: turmaAluno.nome_cracha ?? '',
+                numero_cracha: turmaAluno.numero_cracha ?? '',
+                status_aluno_turma: turmaAluno.status_aluno_turma ?? undefined,
+                origem_aluno: turmaAluno.origem_aluno ?? undefined,
+                created_at:
+                    turmaAluno.criado_em instanceof Date
+                        ? turmaAluno.criado_em.toISOString()
+                        : String(turmaAluno.criado_em ?? ''),
+            }));
+
+            return { data, total: data.length };
+        } catch (error) {
+            console.error('Erro ao exportar alunos da turma:', error);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new Error('Erro interno do servidor ao exportar alunos da turma');
         }
     }
 

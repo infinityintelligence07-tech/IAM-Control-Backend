@@ -153,6 +153,16 @@ export class CriarContratoZapSignDto {
     @IsString()
     cidade_treinamento?: string;
 
+    /**
+     * Comprovante(s) de pagamento anexado(s) na etapa da venda. Quando vários,
+     * o frontend envia um JSON.stringify de um array de data URLs base64.
+     * É salvo no turma_aluno vinculado ao contrato para que o histórico de
+     * vendas (e a modal de edição) exibam o comprovante da venda.
+     */
+    @IsOptional()
+    @IsString()
+    comprovante_pagamento_base64?: string;
+
     @IsOptional()
     @IsString()
     data_inicio_treinamento?: string;

@@ -567,6 +567,16 @@ export class UpdateAlunoTurmaDto {
     @IsOptional()
     @IsBoolean()
     checkin_realizado?: boolean;
+
+    // Acessor (usuário do sistema) responsável pelo aluno. Disponível apenas para
+    // alunos que entraram por boleto. Aceita null para limpar a referência.
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : null;
+    })
+    id_acessor?: number | null;
 }
 
 export class TurmaResponseDto {
@@ -671,6 +681,22 @@ export class AlunoTurmaResponseDto {
     pendencia_pagamento?: boolean;
     quantidade_inscricoes?: number;
     outros_clientes?: OutroClienteTurmaAlunoDto[];
+    /**
+     * Forma(s) de pagamento do contrato que trouxe o aluno para esta turma (venda
+     * feita para a turma ou, em caso de transferência, o contrato da turma de origem).
+     * Label amigável já formatado; "Forma de pagamento indisponível" quando não há contrato.
+     */
+    forma_pagamento?: string;
+    /** Códigos das formas de pagamento (EFormasPagamento) do contrato, sem duplicatas. */
+    formas_pagamento?: string[];
+    /** true quando o aluno entrou por boleto (habilita a seleção de acessor no frontend). */
+    veio_por_boleto?: boolean;
+    /** Acessor responsável (apenas para alunos que vieram por boleto). */
+    id_acessor?: number | null;
+    acessor?: {
+        id: number;
+        nome: string;
+    } | null;
     // Compatibilidade temporária com front legado
     contrato_duplo?: boolean;
     comprovante_pagamento_base64?: string;

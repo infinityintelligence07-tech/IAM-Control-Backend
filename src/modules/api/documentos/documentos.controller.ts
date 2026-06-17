@@ -206,9 +206,11 @@ export class DocumentosController {
         @Query('search') search?: string,
         @Query('canal_venda') canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS',
         @Query('somente_com_pendencia') somente_com_pendencia?: string,
-        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento',
+        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma',
         @Query('treinamento_origem') treinamento_origem?: string,
         @Query('turma_origem') turma_origem?: string,
+        @Query('turma_destino') turma_destino?: string,
+        @Query('staff_lider_id') staff_lider_id?: string,
     ) {
         const filtros = {
             page: page ? parseInt(page) : 1,
@@ -224,6 +226,8 @@ export class DocumentosController {
             tipo_filtro_busca,
             treinamento_origem,
             turma_origem,
+            turma_destino,
+            staff_lider_id,
         };
 
         try {
@@ -245,7 +249,7 @@ export class DocumentosController {
         @Query('somente_com_pendencia') somente_com_pendencia?: string,
         @Query('status') status?: string,
         @Query('treinamento_origem') treinamento_origem?: string,
-        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento',
+        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma',
     ) {
         return this.documentosService.listarOpcoesFiltrosOrigem({
             data_inicio,

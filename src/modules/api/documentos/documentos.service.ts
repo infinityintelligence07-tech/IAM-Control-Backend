@@ -56,6 +56,7 @@ export class DocumentosService {
             value: {
                 treinamentos_origem: string[];
                 turmas_origem: string[];
+                turmas_destino: string[];
             };
         }
     >();
@@ -74,6 +75,29 @@ export class DocumentosService {
                     total_inscricoes_bonus: number;
                     total_com_pendencia: number;
                     receita_total: number;
+                    ranking_staff_lider: Array<{
+                        lider_id: string;
+                        lider_nome: string;
+                        total_inscricoes: number;
+                        total_vendas: number;
+                        times: string[];
+                        vendedores: Array<{
+                            id: string;
+                            nome: string;
+                            total_inscricoes: number;
+                            total_vendas: number;
+                        }>;
+                    }>;
+                    inscricoes_sem_lider: {
+                        total_inscricoes: number;
+                        total_vendas: number;
+                        vendedores: Array<{
+                            vendedor_id: string;
+                            vendedor_nome: string;
+                            total_inscricoes: number;
+                            total_vendas: number;
+                        }>;
+                    };
                 };
             };
         }
@@ -370,6 +394,19 @@ export class DocumentosService {
                 turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
                 // Congela a meta no novo pico de inscritos/extras da turma do aluno.
                 await this.uow.bumparPicoMetricasTurmas([turmaAluno.id_turma, idTurmaDestino]);
+            }
+
+            // Persiste o comprovante de pagamento no turma_aluno vinculado ao
+            // contrato (mesmo registro lido pelo histórico/edição da venda).
+            // Sem isso, o comprovante anexado na etapa da venda só ia para a
+            // matrícula da turma destino e não aparecia no histórico.
+            if (
+                criarContratoDto.comprovante_pagamento_base64 !== undefined &&
+                criarContratoDto.comprovante_pagamento_base64 !== null &&
+                criarContratoDto.comprovante_pagamento_base64 !== ''
+            ) {
+                turmaAluno.comprovante_pagamento_base64 = criarContratoDto.comprovante_pagamento_base64;
+                turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
             }
 
             // Buscar ou criar registro de TurmasAlunosTreinamentos
@@ -2556,6 +2593,88 @@ export class DocumentosService {
         );
     }
 
+    private extrairTurmaDestinoServidor(contrato: any): string {
+        const dadosContrato = contrato?.dados_contrato || {};
+        const camposVariaveis = dadosContrato?.campos_variaveis || {};
+        const turmaAluno = contrato?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
+        const turmaDestinoRel = turmaAluno?.id_turma_fk;
+        const treinamentoViaRelacao = String(turmaDestinoRel?.id_treinamento_fk?.treinamento || '').trim();
+        const edicaoViaRelacao = String(turmaDestinoRel?.edicao_turma || '').trim();
+        const turmaViaRelacao =
+            treinamentoViaRelacao && edicaoViaRelacao ? `${treinamentoViaRelacao} - ${edicaoViaRelacao}` : treinamentoViaRelacao;
+        return (
+            (contrato?.fluxo_evento_destino_turma || '').trim() ||
+            String(dadosContrato?.fluxo_evento_destino_turma || '').trim() ||
+            camposVariaveis['Turma de Destino'] ||
+            camposVariaveis['Turma Destino'] ||
+            turmaViaRelacao ||
+            ''
+        );
+    }
+
+    private ehModoFiltroTurma(tipo?: string | null): boolean {
+        return tipo === 'treinamento' || tipo === 'turma';
+    }
+
+    private turmaHistoricoOrigemElegivel(dataInicio?: Date | string | null): boolean {
+        if (!dataInicio) return false;
+        const inicio = dataInicio instanceof Date ? dataInicio : new Date(dataInicio);
+        if (Number.isNaN(inicio.getTime())) return false;
+        const hojeFim = new Date();
+        hojeFim.setHours(23, 59, 59, 999);
+        return inicio.getTime() <= hojeFim.getTime();
+    }
+
+    private formatarTurmaHistorico(treinamento?: string | null, edicao?: string | null): string {
+        const nomeTreinamento = String(treinamento || '').trim();
+        const edicaoTurma = String(edicao || '').trim();
+        if (!nomeTreinamento) return '';
+        return edicaoTurma ? `${nomeTreinamento} - ${edicaoTurma}` : nomeTreinamento;
+    }
+
+    private ordenarListaTurmasHistorico(turmas: Iterable<string>): string[] {
+        const extrairPartesTurma = (valor: string): { treinamento: string; edicaoTexto: string; edicaoNumero: number } => {
+            const partes = String(valor || '')
+                .split(' - ')
+                .map((parte) => parte.trim())
+                .filter(Boolean);
+            if (partes.length <= 1) {
+                const texto = String(valor || '').trim();
+                return {
+                    treinamento: texto,
+                    edicaoTexto: '',
+                    edicaoNumero: Number.MAX_SAFE_INTEGER,
+                };
+            }
+            const edicaoTexto = partes[partes.length - 1];
+            const treinamento = partes.slice(0, -1).join(' - ');
+            const numeroEdicao = edicaoTexto.match(/\d+/)?.[0];
+            return {
+                treinamento,
+                edicaoTexto,
+                edicaoNumero: numeroEdicao ? parseInt(numeroEdicao, 10) : Number.MAX_SAFE_INTEGER,
+            };
+        };
+
+        return Array.from(turmas).sort((a, b) => {
+            const turmaA = extrairPartesTurma(a);
+            const turmaB = extrairPartesTurma(b);
+            const comparacaoTreinamento = turmaA.treinamento.localeCompare(turmaB.treinamento, 'pt-BR', {
+                sensitivity: 'base',
+            });
+            if (comparacaoTreinamento !== 0) return comparacaoTreinamento;
+            if (turmaA.edicaoNumero !== turmaB.edicaoNumero) {
+                return turmaA.edicaoNumero - turmaB.edicaoNumero;
+            }
+            const comparacaoEdicaoTexto = turmaA.edicaoTexto.localeCompare(turmaB.edicaoTexto, 'pt-BR', {
+                sensitivity: 'base',
+                numeric: true,
+            });
+            if (comparacaoEdicaoTexto !== 0) return comparacaoEdicaoTexto;
+            return a.localeCompare(b, 'pt-BR');
+        });
+    }
+
     private statusContratoEhConcluido(status?: string | null): boolean {
         const s = this.normalizarTexto(status);
         return s === 'signed' || s === 'complete' || s === 'completed' || s === 'assinado';
@@ -2594,7 +2713,7 @@ export class DocumentosService {
         somente_com_pendencia?: boolean | string;
         status?: string;
         treinamento_origem?: string;
-        tipo_filtro_busca?: 'periodo' | 'treinamento';
+        tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
     }): string {
         return JSON.stringify({
             data_inicio: filtros?.data_inicio || '',
@@ -2611,6 +2730,7 @@ export class DocumentosService {
     private lerCacheOpcoesOrigem(chave: string): {
         treinamentos_origem: string[];
         turmas_origem: string[];
+        turmas_destino: string[];
     } | null {
         const registro = this.opcoesOrigemCache.get(chave);
         if (!registro) return null;
@@ -2628,6 +2748,7 @@ export class DocumentosService {
         valor: {
             treinamentos_origem: string[];
             turmas_origem: string[];
+            turmas_destino: string[];
         },
     ): void {
         const agora = Date.now();
@@ -2705,10 +2826,11 @@ export class DocumentosService {
         somente_com_pendencia?: boolean | string;
         status?: string;
         treinamento_origem?: string;
-        tipo_filtro_busca?: 'periodo' | 'treinamento';
+        tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
     }): Promise<{
         treinamentos_origem: string[];
         turmas_origem: string[];
+        turmas_destino: string[];
     }> {
         const cacheKey = this.montarChaveCacheOpcoesOrigem(filtros);
         const cacheHit = this.lerCacheOpcoesOrigem(cacheKey);
@@ -2716,8 +2838,8 @@ export class DocumentosService {
             return cacheHit;
         }
 
-        const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
-        const aplicarFiltroPeriodo = !filtroTreinamentoAtivo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
+        const filtroTurmaAtivo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
+        const aplicarFiltroPeriodo = !filtroTurmaAtivo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
         const dataInicioPadrao = (() => {
             const d = new Date();
             d.setDate(d.getDate() - 30);
@@ -2779,6 +2901,7 @@ export class DocumentosService {
             {
                 treinamento: string;
                 turma: string;
+                data_inicio: Date | string | null;
             }
         >();
         if (idsTurmaOrigemViaDadosContrato.length > 0) {
@@ -2792,16 +2915,76 @@ export class DocumentosService {
             turmasOrigemViaDadosContrato.forEach((turma) => {
                 const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
                 const edicao = String(turma?.edicao_turma || '').trim();
-                const turmaFormatada = treinamento && edicao ? `${treinamento} - ${edicao}` : treinamento;
+                const turmaFormatada = this.formatarTurmaHistorico(treinamento, edicao);
                 turmasOrigemPorId.set(turma.id, {
                     treinamento,
                     turma: turmaFormatada,
+                    data_inicio: turma?.data_inicio ?? null,
                 });
             });
         }
 
+        const idsTurmaDestinoViaDadosContrato = Array.from(
+            new Set(
+                contratos
+                    .map((contrato) => {
+                        const dadosContrato = (contrato as any)?.dados_contrato || {};
+                        const turmaAluno = (contrato as any)?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
+                        const idViaRelacao = Number(turmaAluno?.id_turma_fk?.id || turmaAluno?.id_turma || 0);
+                        const idViaTat = Number((contrato as any)?.id_turma_aluno_treinamento_fk?.id_turma_destino || 0);
+                        const idViaDados = Number(
+                            dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || dadosContrato?.turma?.id || 0,
+                        );
+                        return idViaDados || idViaTat || idViaRelacao;
+                    })
+                    .filter((id) => Number.isFinite(id) && id > 0),
+            ),
+        );
+        const turmasDestinoPorId = new Map<
+            number,
+            {
+                treinamento: string;
+                turma: string;
+            }
+        >();
+        if (idsTurmaDestinoViaDadosContrato.length > 0) {
+            const turmasDestinoViaDadosContrato = await this.uow.turmasRP.find({
+                where: {
+                    id: In(idsTurmaDestinoViaDadosContrato),
+                    deletado_em: IsNull(),
+                },
+                relations: ['id_treinamento_fk'],
+            });
+            turmasDestinoViaDadosContrato.forEach((turma) => {
+                const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
+                const edicao = String(turma?.edicao_turma || '').trim();
+                turmasDestinoPorId.set(turma.id, {
+                    treinamento,
+                    turma: this.formatarTurmaHistorico(treinamento, edicao),
+                });
+            });
+        }
+
+        const turmasCadastradas = await this.uow.turmasRP.find({
+            where: {
+                deletado_em: IsNull(),
+            },
+            relations: ['id_treinamento_fk'],
+        });
+        const turmasOrigemElegiveisPorNome = new Map<string, string>();
+        turmasCadastradas.forEach((turma) => {
+            const nomeTreinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
+            const edicao = String(turma?.edicao_turma || '').trim();
+            const turmaFormatada = this.formatarTurmaHistorico(nomeTreinamento, edicao);
+            if (!turmaFormatada || turmaEhInvalida(turmaFormatada)) return;
+            if (!this.turmaHistoricoOrigemElegivel(turma?.data_inicio)) return;
+            if (treinamentoOrigemSelecionado && this.normalizarTexto(nomeTreinamento) !== treinamentoOrigemSelecionado) return;
+            turmasOrigemElegiveisPorNome.set(this.normalizarTexto(turmaFormatada), turmaFormatada);
+        });
+
         const treinamentos = new Set<string>();
-        const turmas = new Set<string>();
+        const turmasOrigem = new Set<string>();
+        const turmasDestino = new Set<string>();
 
         contratos.forEach((contrato) => {
             const contratoAny = contrato as any;
@@ -2811,9 +2994,21 @@ export class DocumentosService {
             const camposVariaveis = dadosContrato?.campos_variaveis || {};
             const idTurmaOrigemViaDadosContrato =
                 Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0) || 0;
-            const fallbackViaId = turmasOrigemPorId.get(idTurmaOrigemViaDadosContrato);
-            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || fallbackViaId?.treinamento || '').trim();
-            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || fallbackViaId?.turma || '').trim();
+            const fallbackOrigemViaId = turmasOrigemPorId.get(idTurmaOrigemViaDadosContrato);
+            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || fallbackOrigemViaId?.treinamento || '').trim();
+            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || fallbackOrigemViaId?.turma || '').trim();
+            const idTurmaDestinoViaDadosContrato =
+                Number(
+                    dadosContrato?.fluxo_evento_destino_id_turma ||
+                        dadosContrato?.id_turma_destino ||
+                        dadosContrato?.turma?.id ||
+                        turmaAluno?.id_turma_fk?.id ||
+                        turmaAluno?.id_turma ||
+                        contratoAny?.id_turma_aluno_treinamento_fk?.id_turma_destino ||
+                        0,
+                ) || 0;
+            const fallbackDestinoViaId = turmasDestinoPorId.get(idTurmaDestinoViaDadosContrato);
+            const turmaDestino = String(this.extrairTurmaDestinoServidor(contratoAny) || fallbackDestinoViaId?.turma || '').trim();
             const nomeAluno = this.normalizarTexto(alunoRelacao?.nome || dadosContrato?.aluno?.nome);
             const emailAluno = this.normalizarTexto(alunoRelacao?.email || dadosContrato?.aluno?.email);
             const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento || dadosContrato?.turma_aluno?.pendencia_pagamento);
@@ -2833,82 +3028,548 @@ export class DocumentosService {
                 treinamentos.add(treinamentoOrigem);
             }
 
+            const origemElegivelPorId =
+                idTurmaOrigemViaDadosContrato > 0
+                    ? this.turmaHistoricoOrigemElegivel(fallbackOrigemViaId?.data_inicio ?? null)
+                    : false;
+            const origemElegivelPorNome = turmasOrigemElegiveisPorNome.has(this.normalizarTexto(turmaOrigem));
             if (
                 turmaOrigem &&
                 !turmaEhInvalida(turmaOrigem) &&
+                (origemElegivelPorId || origemElegivelPorNome) &&
                 (!treinamentoOrigemSelecionado || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemSelecionado)
             ) {
-                turmas.add(turmaOrigem);
+                turmasOrigem.add(turmaOrigem);
+            }
+
+            if (turmaDestino && !turmaEhInvalida(turmaDestino)) {
+                turmasDestino.add(turmaDestino);
             }
         });
 
-        // Completa o autocomplete com turmas ativas de outros treinamentos
-        // (não depender apenas dos contratos que já possuem snapshot de origem).
-        const turmasGerais = await this.uow.turmasRP.find({
-            where: {
-                deletado_em: IsNull(),
-            },
-            relations: ['id_treinamento_fk'],
-        });
-        turmasGerais.forEach((turma) => {
-            const nomeTreinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
-            const edicao = String(turma?.edicao_turma || '').trim();
-            const turmaFormatada = nomeTreinamento && edicao ? `${nomeTreinamento} - ${edicao}` : '';
-            if (!nomeTreinamento || !edicao) return;
-            if (turmaEhInvalida(turmaFormatada)) return;
-            if (treinamentoOrigemSelecionado && this.normalizarTexto(nomeTreinamento) !== treinamentoOrigemSelecionado) return;
-            treinamentos.add(nomeTreinamento);
-            turmas.add(turmaFormatada);
+        turmasOrigemElegiveisPorNome.forEach((turmaFormatada) => {
+            turmasOrigem.add(turmaFormatada);
+            const [treinamento] = turmaFormatada.split(' - ');
+            if (treinamento) {
+                treinamentos.add(treinamento.trim());
+            }
         });
 
         const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-        const extrairPartesTurma = (valor: string): { treinamento: string; edicaoTexto: string; edicaoNumero: number } => {
-            const partes = String(valor || '')
-                .split(' - ')
-                .map((parte) => parte.trim())
-                .filter(Boolean);
-            if (partes.length <= 1) {
-                const texto = String(valor || '').trim();
-                return {
-                    treinamento: texto,
-                    edicaoTexto: '',
-                    edicaoNumero: Number.MAX_SAFE_INTEGER,
-                };
-            }
-            const edicaoTexto = partes[partes.length - 1];
-            const treinamento = partes.slice(0, -1).join(' - ');
-            const numeroEdicao = edicaoTexto.match(/\d+/)?.[0];
-            return {
-                treinamento,
-                edicaoTexto,
-                edicaoNumero: numeroEdicao ? parseInt(numeroEdicao, 10) : Number.MAX_SAFE_INTEGER,
-            };
-        };
-        const turmasOrdenadas = Array.from(turmas).sort((a, b) => {
-            const turmaA = extrairPartesTurma(a);
-            const turmaB = extrairPartesTurma(b);
-            const comparacaoTreinamento = turmaA.treinamento.localeCompare(turmaB.treinamento, 'pt-BR', {
-                sensitivity: 'base',
-            });
-            if (comparacaoTreinamento !== 0) return comparacaoTreinamento;
-            if (turmaA.edicaoNumero !== turmaB.edicaoNumero) {
-                return turmaA.edicaoNumero - turmaB.edicaoNumero;
-            }
-            const comparacaoEdicaoTexto = turmaA.edicaoTexto.localeCompare(turmaB.edicaoTexto, 'pt-BR', {
-                sensitivity: 'base',
-                numeric: true,
-            });
-            if (comparacaoEdicaoTexto !== 0) return comparacaoEdicaoTexto;
-            return a.localeCompare(b, 'pt-BR');
-        });
+        const turmasOrigemOrdenadas = this.ordenarListaTurmasHistorico(turmasOrigem);
+        const turmasDestinoOrdenadas = this.ordenarListaTurmasHistorico(turmasDestino);
 
         const resultado = {
             treinamentos_origem: treinamentosOrdenados,
-            turmas_origem: turmasOrdenadas,
+            turmas_origem: turmasOrigemOrdenadas,
+            turmas_destino: turmasDestinoOrdenadas,
         };
         this.salvarCacheOpcoesOrigem(cacheKey, resultado);
 
         return resultado;
+    }
+
+    private parseJsonSeguroHistorico(valor: unknown): Record<string, any> {
+        if (!valor) return {};
+        if (typeof valor === 'object') return valor as Record<string, any>;
+        if (typeof valor !== 'string') return {};
+        try {
+            const parsed = JSON.parse(valor);
+            return parsed && typeof parsed === 'object' ? (parsed as Record<string, any>) : {};
+        } catch {
+            return {};
+        }
+    }
+
+    private obterQuantidadeInscricoesVendidasResumo(contratoMapeado: {
+        turma_aluno?: { quantidade_inscricoes?: number; outros_clientes?: unknown[] };
+        dados_contrato?: Record<string, any>;
+    }): number {
+        const dadosContrato = contratoMapeado?.dados_contrato || {};
+        const camposVariaveis = dadosContrato?.campos_variaveis || {};
+        const turmaAluno = contratoMapeado?.turma_aluno || dadosContrato?.turma_aluno || {};
+        const quantidadeViaTurmaAluno = Number(turmaAluno?.quantidade_inscricoes ?? 0);
+        const quantidadeViaCampos = Number.parseInt(
+            String(camposVariaveis['Quantidade de Inscrições'] || camposVariaveis['Quantidade de Inscricoes'] || ''),
+            10,
+        );
+        const outrosClientes = Array.isArray(turmaAluno?.outros_clientes) ? turmaAluno.outros_clientes : [];
+        const quantidadeViaOutrosClientes = outrosClientes.length + 1;
+
+        return Math.max(
+            1,
+            Number.isFinite(quantidadeViaTurmaAluno) && quantidadeViaTurmaAluno > 0 ? quantidadeViaTurmaAluno : 0,
+            Number.isFinite(quantidadeViaCampos) && quantidadeViaCampos > 0 ? quantidadeViaCampos : 0,
+            quantidadeViaOutrosClientes,
+        );
+    }
+
+    private obterQuantidadeInscricoesBonusResumoHistorico(contratoMapeado: {
+        turma_aluno?: { quantidade_inscricoes?: number };
+        dados_contrato?: Record<string, any>;
+    }): number {
+        const camposVariaveis = contratoMapeado?.dados_contrato?.campos_variaveis || {};
+        const valoresBonus = contratoMapeado?.dados_contrato?.bonus?.valores_bonus || {};
+        const quantidadeInscricoes = this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado);
+
+        const quantidadeBonusDiretaKeys = [
+            'Quantidade de Inscrições Bônus',
+            'Quantidade de Inscrições Bonus',
+            'Quantidade Inscrições Bônus',
+            'Quantidade Inscrições Bonus',
+            'Quantidade de Bônus',
+            'Quantidade de Bonus',
+            'Quantidade Bônus',
+            'Quantidade Bonus',
+        ];
+        const quantidadeBonusDireta = quantidadeBonusDiretaKeys.reduce((acc, key) => {
+            if (acc > 0) return acc;
+            const parsed = Number.parseInt(String(camposVariaveis?.[key] || ''), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+        }, 0);
+        if (quantidadeBonusDireta > 0) {
+            return quantidadeBonusDireta;
+        }
+
+        const bonusPorInscricaoKeys = [
+            'Bônus por Inscrição',
+            'Bonus por Inscrição',
+            'Bônus por Inscricao',
+            'Bonus por Inscricao',
+            'Quantidade de Bônus por Inscrição',
+            'Quantidade de Bonus por Inscrição',
+            'Quantidade de Bônus por Inscricao',
+            'Quantidade de Bonus por Inscricao',
+            'Ingressos Bônus por Inscrição',
+            'Ingressos Bonus por Inscrição',
+            'Ingressos Bônus por Inscricao',
+            'Ingressos Bonus por Inscricao',
+        ];
+        const bonusPorInscricao = bonusPorInscricaoKeys.reduce((acc, key) => {
+            if (acc > 0) return acc;
+            const parsed = Number.parseInt(String(camposVariaveis?.[key] || ''), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+        }, 0);
+        if (bonusPorInscricao > 0) {
+            return quantidadeInscricoes * bonusPorInscricao;
+        }
+
+        const quantidadeBonusViaValores = Object.keys(valoresBonus || {}).reduce((acc, key) => {
+            if (acc > 0) return acc;
+            const match = key.match(/B[oô]nus-(\d+)\s+Inscri[cç][aã]o/i);
+            if (!match?.[1]) return 0;
+            const parsed = Number.parseInt(match[1], 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+        }, 0);
+        if (quantidadeBonusViaValores > 0) {
+            return quantidadeBonusViaValores;
+        }
+
+        return 0;
+    }
+
+    private obterValorTotalVendaResumo(dadosContrato: Record<string, any>): number {
+        const formasPagamento = Array.isArray(dadosContrato?.pagamento?.formas_pagamento)
+            ? dadosContrato.pagamento.formas_pagamento
+            : Array.isArray(dadosContrato?.formas_pagamento)
+              ? dadosContrato.formas_pagamento
+              : [];
+
+        return formasPagamento.reduce((totalAtual: number, forma: any) => {
+            const valor = typeof forma?.valor === 'number' ? forma.valor : Number.parseFloat(String(forma?.valor || 0));
+            return totalAtual + (Number.isFinite(valor) ? valor : 0);
+        }, 0);
+    }
+
+    private obterCriadoPorResumoHistorico(row: {
+        dados_contrato: unknown;
+        criado_por_contrato?: string | number | null;
+        criado_por_tat?: string | number | null;
+        criado_por_ta?: string | number | null;
+    }): string {
+        const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
+        const criadoPorConfronto = dadosContrato?.criado_por_confronto || {};
+        const candidatos = [
+            criadoPorConfronto?.consolidado,
+            row.criado_por_contrato,
+            dadosContrato?.criado_por,
+            criadoPorConfronto?.contrato,
+            row.criado_por_tat,
+            criadoPorConfronto?.turma_aluno_treinamento,
+            row.criado_por_ta,
+            criadoPorConfronto?.turma_aluno,
+        ];
+        for (const candidato of candidatos) {
+            const id = String(candidato ?? '').trim();
+            if (id) return id;
+        }
+        return '';
+    }
+
+    private obterIdsTurmasResumoHistorico(row: {
+        dados_contrato: unknown;
+        id_turma?: string | number | null;
+        id_turma_destino?: string | number | null;
+    }): number[] {
+        const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
+        const candidatos = [
+            row.id_turma,
+            row.id_turma_destino,
+            dadosContrato?.fluxo_evento_origem_id_turma,
+            dadosContrato?.id_turma_origem,
+            dadosContrato?.turma_origem?.id,
+            dadosContrato?.fluxo_evento_destino_id_turma,
+            dadosContrato?.turma?.id,
+        ];
+        return Array.from(
+            new Set(
+                candidatos
+                    .map((valor) => Number(valor))
+                    .filter((valor) => Number.isFinite(valor) && valor > 0),
+            ),
+        );
+    }
+
+    private async carregarLinhasHistoricoVendas(
+        baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
+    ): Promise<
+        Array<{
+            id: string;
+            criado_em?: string | Date | null;
+            dados_contrato: unknown;
+            criado_por_contrato?: string | number | null;
+            criado_por_tat?: string | number | null;
+            criado_por_ta?: string | number | null;
+            quantidade_inscricoes: string | number;
+            outros_clientes: unknown;
+            pendencia_pagamento: string | boolean;
+            id_turma?: string | number | null;
+            id_turma_destino?: string | number | null;
+        }>
+    > {
+        const resumoRowsRaw = await baseQb
+            .clone()
+            .select('contrato.id', 'id')
+            .addSelect('contrato.criado_em', 'criado_em')
+            .addSelect('contrato.dados_contrato', 'dados_contrato')
+            .addSelect('contrato.criado_por', 'criado_por_contrato')
+            .addSelect('tat.criado_por', 'criado_por_tat')
+            .addSelect('ta.criado_por', 'criado_por_ta')
+            .addSelect('COALESCE(ta.quantidade_inscricoes, 1)', 'quantidade_inscricoes')
+            .addSelect('ta.outros_clientes', 'outros_clientes')
+            .addSelect('COALESCE(ta.pendencia_pagamento, false)', 'pendencia_pagamento')
+            .addSelect('ta.id_turma', 'id_turma')
+            .addSelect('tat.id_turma_destino', 'id_turma_destino')
+            .distinct(true)
+            .getRawMany();
+
+        const resumoRowsMap = new Map<string, (typeof resumoRowsRaw)[number]>();
+        resumoRowsRaw.forEach((row) => {
+            const contratoId = String(row.id || '').trim();
+            if (!contratoId) return;
+            if (!resumoRowsMap.has(contratoId)) {
+                resumoRowsMap.set(contratoId, row);
+            }
+        });
+        return Array.from(resumoRowsMap.values());
+    }
+
+    private async montarMapasTimesHistorico(
+        linhas: Array<{
+            dados_contrato: unknown;
+            id_turma?: string | number | null;
+            id_turma_destino?: string | number | null;
+        }>,
+    ): Promise<{
+        timesPorTurma: Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>;
+        liderPorMembroGlobal: Map<string, string>;
+    }> {
+        const idsTurmas = Array.from(new Set(linhas.flatMap((row) => this.obterIdsTurmasResumoHistorico(row))));
+        const timesPorTurma = new Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>();
+        if (idsTurmas.length > 0) {
+            const turmas = await this.uow.turmasRP.find({
+                where: { id: In(idsTurmas), deletado_em: IsNull() },
+                select: { id: true, times_equipes: true },
+            });
+            turmas.forEach((turma) => {
+                const times = Array.isArray(turma.times_equipes) ? turma.times_equipes : [];
+                timesPorTurma.set(
+                    turma.id,
+                    times.map((time) => ({
+                        id: String(time.id || ''),
+                        nome: String(time.nome || ''),
+                        liderId: String(time.liderId || '').trim(),
+                        membrosIds: Array.isArray(time.membrosIds) ? time.membrosIds.map((id) => String(id).trim()) : [],
+                    })),
+                );
+            });
+        }
+
+        const liderPorMembroGlobal = new Map<string, string>();
+        timesPorTurma.forEach((times) => {
+            times.forEach((time) => {
+                if (!time.liderId) return;
+                liderPorMembroGlobal.set(time.liderId, time.liderId);
+                time.membrosIds.forEach((membroId) => {
+                    if (membroId) liderPorMembroGlobal.set(membroId, time.liderId);
+                });
+            });
+        });
+
+        return { timesPorTurma, liderPorMembroGlobal };
+    }
+
+    private resolverLiderIdLinhaHistorico(
+        row: {
+            dados_contrato: unknown;
+            criado_por_contrato?: string | number | null;
+            criado_por_tat?: string | number | null;
+            criado_por_ta?: string | number | null;
+            id_turma?: string | number | null;
+            id_turma_destino?: string | number | null;
+        },
+        timesPorTurma: Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>,
+        liderPorMembroGlobal: Map<string, string>,
+    ): string {
+        const vendedorId = this.obterCriadoPorResumoHistorico(row);
+        if (!vendedorId) return '';
+        const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
+        const timesDaVenda = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
+        const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorId || time.membrosIds.includes(vendedorId));
+        return timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorId) || '';
+    }
+
+    private async calcularResumoHistoricoVendas(
+        baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
+        options?: { staff_lider_id?: string },
+    ): Promise<{
+        total_inscricoes_vendidas: number;
+        total_inscricoes_bonus: number;
+        total_com_pendencia: number;
+        receita_total: number;
+        ranking_staff_lider: Array<{
+            lider_id: string;
+            lider_nome: string;
+            total_inscricoes: number;
+            total_vendas: number;
+            times: string[];
+            vendedores: Array<{
+                id: string;
+                nome: string;
+                total_inscricoes: number;
+                total_vendas: number;
+            }>;
+        }>;
+        inscricoes_sem_lider: {
+            total_inscricoes: number;
+            total_vendas: number;
+            vendedores: Array<{
+                vendedor_id: string;
+                vendedor_nome: string;
+                total_inscricoes: number;
+                total_vendas: number;
+            }>;
+        };
+    }> {
+        const resumoRows = await this.carregarLinhasHistoricoVendas(baseQb);
+        const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
+        const staffLiderId = String(options?.staff_lider_id || '').trim();
+        const linhasAtivas = staffLiderId
+            ? resumoRows.filter(
+                  (row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId,
+              )
+            : resumoRows;
+
+        const resumoBase = linhasAtivas.reduce(
+            (acc, row) => {
+                const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
+                const turmaAlunoDados = dadosContrato?.turma_aluno || {};
+                const outrosClientesRaw = row.outros_clientes ?? turmaAlunoDados?.outros_clientes;
+                const contratoMapeado = {
+                    turma_aluno: {
+                        quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
+                        pendencia_pagamento: row.pendencia_pagamento === true || String(row.pendencia_pagamento).toLowerCase() === 'true',
+                        outros_clientes: Array.isArray(outrosClientesRaw) ? outrosClientesRaw : [],
+                    },
+                    dados_contrato: dadosContrato,
+                };
+                const quantidadeInscricoes = this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado);
+                const pendenciaPagamento = Boolean(contratoMapeado.turma_aluno.pendencia_pagamento);
+                const valorTotalVenda = this.obterValorTotalVendaResumo(dadosContrato);
+
+                acc.total_inscricoes_vendidas += quantidadeInscricoes;
+                acc.total_inscricoes_bonus += this.obterQuantidadeInscricoesBonusResumoHistorico(contratoMapeado);
+                if (pendenciaPagamento) {
+                    acc.total_com_pendencia += 1;
+                }
+                acc.receita_total += valorTotalVenda;
+                return acc;
+            },
+            {
+                total_inscricoes_vendidas: 0,
+                total_inscricoes_bonus: 0,
+                total_com_pendencia: 0,
+                receita_total: 0,
+            },
+        );
+
+        const idsUsuarios = Array.from(
+            new Set(
+                linhasAtivas
+                    .flatMap((row) => {
+                        const vendedorId = this.obterCriadoPorResumoHistorico(row);
+                        const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
+                        const lideres = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []).map((time) => time.liderId);
+                        return [vendedorId, ...lideres].filter(Boolean);
+                    })
+                    .map((id) => Number(id))
+                    .filter((id) => Number.isFinite(id) && id > 0),
+            ),
+        );
+        const nomeUsuarioPorId = new Map<number, string>();
+        if (idsUsuarios.length > 0) {
+            const usuarios = await this.uow.usuariosRP.find({
+                where: { id: In(idsUsuarios), deletado_em: IsNull() },
+                select: { id: true, nome: true, primeiro_nome: true, sobrenome: true },
+            });
+            usuarios.forEach((usuario) => {
+                const nomeCompleto = usuario.nome || `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() || `Usuário ${usuario.id}`;
+                nomeUsuarioPorId.set(usuario.id, nomeCompleto);
+            });
+        }
+
+        type TVendedorAgrupado = {
+            id: string;
+            nome: string;
+            totalInscricoes: number;
+            totalVendas: number;
+        };
+        type TLiderAgrupado = {
+            liderId: string;
+            liderNome: string;
+            totalInscricoes: number;
+            totalVendas: number;
+            vendedores: Record<string, TVendedorAgrupado>;
+            times: Set<string>;
+        };
+
+        const mapaLider = new Map<string, TLiderAgrupado>();
+        const mapaSemLider = new Map<string, { vendedorNome: string; totalInscricoes: number; totalVendas: number }>();
+        let totalInscricoesSemLider = 0;
+
+        linhasAtivas.forEach((row) => {
+            const vendedorId = this.obterCriadoPorResumoHistorico(row) || 'Não informado';
+            const vendedorNome = nomeUsuarioPorId.get(Number(vendedorId)) || `ID ${vendedorId}`;
+            const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
+            const contratoMapeado = {
+                turma_aluno: {
+                    quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
+                    outros_clientes: Array.isArray(row.outros_clientes) ? row.outros_clientes : [],
+                },
+                dados_contrato: dadosContrato,
+            };
+            const inscricoesDaVenda = this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado);
+            const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
+            const timesDaVenda = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
+            const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorId || time.membrosIds.includes(vendedorId));
+            const liderId = timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorId) || '';
+
+            if (!liderId) {
+                totalInscricoesSemLider += inscricoesDaVenda;
+                const atual = mapaSemLider.get(vendedorId) || {
+                    vendedorNome,
+                    totalInscricoes: 0,
+                    totalVendas: 0,
+                };
+                atual.totalInscricoes += inscricoesDaVenda;
+                atual.totalVendas += 1;
+                mapaSemLider.set(vendedorId, atual);
+                return;
+            }
+
+            const liderNome = nomeUsuarioPorId.get(Number(liderId)) || (liderId === vendedorId ? vendedorNome : `Líder ID ${liderId}`);
+            const registroLider =
+                mapaLider.get(liderId) ||
+                ({
+                    liderId,
+                    liderNome,
+                    totalInscricoes: 0,
+                    totalVendas: 0,
+                    vendedores: {},
+                    times: new Set<string>(),
+                } as TLiderAgrupado);
+
+            registroLider.totalInscricoes += inscricoesDaVenda;
+            registroLider.totalVendas += 1;
+            if (timeDoVendedor?.nome) {
+                registroLider.times.add(timeDoVendedor.nome);
+            }
+
+            const vendedorAtual =
+                registroLider.vendedores[vendedorId] ||
+                ({
+                    id: vendedorId,
+                    nome: vendedorNome,
+                    totalInscricoes: 0,
+                    totalVendas: 0,
+                } as TVendedorAgrupado);
+            vendedorAtual.totalInscricoes += inscricoesDaVenda;
+            vendedorAtual.totalVendas += 1;
+            registroLider.vendedores[vendedorId] = vendedorAtual;
+            mapaLider.set(liderId, registroLider);
+        });
+
+        const rankingStaffLider = Array.from(mapaLider.values())
+            .map((item) => ({
+                lider_id: item.liderId,
+                lider_nome: item.liderNome,
+                total_inscricoes: item.totalInscricoes,
+                total_vendas: item.totalVendas,
+                times: Array.from(item.times),
+                vendedores: Object.values(item.vendedores)
+                    .map((vendedor) => ({
+                        id: vendedor.id,
+                        nome: vendedor.nome,
+                        total_inscricoes: vendedor.totalInscricoes,
+                        total_vendas: vendedor.totalVendas,
+                    }))
+                    .sort(
+                        (a, b) =>
+                            b.total_inscricoes - a.total_inscricoes ||
+                            b.total_vendas - a.total_vendas ||
+                            a.nome.localeCompare(b.nome, 'pt-BR'),
+                    ),
+            }))
+            .sort(
+                (a, b) =>
+                    b.total_inscricoes - a.total_inscricoes ||
+                    b.total_vendas - a.total_vendas ||
+                    a.lider_nome.localeCompare(b.lider_nome, 'pt-BR'),
+            );
+
+        const vendedoresSemLider = Array.from(mapaSemLider.entries())
+            .map(([vendedorId, dados]) => ({
+                vendedor_id: vendedorId,
+                vendedor_nome: dados.vendedorNome,
+                total_inscricoes: dados.totalInscricoes,
+                total_vendas: dados.totalVendas,
+            }))
+            .sort(
+                (a, b) =>
+                    b.total_inscricoes - a.total_inscricoes ||
+                    b.total_vendas - a.total_vendas ||
+                    a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR'),
+            );
+
+        return {
+            ...resumoBase,
+            ranking_staff_lider: rankingStaffLider,
+            inscricoes_sem_lider: {
+                total_inscricoes: totalInscricoesSemLider,
+                total_vendas: vendedoresSemLider.reduce((acc, item) => acc + item.total_vendas, 0),
+                vendedores: vendedoresSemLider,
+            },
+        };
     }
 
     async listarContratosBanco(filtros?: {
@@ -2922,9 +3583,11 @@ export class DocumentosService {
         search?: string;
         canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
         somente_com_pendencia?: boolean | string;
-        tipo_filtro_busca?: 'periodo' | 'treinamento';
+        tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
         treinamento_origem?: string;
         turma_origem?: string;
+        turma_destino?: string;
+        staff_lider_id?: string;
     }): Promise<{
         data: any[];
         total: number;
@@ -2936,8 +3599,8 @@ export class DocumentosService {
             const page = filtros?.page || 1;
             const limit = filtros?.limit || 10;
             const offset = (page - 1) * limit;
-            const filtroTreinamentoSemPeriodo = filtros?.tipo_filtro_busca === 'treinamento';
-            const aplicarFiltroPeriodo = !filtroTreinamentoSemPeriodo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
+            const filtroTurmaSemPeriodo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
+            const aplicarFiltroPeriodo = !filtroTurmaSemPeriodo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
             const dataInicioPadrao = (() => {
                 const d = new Date();
                 d.setDate(d.getDate() - 30);
@@ -2951,6 +3614,7 @@ export class DocumentosService {
             })();
             const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
             const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
+            const staffLiderId = String(filtros?.staff_lider_id || '').trim() || undefined;
             const marcadorAtualizacao = await this.obterMarcadorAtualizacaoHistorico();
             const chaveCache = JSON.stringify({
                 page,
@@ -2967,6 +3631,8 @@ export class DocumentosService {
                 tipo_filtro_busca: filtros?.tipo_filtro_busca || null,
                 treinamento_origem: filtros?.treinamento_origem || null,
                 turma_origem: filtros?.turma_origem || null,
+                turma_destino: filtros?.turma_destino || null,
+                staff_lider_id: staffLiderId || null,
             });
             const cacheExistente = this.contratosBancoCache.get(chaveCache);
 
@@ -2978,7 +3644,8 @@ export class DocumentosService {
             const statusFiltro = this.normalizarTexto(filtros?.status);
             const treinamentoOrigemFiltro = this.normalizarTexto(filtros?.treinamento_origem);
             const turmaOrigemFiltro = this.normalizarTexto(filtros?.turma_origem);
-            const filtroTreinamentoAtivo = filtros?.tipo_filtro_busca === 'treinamento';
+            const turmaDestinoFiltro = this.normalizarTexto(filtros?.turma_destino);
+            const filtroTurmaAtivo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
             const idTurmaOrigemDadosContratoSql = `NULLIF(COALESCE(
@@ -3007,6 +3674,29 @@ export class DocumentosService {
                 END,
                 ''
             )))`;
+            const idTurmaDestinoDadosContratoSql = `NULLIF(COALESCE(
+                contrato.dados_contrato->>'fluxo_evento_destino_id_turma',
+                contrato.dados_contrato->>'id_turma_destino',
+                contrato.dados_contrato->'turma'->>'id',
+                tat.id_turma_destino::text,
+                ta.id_turma::text,
+                ''
+            ), '')::int`;
+            const turmaDestinoSql = `LOWER(TRIM(COALESCE(
+                NULLIF(contrato.dados_contrato->>'fluxo_evento_destino_turma', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Destino', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Destino', ''),
+                CASE
+                    WHEN treinamento_destino_evento.treinamento IS NOT NULL AND turma_destino_evento.edicao_turma IS NOT NULL
+                        THEN CONCAT(treinamento_destino_evento.treinamento, ' - ', turma_destino_evento.edicao_turma)
+                    WHEN treinamento_destino_tat.treinamento IS NOT NULL AND turma_destino_tat.edicao_turma IS NOT NULL
+                        THEN CONCAT(treinamento_destino_tat.treinamento, ' - ', turma_destino_tat.edicao_turma)
+                    WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
+                        THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
+                    ELSE COALESCE(treinamento_destino_evento.treinamento, treinamento_destino_tat.treinamento, treinamento_destino.treinamento, '')
+                END,
+                ''
+            )))`;
             const canalTextoSql = `LOWER(CONCAT_WS(' ',
                 ${treinamentoOrigemSql},
                 ${turmaOrigemSql},
@@ -3032,6 +3722,10 @@ export class DocumentosService {
                 .leftJoin('tat.id_treinamento_fk', 'treinamento_tat')
                 .leftJoin(Turmas, 'turma_origem_evento', `turma_origem_evento.id = ${idTurmaOrigemDadosContratoSql}`)
                 .leftJoin('turma_origem_evento.id_treinamento_fk', 'treinamento_origem_evento')
+                .leftJoin(Turmas, 'turma_destino_evento', `turma_destino_evento.id = ${idTurmaDestinoDadosContratoSql}`)
+                .leftJoin('turma_destino_evento.id_treinamento_fk', 'treinamento_destino_evento')
+                .leftJoin(Turmas, 'turma_destino_tat', 'turma_destino_tat.id = tat.id_turma_destino')
+                .leftJoin('turma_destino_tat.id_treinamento_fk', 'treinamento_destino_tat')
                 .where('contrato.deletado_em IS NULL');
 
             if (aplicarFiltroPeriodo) {
@@ -3082,15 +3776,21 @@ export class DocumentosService {
                 }
             }
 
-            if (filtroTreinamentoAtivo && treinamentoOrigemFiltro) {
+            if (filtroTurmaAtivo && treinamentoOrigemFiltro) {
                 baseQb.andWhere(`${treinamentoOrigemSql} = :treinamentoOrigemFiltro`, {
                     treinamentoOrigemFiltro,
                 });
             }
 
-            if (filtroTreinamentoAtivo && turmaOrigemFiltro) {
+            if (filtroTurmaAtivo && turmaOrigemFiltro) {
                 baseQb.andWhere(`${turmaOrigemSql} = :turmaOrigemFiltro`, {
                     turmaOrigemFiltro,
+                });
+            }
+
+            if (filtroTurmaAtivo && turmaDestinoFiltro) {
+                baseQb.andWhere(`${turmaDestinoSql} = :turmaDestinoFiltro`, {
+                    turmaDestinoFiltro,
                 });
             }
 
@@ -3114,30 +3814,41 @@ export class DocumentosService {
                 );
             }
 
-            const total = await baseQb.clone().select('contrato.id').distinct(true).getCount();
-            const totalPages = Math.max(1, Math.ceil(total / limit));
-            const idsPaginaRaw = await baseQb
-                .clone()
-                .select('contrato.id', 'id')
-                .addSelect('MAX(contrato.criado_em)', 'ordem_criado_em')
-                .groupBy('contrato.id')
-                .orderBy('MAX(contrato.criado_em)', 'DESC')
-                .offset(offset)
-                .limit(limit)
-                .getRawMany<{ id: string }>();
-            const idsPagina = idsPaginaRaw.map((item) => String(item.id));
+            let total: number;
+            let totalPages: number;
+            let idsPagina: string[];
 
-            const resumoRows = await baseQb
-                .clone()
-                .select('contrato.dados_contrato', 'dados_contrato')
-                .addSelect('COALESCE(ta.quantidade_inscricoes, 1)', 'quantidade_inscricoes')
-                .addSelect('COALESCE(ta.pendencia_pagamento, false)', 'pendencia_pagamento')
-                .distinct(true)
-                .getRawMany<{
-                    dados_contrato: any;
-                    quantidade_inscricoes: string | number;
-                    pendencia_pagamento: string | boolean;
-                }>();
+            if (staffLiderId) {
+                const linhasHistorico = await this.carregarLinhasHistoricoVendas(baseQb);
+                const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(linhasHistorico);
+                const idsOrdenados = linhasHistorico
+                    .filter(
+                        (row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId,
+                    )
+                    .sort(
+                        (a, b) =>
+                            new Date(String(b.criado_em || 0)).getTime() - new Date(String(a.criado_em || 0)).getTime(),
+                    )
+                    .map((row) => String(row.id));
+                total = idsOrdenados.length;
+                totalPages = Math.max(1, Math.ceil(total / limit));
+                idsPagina = idsOrdenados.slice(offset, offset + limit);
+            } else {
+                total = await baseQb.clone().select('contrato.id').distinct(true).getCount();
+                totalPages = Math.max(1, Math.ceil(total / limit));
+                const idsPaginaRaw = await baseQb
+                    .clone()
+                    .select('contrato.id', 'id')
+                    .addSelect('MAX(contrato.criado_em)', 'ordem_criado_em')
+                    .groupBy('contrato.id')
+                    .orderBy('MAX(contrato.criado_em)', 'DESC')
+                    .offset(offset)
+                    .limit(limit)
+                    .getRawMany<{ id: string }>();
+                idsPagina = idsPaginaRaw.map((item) => String(item.id));
+            }
+
+            const resumo = await this.calcularResumoHistoricoVendas(baseQb, { staff_lider_id: staffLiderId });
 
             if (idsPagina.length === 0) {
                 const resultadoVazio = {
@@ -3146,12 +3857,7 @@ export class DocumentosService {
                     page,
                     limit,
                     totalPages,
-                    resumo: {
-                        total_inscricoes_vendidas: 0,
-                        total_inscricoes_bonus: 0,
-                        total_com_pendencia: 0,
-                        receita_total: 0,
-                    },
+                    resumo,
                 };
                 this.contratosBancoCache.set(chaveCache, {
                     expiresAt: Date.now() + this.contratosBancoCacheTtlMs,
@@ -3811,128 +4517,6 @@ export class DocumentosService {
                 }),
             );
 
-            const parseJsonSeguro = (valor: unknown): Record<string, any> => {
-                if (!valor) return {};
-                if (typeof valor === 'object') return valor as Record<string, any>;
-                if (typeof valor !== 'string') return {};
-                try {
-                    const parsed = JSON.parse(valor);
-                    return parsed && typeof parsed === 'object' ? (parsed as Record<string, any>) : {};
-                } catch {
-                    return {};
-                }
-            };
-
-            const obterQuantidadeInscricoesBonusResumo = (contratoMapeado: any): number => {
-                const camposVariaveis = contratoMapeado?.dados_contrato?.campos_variaveis || {};
-                const valoresBonus = contratoMapeado?.dados_contrato?.bonus?.valores_bonus || {};
-                const quantidadeInscricoes = Math.max(
-                    1,
-                    Number(
-                        contratoMapeado?.turma_aluno?.quantidade_inscricoes ??
-                            contratoMapeado?.dados_contrato?.turma_aluno?.quantidade_inscricoes ??
-                            camposVariaveis['Quantidade de Inscrições'] ??
-                            1,
-                    ) || 1,
-                );
-
-                const quantidadeBonusDiretaKeys = [
-                    'Quantidade de Inscrições Bônus',
-                    'Quantidade de Inscrições Bonus',
-                    'Quantidade Inscrições Bônus',
-                    'Quantidade Inscrições Bonus',
-                    'Quantidade de Bônus',
-                    'Quantidade de Bonus',
-                    'Quantidade Bônus',
-                    'Quantidade Bonus',
-                ];
-                const quantidadeBonusDireta = quantidadeBonusDiretaKeys.reduce((acc, key) => {
-                    if (acc > 0) return acc;
-                    const parsed = Number.parseInt(String(camposVariaveis?.[key] || ''), 10);
-                    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-                }, 0);
-                if (quantidadeBonusDireta > 0) {
-                    return quantidadeBonusDireta;
-                }
-
-                const bonusPorInscricaoKeys = [
-                    'Bônus por Inscrição',
-                    'Bonus por Inscrição',
-                    'Bônus por Inscricao',
-                    'Bonus por Inscricao',
-                    'Quantidade de Bônus por Inscrição',
-                    'Quantidade de Bonus por Inscrição',
-                    'Quantidade de Bônus por Inscricao',
-                    'Quantidade de Bonus por Inscricao',
-                    'Ingressos Bônus por Inscrição',
-                    'Ingressos Bonus por Inscrição',
-                    'Ingressos Bônus por Inscricao',
-                    'Ingressos Bonus por Inscricao',
-                ];
-                const bonusPorInscricao = bonusPorInscricaoKeys.reduce((acc, key) => {
-                    if (acc > 0) return acc;
-                    const parsed = Number.parseInt(String(camposVariaveis?.[key] || ''), 10);
-                    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-                }, 0);
-                if (bonusPorInscricao > 0) {
-                    return quantidadeInscricoes * bonusPorInscricao;
-                }
-
-                const quantidadeBonusViaValores = Object.keys(valoresBonus || {}).reduce((acc, key) => {
-                    if (acc > 0) return acc;
-                    const match = key.match(/B[oô]nus-(\d+)\s+Inscri[cç][aã]o/i);
-                    if (!match?.[1]) return 0;
-                    const parsed = Number.parseInt(match[1], 10);
-                    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-                }, 0);
-                if (quantidadeBonusViaValores > 0) {
-                    return quantidadeBonusViaValores;
-                }
-
-                // Nao considerar compradores adicionais/inscricoes extras como bonus.
-                return 0;
-            };
-
-            const contratosParaResumo = resumoRows.map((row) => ({
-                turma_aluno: {
-                    quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
-                    pendencia_pagamento: row.pendencia_pagamento === true || String(row.pendencia_pagamento).toLowerCase() === 'true',
-                },
-                dados_contrato: parseJsonSeguro(row.dados_contrato),
-            }));
-
-            const resumo = contratosParaResumo.reduce(
-                (acc, contratoMapeado) => {
-                    const quantidadeInscricoes = Math.max(
-                        1,
-                        Number(contratoMapeado?.turma_aluno?.quantidade_inscricoes ?? contratoMapeado?.dados_contrato?.turma_aluno?.quantidade_inscricoes ?? 1) || 1,
-                    );
-                    const pendenciaPagamento = Boolean(contratoMapeado?.turma_aluno?.pendencia_pagamento);
-                    const formasPagamento = Array.isArray(contratoMapeado?.dados_contrato?.pagamento?.formas_pagamento)
-                        ? contratoMapeado?.dados_contrato?.pagamento?.formas_pagamento
-                        : Array.isArray(contratoMapeado?.dados_contrato?.formas_pagamento)
-                          ? contratoMapeado?.dados_contrato?.formas_pagamento
-                          : [];
-                    const valorTotalVenda = formasPagamento.reduce((totalAtual: number, forma: any) => {
-                        const valor = typeof forma?.valor === 'number' ? forma.valor : Number.parseFloat(String(forma?.valor || 0));
-                        return totalAtual + (Number.isFinite(valor) ? valor : 0);
-                    }, 0);
-
-                    acc.total_inscricoes_vendidas += quantidadeInscricoes;
-                    acc.total_inscricoes_bonus += obterQuantidadeInscricoesBonusResumo(contratoMapeado);
-                    if (pendenciaPagamento) {
-                        acc.total_com_pendencia += 1;
-                    }
-                    acc.receita_total += valorTotalVenda;
-                    return acc;
-                },
-                {
-                    total_inscricoes_vendidas: 0,
-                    total_inscricoes_bonus: 0,
-                    total_com_pendencia: 0,
-                    receita_total: 0,
-                },
-            );
             const dataPagina = contratosMapeados;
             const idsCriadoresUnicos = Array.from(
                 new Set(

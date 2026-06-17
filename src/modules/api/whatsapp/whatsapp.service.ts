@@ -716,6 +716,29 @@ Vamos Prosperar! 🙌`;
     }
 
     async sendConfirmacaoToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
+        // Gatilho de envio de copy de confirmação de presença DESABILITADO por padrão.
+        // Nenhuma mensagem de confirmação é disparada (botões individuais/lote em /turmas e /turmas/editar).
+        // Para reativar, defina CONFIRMACAO_ENVIO_HABILITADO=true no ambiente.
+        const confirmacaoEnvioHabilitado = process.env.CONFIRMACAO_ENVIO_HABILITADO === 'true';
+        if (!confirmacaoEnvioHabilitado) {
+            console.log(
+                JSON.stringify(
+                    {
+                        event: 'confirmacao_envio_desabilitado',
+                        motivo: 'CONFIRMACAO_ENVIO_HABILITADO != true',
+                        totalAlunos: students?.length ?? 0,
+                    },
+                    null,
+                    2,
+                ),
+            );
+            return {
+                success: false,
+                sent: 0,
+                errors: ['O envio de mensagens de confirmação está desabilitado no sistema.'],
+            };
+        }
+
         const orderedStudents = await this.sortStudentsByEnrollment(students);
         const results = { success: true, sent: 0, errors: [] as string[] };
         const configuredConcurrency = Number(process.env.CONFIRMACAO_BULK_CONCURRENCY || process.env.CHECKIN_BULK_CONCURRENCY || 5);

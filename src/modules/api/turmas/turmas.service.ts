@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral } from '../../config/entities/enum';
+import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral, EFormasPagamento } from '../../config/entities/enum';
 import {
     GetTurmasDto,
     CreateTurmaDto,
@@ -461,7 +461,12 @@ export class TurmasService {
         id_turma_transferencia_para: true,
         id_turma_transferencia_de: true,
         codigo_turma_origem_planilha: true,
+        id_acessor: true,
         criado_em: true,
+        id_acessor_fk: {
+            id: true,
+            nome: true,
+        },
         id_aluno_fk: {
             id: true,
             nome: true,
@@ -2927,6 +2932,111 @@ export class TurmasService {
 
     // Métodos para gerenciar alunos na turma
 
+    /** Rótulo amigável para cada forma de pagamento (alinhado às formas padrão do sistema). */
+    private static readonly FORMA_PAGAMENTO_LABELS: Record<string, string> = {
+        [EFormasPagamento.BOLETO]: 'Boleto',
+        [EFormasPagamento.CARTAO_CREDITO]: 'Cartão de Crédito',
+        [EFormasPagamento.CARTAO_DEBITO]: 'Cartão de Débito',
+        [EFormasPagamento.PIX]: 'Pix/Transferência',
+        [EFormasPagamento.DINHEIRO]: 'Espécie',
+    };
+
+    /** Monta o label exibido na coluna de pagamento a partir dos códigos de forma. */
+    private formatarFormaPagamentoLabel(formas: string[]): string {
+        if (!formas || formas.length === 0) {
+            return 'Forma de pagamento indisponível';
+        }
+        return formas.map((forma) => TurmasService.FORMA_PAGAMENTO_LABELS[forma] || forma).join(' + ');
+    }
+
+    /** Extrai os códigos de forma de pagamento (sem duplicatas) de um dados_contrato (jsonb). */
+    private extrairFormasDeContrato(dadosContrato: any): string[] {
+        const candidatos = Array.isArray(dadosContrato?.pagamento?.formas_pagamento)
+            ? dadosContrato.pagamento.formas_pagamento
+            : Array.isArray(dadosContrato?.formas_pagamento)
+              ? dadosContrato.formas_pagamento
+              : [];
+        const validas = new Set(Object.values(EFormasPagamento) as string[]);
+        const formas: string[] = [];
+        for (const item of candidatos) {
+            const codigo = typeof item?.forma === 'string' ? item.forma.toUpperCase().trim() : '';
+            if (validas.has(codigo) && !formas.includes(codigo)) {
+                formas.push(codigo);
+            }
+        }
+        return formas;
+    }
+
+    /**
+     * Resolve, para cada matrícula (turmas_alunos) informada, as formas de pagamento do contrato
+     * que trouxe o aluno para a turma. Cobre três caminhos de ligação:
+     *  - venda registrada na própria matrícula;
+     *  - venda cuja turma DESTINO é esta turma (mesmo aluno na origem);
+     *  - transferência: contrato na matrícula da turma de origem (id_turma_transferencia_de).
+     * Retorna um Map<id_turma_aluno, string[] (códigos EFormasPagamento)>.
+     */
+    private async resolverFormasPagamentoPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, string[]>> {
+        const resultado = new Map<string, string[]>();
+        if (!turmaAlunoIds || turmaAlunoIds.length === 0) {
+            return resultado;
+        }
+
+        try {
+            const linhas: Array<{ id_ta: string; dados_contrato: any }> = await this.uow.turmasAlunosRP.query(
+                `
+                WITH alvo AS (
+                    SELECT ta.id AS id_ta, ta.id_aluno, ta.id_turma, ta.id_turma_transferencia_de
+                    FROM turmas_alunos ta
+                    WHERE ta.id_turma = $1
+                      AND ta.id = ANY($2::bigint[])
+                      AND ta.deletado_em IS NULL
+                ),
+                contratos AS (
+                    SELECT a.id_ta, c.id AS id_contrato, c.criado_em, c.dados_contrato
+                    FROM alvo a
+                    JOIN turmas_alunos_treinamentos tat
+                      ON tat.deletado_em IS NULL
+                     AND (
+                          tat.id_turma_aluno = a.id_ta
+                          OR (
+                              tat.id_turma_destino = a.id_turma
+                              AND EXISTS (
+                                  SELECT 1 FROM turmas_alunos ta_o
+                                  WHERE ta_o.id = tat.id_turma_aluno
+                                    AND ta_o.id_aluno = a.id_aluno
+                              )
+                          )
+                          OR (
+                              a.id_turma_transferencia_de IS NOT NULL
+                              AND EXISTS (
+                                  SELECT 1 FROM turmas_alunos ta_t
+                                  WHERE ta_t.id = tat.id_turma_aluno
+                                    AND ta_t.id_turma = a.id_turma_transferencia_de
+                                    AND ta_t.id_aluno = a.id_aluno
+                              )
+                          )
+                     )
+                    JOIN turmas_alunos_treinamentos_contratos c
+                      ON c.id_turma_aluno_treinamento = tat.id
+                     AND c.deletado_em IS NULL
+                )
+                SELECT DISTINCT ON (id_ta) id_ta, dados_contrato
+                FROM contratos
+                ORDER BY id_ta, criado_em DESC, id_contrato DESC
+                `,
+                [id_turma, turmaAlunoIds],
+            );
+
+            for (const linha of linhas) {
+                resultado.set(String(linha.id_ta), this.extrairFormasDeContrato(linha.dados_contrato));
+            }
+        } catch (error) {
+            this.logger.error('turma.aluno.forma_pagamento | Falha ao resolver formas de pagamento', error instanceof Error ? error.stack : undefined);
+        }
+
+        return resultado;
+    }
+
     async getAlunosTurma(id_turma: number, page: number = 1, limit: number = 10): Promise<AlunosTurmaListResponseDto> {
         try {
             const turma = await this.uow.turmasRP.findOne({
@@ -2941,6 +3051,7 @@ export class TurmasService {
 
             const relacoesAlunos = [
                 'id_aluno_fk',
+                'id_acessor_fk',
                 'id_turma_transferencia_para_fk',
                 'id_turma_transferencia_para_fk.id_treinamento_fk',
                 'id_turma_transferencia_para_fk.id_polo_fk',
@@ -3083,7 +3194,16 @@ export class TurmasService {
                 }
             }
 
-            const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => ({
+            // Forma(s) de pagamento do contrato que trouxe cada aluno para a turma.
+            const formasPagamentoPorTurmaAlunoId = await this.resolverFormasPagamentoPorTurmaAluno(id_turma, turmaAlunoIds);
+
+            const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => {
+                const formasAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
+                const veioPorBoleto = formasAluno.includes(EFormasPagamento.BOLETO);
+                const acessor = turmaAluno.id_acessor_fk
+                    ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome }
+                    : null;
+                return ({
                 id: turmaAluno.id,
                 id_turma: turmaAluno.id_turma,
                 id_aluno: turmaAluno.id_aluno,
@@ -3105,6 +3225,11 @@ export class TurmasService {
                 outros_clientes: turmaAluno.outros_clientes ?? [],
                 contrato_duplo: (turmaAluno.quantidade_inscricoes ?? 1) > 1,
                 tem_comprovante_pagamento: Boolean(turmaAluno.url_comprovante_pgto?.trim()),
+                forma_pagamento: this.formatarFormaPagamentoLabel(formasAluno),
+                formas_pagamento: formasAluno,
+                veio_por_boleto: veioPorBoleto,
+                id_acessor: turmaAluno.id_acessor ?? null,
+                acessor,
                 created_at: turmaAluno.criado_em,
                 transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
                 transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
@@ -3135,7 +3260,8 @@ export class TurmasService {
                       }
                     : undefined,
                 ficha_preenchida: this.isFichaPreenchida(turmaAluno.id_aluno_fk),
-            }));
+            });
+            });
 
             const totalPages = Math.ceil(total / limit);
 
@@ -4950,6 +5076,20 @@ export class TurmasService {
             if (updateAlunoDto.id_turma_transferencia_de !== undefined) {
                 turmaAluno.id_turma_transferencia_de = updateAlunoDto.id_turma_transferencia_de;
             }
+            // Acessor responsável: disponível apenas para alunos que entraram por boleto.
+            if (updateAlunoDto.id_acessor !== undefined) {
+                if (updateAlunoDto.id_acessor !== null) {
+                    const formasAluno = (await this.resolverFormasPagamentoPorTurmaAluno(turmaAluno.id_turma, [turmaAluno.id])).get(turmaAluno.id) ?? [];
+                    if (!formasAluno.includes(EFormasPagamento.BOLETO)) {
+                        throw new BadRequestException('O acessor só pode ser definido para alunos que entraram por boleto.');
+                    }
+                    const acessorExiste = await this.uow.usuariosRP.findOne({ where: { id: updateAlunoDto.id_acessor }, select: { id: true } });
+                    if (!acessorExiste) {
+                        throw new BadRequestException('Acessor (usuário) não encontrado.');
+                    }
+                }
+                turmaAluno.id_acessor = updateAlunoDto.id_acessor;
+            }
             if (updateAlunoDto.presenca_turma !== undefined) {
                 const novaPresenca = (updateAlunoDto.presenca_turma as EPresencaTurmas | null) ?? null;
                 const mudouPresenca = (turmaAluno.presenca_turma ?? null) !== novaPresenca;
@@ -5104,6 +5244,7 @@ export class TurmasService {
                 outros_clientes: turmaAlunoAtualizada.outros_clientes ?? [],
                 contrato_duplo: (turmaAlunoAtualizada.quantidade_inscricoes ?? 1) > 1,
                 comprovante_pagamento_base64: turmaAlunoAtualizada.comprovante_pagamento_base64,
+                id_acessor: turmaAlunoAtualizada.id_acessor ?? null,
                 created_at: turmaAlunoAtualizada.criado_em,
                 aluno: turmaAlunoAtualizada.id_aluno_fk
                     ? {

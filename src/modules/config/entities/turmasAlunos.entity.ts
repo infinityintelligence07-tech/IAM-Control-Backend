@@ -7,6 +7,7 @@ import { Turmas } from './turmas.entity';
 import { TurmasAlunosProdutos } from './turmasAlunosProdutos.entity';
 import { Alunos } from './alunos.entity';
 import { TurmasAlunosTreinamentos } from './turmasAlunosTreinamentos.entity';
+import { Usuarios } from './usuarios.entity';
 
 export type TOutroClienteTurmaAluno = {
     id?: string;
@@ -86,6 +87,13 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'varchar', name: 'codigo_turma_origem_planilha', length: 255, nullable: true })
     codigo_turma_origem_planilha: string | null;
 
+    /**
+     * Acessor (usuário do sistema) responsável por acompanhar este aluno na turma.
+     * Coluna opcional, definida apenas para alunos que entraram por boleto.
+     */
+    @Column({ type: 'int', name: 'id_acessor', nullable: true })
+    id_acessor: number | null;
+
     @ManyToOne(() => Turmas, { nullable: true })
     @JoinColumn([{ name: 'id_turma_transferencia_para', referencedColumnName: 'id' }])
     id_turma_transferencia_para_fk: Turmas | null;
@@ -97,6 +105,10 @@ export class TurmasAlunos extends BaseEntity {
     @ManyToOne(() => Alunos, (alunos) => alunos.turmasAlunos)
     @JoinColumn([{ name: 'id_aluno', referencedColumnName: 'id' }])
     id_aluno_fk: Alunos;
+
+    @ManyToOne(() => Usuarios, { nullable: true })
+    @JoinColumn([{ name: 'id_acessor', referencedColumnName: 'id' }])
+    id_acessor_fk: Usuarios | null;
 
     @ManyToOne(() => Turmas, (turmas) => turmas.turmasAlunos)
     @JoinColumn([{ name: 'id_turma', referencedColumnName: 'id' }])

@@ -3339,6 +3339,59 @@ export class TurmasService {
         }
     }
 
+    /**
+     * Lista as matrículas de bônus (origem ALUNO_BONUS) vinculadas a um comprador,
+     * restritas às turmas de Imersão Prosperar (IPR). Usado na edição de venda do
+     * histórico para gerenciar (editar/remover/acrescentar) os bônus do comprador.
+     */
+    async getBonusMatriculasComprador(idAlunoComprador: number): Promise<
+        Array<{
+            id_turma_aluno: string;
+            id_turma: number;
+            id_aluno: string | null;
+            edicao_turma: string;
+            treinamento_nome: string;
+            sigla_treinamento: string;
+        }>
+    > {
+        const matriculas = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoinAndSelect('ta.id_turma_fk', 'turma')
+            .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
+            .where('ta.id_aluno_bonus = :idAlunoComprador', { idAlunoComprador: String(idAlunoComprador) })
+            .andWhere('ta.origem_aluno = :origemBonus', { origemBonus: EOrigemAlunos.ALUNO_BONUS })
+            .andWhere('ta.deletado_em IS NULL')
+            .getMany();
+
+        const ehTurmaIpr = (sigla?: string, nome?: string): boolean => {
+            const siglaNorm = String(sigla || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim()
+                .toLowerCase();
+            const nomeNorm = String(nome || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim()
+                .toLowerCase();
+            return siglaNorm === 'ipr' || nomeNorm.includes('imersao prosperar');
+        };
+
+        return matriculas
+            .filter((ta) => {
+                const treinamento = ta.id_turma_fk?.id_treinamento_fk;
+                return ehTurmaIpr(treinamento?.sigla_treinamento, treinamento?.treinamento);
+            })
+            .map((ta) => ({
+                id_turma_aluno: String(ta.id),
+                id_turma: Number(ta.id_turma),
+                id_aluno: ta.id_aluno ? String(ta.id_aluno) : null,
+                edicao_turma: ta.id_turma_fk?.edicao_turma ?? '',
+                treinamento_nome: ta.id_turma_fk?.id_treinamento_fk?.treinamento ?? '',
+                sigla_treinamento: ta.id_turma_fk?.id_treinamento_fk?.sigla_treinamento ?? '',
+            }));
+    }
+
     async addAlunoTurma(id_turma: number, addAlunoDto: AddAlunoTurmaDto, userId?: number): Promise<AlunoTurmaResponseDto> {
         try {
             const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma } });

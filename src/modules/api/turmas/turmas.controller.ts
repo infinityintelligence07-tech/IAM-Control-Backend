@@ -109,6 +109,12 @@ export class TurmasController {
         return await this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum, searchStr);
     }
 
+    @Get('bonus-comprador/:id_aluno_comprador')
+    @UseGuards(JwtAuthGuard)
+    async getBonusMatriculasComprador(@Param('id_aluno_comprador', ParseIntPipe) id_aluno_comprador: number) {
+        return this.turmasService.getBonusMatriculasComprador(id_aluno_comprador);
+    }
+
     @Get('aluno/:id')
     @UseGuards(JwtAuthGuard)
     async getAlunoTurmaById(@Param('id') id: string): Promise<AlunoTurmaResponseDto> {

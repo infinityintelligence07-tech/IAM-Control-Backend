@@ -2600,8 +2600,7 @@ export class DocumentosService {
         const turmaDestinoRel = turmaAluno?.id_turma_fk;
         const treinamentoViaRelacao = String(turmaDestinoRel?.id_treinamento_fk?.treinamento || '').trim();
         const edicaoViaRelacao = String(turmaDestinoRel?.edicao_turma || '').trim();
-        const turmaViaRelacao =
-            treinamentoViaRelacao && edicaoViaRelacao ? `${treinamentoViaRelacao} - ${edicaoViaRelacao}` : treinamentoViaRelacao;
+        const turmaViaRelacao = treinamentoViaRelacao && edicaoViaRelacao ? `${treinamentoViaRelacao} - ${edicaoViaRelacao}` : treinamentoViaRelacao;
         return (
             (contrato?.fluxo_evento_destino_turma || '').trim() ||
             String(dadosContrato?.fluxo_evento_destino_turma || '').trim() ||
@@ -2932,9 +2931,7 @@ export class DocumentosService {
                         const turmaAluno = (contrato as any)?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
                         const idViaRelacao = Number(turmaAluno?.id_turma_fk?.id || turmaAluno?.id_turma || 0);
                         const idViaTat = Number((contrato as any)?.id_turma_aluno_treinamento_fk?.id_turma_destino || 0);
-                        const idViaDados = Number(
-                            dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || dadosContrato?.turma?.id || 0,
-                        );
+                        const idViaDados = Number(dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || dadosContrato?.turma?.id || 0);
                         return idViaDados || idViaTat || idViaRelacao;
                     })
                     .filter((id) => Number.isFinite(id) && id > 0),
@@ -3028,10 +3025,7 @@ export class DocumentosService {
                 treinamentos.add(treinamentoOrigem);
             }
 
-            const origemElegivelPorId =
-                idTurmaOrigemViaDadosContrato > 0
-                    ? this.turmaHistoricoOrigemElegivel(fallbackOrigemViaId?.data_inicio ?? null)
-                    : false;
+            const origemElegivelPorId = idTurmaOrigemViaDadosContrato > 0 ? this.turmaHistoricoOrigemElegivel(fallbackOrigemViaId?.data_inicio ?? null) : false;
             const origemElegivelPorNome = turmasOrigemElegiveisPorNome.has(this.normalizarTexto(turmaOrigem));
             if (
                 turmaOrigem &&
@@ -3089,10 +3083,7 @@ export class DocumentosService {
         const camposVariaveis = dadosContrato?.campos_variaveis || {};
         const turmaAluno = contratoMapeado?.turma_aluno || dadosContrato?.turma_aluno || {};
         const quantidadeViaTurmaAluno = Number(turmaAluno?.quantidade_inscricoes ?? 0);
-        const quantidadeViaCampos = Number.parseInt(
-            String(camposVariaveis['Quantidade de Inscrições'] || camposVariaveis['Quantidade de Inscricoes'] || ''),
-            10,
-        );
+        const quantidadeViaCampos = Number.parseInt(String(camposVariaveis['Quantidade de Inscrições'] || camposVariaveis['Quantidade de Inscricoes'] || ''), 10);
         const outrosClientes = Array.isArray(turmaAluno?.outros_clientes) ? turmaAluno.outros_clientes : [];
         const quantidadeViaOutrosClientes = outrosClientes.length + 1;
 
@@ -3206,11 +3197,7 @@ export class DocumentosService {
         return '';
     }
 
-    private obterIdsTurmasResumoHistorico(row: {
-        dados_contrato: unknown;
-        id_turma?: string | number | null;
-        id_turma_destino?: string | number | null;
-    }): number[] {
+    private obterIdsTurmasResumoHistorico(row: { dados_contrato: unknown; id_turma?: string | number | null; id_turma_destino?: string | number | null }): number[] {
         const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
         const candidatos = [
             row.id_turma,
@@ -3221,18 +3208,10 @@ export class DocumentosService {
             dadosContrato?.fluxo_evento_destino_id_turma,
             dadosContrato?.turma?.id,
         ];
-        return Array.from(
-            new Set(
-                candidatos
-                    .map((valor) => Number(valor))
-                    .filter((valor) => Number.isFinite(valor) && valor > 0),
-            ),
-        );
+        return Array.from(new Set(candidatos.map((valor) => Number(valor)).filter((valor) => Number.isFinite(valor) && valor > 0)));
     }
 
-    private async carregarLinhasHistoricoVendas(
-        baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
-    ): Promise<
+    private async carregarLinhasHistoricoVendas(baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>): Promise<
         Array<{
             id: string;
             criado_em?: string | Date | null;
@@ -3375,9 +3354,7 @@ export class DocumentosService {
         const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
         const staffLiderId = String(options?.staff_lider_id || '').trim();
         const linhasAtivas = staffLiderId
-            ? resumoRows.filter(
-                  (row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId,
-              )
+            ? resumoRows.filter((row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId)
             : resumoRows;
 
         const resumoBase = linhasAtivas.reduce(
@@ -3533,19 +3510,9 @@ export class DocumentosService {
                         total_inscricoes: vendedor.totalInscricoes,
                         total_vendas: vendedor.totalVendas,
                     }))
-                    .sort(
-                        (a, b) =>
-                            b.total_inscricoes - a.total_inscricoes ||
-                            b.total_vendas - a.total_vendas ||
-                            a.nome.localeCompare(b.nome, 'pt-BR'),
-                    ),
+                    .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.nome.localeCompare(b.nome, 'pt-BR')),
             }))
-            .sort(
-                (a, b) =>
-                    b.total_inscricoes - a.total_inscricoes ||
-                    b.total_vendas - a.total_vendas ||
-                    a.lider_nome.localeCompare(b.lider_nome, 'pt-BR'),
-            );
+            .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.lider_nome.localeCompare(b.lider_nome, 'pt-BR'));
 
         const vendedoresSemLider = Array.from(mapaSemLider.entries())
             .map(([vendedorId, dados]) => ({
@@ -3554,12 +3521,7 @@ export class DocumentosService {
                 total_inscricoes: dados.totalInscricoes,
                 total_vendas: dados.totalVendas,
             }))
-            .sort(
-                (a, b) =>
-                    b.total_inscricoes - a.total_inscricoes ||
-                    b.total_vendas - a.total_vendas ||
-                    a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR'),
-            );
+            .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR'));
 
         return {
             ...resumoBase,
@@ -3765,9 +3727,7 @@ export class DocumentosService {
                 };
                 if (termoBuscaDigitos.length >= 3) {
                     condicoesBusca.push(`REGEXP_REPLACE(COALESCE(aluno.cpf, ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`);
-                    condicoesBusca.push(
-                        `REGEXP_REPLACE(COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`,
-                    );
+                    condicoesBusca.push(`REGEXP_REPLACE(COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`);
                     parametrosBusca.termoBuscaCpf = `%${termoBuscaDigitos}%`;
                 }
                 baseQb.andWhere(`(${condicoesBusca.join(' OR ')})`, parametrosBusca);
@@ -3835,13 +3795,8 @@ export class DocumentosService {
                 const linhasHistorico = await this.carregarLinhasHistoricoVendas(baseQb);
                 const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(linhasHistorico);
                 const idsOrdenados = linhasHistorico
-                    .filter(
-                        (row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId,
-                    )
-                    .sort(
-                        (a, b) =>
-                            new Date(String(b.criado_em || 0)).getTime() - new Date(String(a.criado_em || 0)).getTime(),
-                    )
+                    .filter((row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId)
+                    .sort((a, b) => new Date(String(b.criado_em || 0)).getTime() - new Date(String(a.criado_em || 0)).getTime())
                     .map((row) => String(row.id));
                 total = idsOrdenados.length;
                 totalPages = Math.max(1, Math.ceil(total / limit));
@@ -3851,10 +3806,7 @@ export class DocumentosService {
                 // origem/destino, treinamentos, etc.) podem multiplicar as linhas e
                 // inflar o getCount(), gerando páginas a mais. COUNT(DISTINCT) garante
                 // o total real de vendas (alinhado ao resumo).
-                const totalRow = await baseQb
-                    .clone()
-                    .select('COUNT(DISTINCT contrato.id)', 'total')
-                    .getRawOne<{ total: string | number }>();
+                const totalRow = await baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>();
                 total = Number(totalRow?.total ?? 0);
                 totalPages = Math.max(1, Math.ceil(total / limit));
                 const idsPaginaRaw = await baseQb

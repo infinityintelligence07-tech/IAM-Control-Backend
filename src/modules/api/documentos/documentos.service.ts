@@ -3752,12 +3752,25 @@ export class DocumentosService {
             }
 
             if (termoBuscaFiltro) {
-                baseQb.andWhere(
-                    `(LOWER(COALESCE(aluno.nome, '')) LIKE :termoBusca OR LOWER(COALESCE(aluno.email, '')) LIKE :termoBusca OR LOWER(COALESCE(contrato.dados_contrato::text, '')) LIKE :termoBusca)`,
-                    {
-                        termoBusca: `%${termoBuscaFiltro}%`,
-                    },
-                );
+                // Busca somente por NOME ou CPF (não varrer todo o JSON do
+                // contrato, que causava resultados incorretos). O CPF é comparado
+                // apenas pelos dígitos, ignorando pontuação em ambos os lados.
+                const termoBuscaDigitos = termoBuscaFiltro.replace(/\D/g, '');
+                const condicoesBusca = [
+                    `LOWER(COALESCE(aluno.nome, '')) LIKE :termoBusca`,
+                    `LOWER(COALESCE(contrato.dados_contrato->'aluno'->>'nome', '')) LIKE :termoBusca`,
+                ];
+                const parametrosBusca: Record<string, string> = {
+                    termoBusca: `%${termoBuscaFiltro}%`,
+                };
+                if (termoBuscaDigitos.length >= 3) {
+                    condicoesBusca.push(`REGEXP_REPLACE(COALESCE(aluno.cpf, ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`);
+                    condicoesBusca.push(
+                        `REGEXP_REPLACE(COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`,
+                    );
+                    parametrosBusca.termoBuscaCpf = `%${termoBuscaDigitos}%`;
+                }
+                baseQb.andWhere(`(${condicoesBusca.join(' OR ')})`, parametrosBusca);
             }
 
             if (somentePendenciaAtivo) {
@@ -3834,7 +3847,15 @@ export class DocumentosService {
                 totalPages = Math.max(1, Math.ceil(total / limit));
                 idsPagina = idsOrdenados.slice(offset, offset + limit);
             } else {
-                total = await baseQb.clone().select('contrato.id').distinct(true).getCount();
+                // Contagem por contrato distinto: os múltiplos LEFT JOINs (turma de
+                // origem/destino, treinamentos, etc.) podem multiplicar as linhas e
+                // inflar o getCount(), gerando páginas a mais. COUNT(DISTINCT) garante
+                // o total real de vendas (alinhado ao resumo).
+                const totalRow = await baseQb
+                    .clone()
+                    .select('COUNT(DISTINCT contrato.id)', 'total')
+                    .getRawOne<{ total: string | number }>();
+                total = Number(totalRow?.total ?? 0);
                 totalPages = Math.max(1, Math.ceil(total / limit));
                 const idsPaginaRaw = await baseQb
                     .clone()
@@ -4024,6 +4045,18 @@ export class DocumentosService {
                         .filter((id) => Number.isFinite(id) && id > 0),
                 ),
             );
+            // Destino salvo no contrato (ex.: Confronto), que pode divergir da turma
+            // de matrícula (turma_aluno.id_turma_fk) usada como fallback.
+            const idsTurmaDestinoViaContrato = Array.from(
+                new Set(
+                    contratos
+                        .map((contrato) => {
+                            const dadosContrato = contrato?.dados_contrato || {};
+                            return Number(dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || 0);
+                        })
+                        .filter((id) => Number.isFinite(id) && id > 0),
+                ),
+            );
             const idsTurmasIprRelacionadas = Array.from(
                 new Set(
                     contratos.flatMap((contrato) => {
@@ -4033,7 +4066,7 @@ export class DocumentosService {
                     }),
                 ),
             );
-            const idsTurmasCacheInicial = Array.from(new Set([...idsTurmaOrigemViaContrato, ...idsTurmasIprRelacionadas]));
+            const idsTurmasCacheInicial = Array.from(new Set([...idsTurmaOrigemViaContrato, ...idsTurmaDestinoViaContrato, ...idsTurmasIprRelacionadas]));
 
             if (idsTurmasCacheInicial.length > 0) {
                 const turmasOrigemViaContrato = await this.uow.turmasRP.find({
@@ -4308,7 +4341,17 @@ export class DocumentosService {
 
                     // Usar treinamento das relations ou dos dados do contrato
                     const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
-                    const turmaDestinoEvento = turmaAluno?.id_turma_fk || null;
+                    let turmaDestinoEvento = turmaAluno?.id_turma_fk || null;
+                    const fluxoEventoDestinoIdViaDadosContrato =
+                        Number(dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || 0) || null;
+                    // Prioridade máxima: respeitar a turma de destino salva no contrato
+                    // (o evento efetivamente vendido, ex.: Confronto), que pode diferir
+                    // da turma de matrícula usada como fallback.
+                    if (fluxoEventoDestinoIdViaDadosContrato && fluxoEventoDestinoIdViaDadosContrato > 0) {
+                        if (cacheTurmaPorId.has(fluxoEventoDestinoIdViaDadosContrato)) {
+                            turmaDestinoEvento = cacheTurmaPorId.get(fluxoEventoDestinoIdViaDadosContrato) || turmaDestinoEvento;
+                        }
+                    }
                     let turmaOrigemEvento = turmaAluno?.id_turma_transferencia_de_fk || null;
                     const idAlunoContrato = Number(turmaAluno?.id_aluno || dadosContrato?.aluno?.id || 0);
                     const idTurmaAlunoContrato = turmaAluno?.id ? String(turmaAluno.id) : null;

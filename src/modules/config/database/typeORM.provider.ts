@@ -89,6 +89,26 @@ export class PostgresSQLProvider {
             }),
         );
 
+        // Banco remoto pode ter quedas transitórias de rede no boot; tenta novamente
+        // antes de derrubar a aplicação em vez de falhar no primeiro timeout.
+        const maxAttempts = parseNumberEnv(process.env.DB_CONNECT_RETRY_ATTEMPTS, 5);
+        const retryDelayMs = parseNumberEnv(process.env.DB_CONNECT_RETRY_DELAY_MS, 3000);
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await dataSource.initialize();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Erro desconhecido';
+                if (attempt >= maxAttempts) {
+                    console.error(`[DB] Falha ao conectar após ${maxAttempts} tentativas: ${message}`);
+                    throw error;
+                }
+                console.warn(`[DB] Tentativa ${attempt}/${maxAttempts} de conexão falhou (${message}). Retentando em ${retryDelayMs}ms...`);
+                await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            }
+        }
+
+        // Inalcançável: o loop sempre retorna ou lança.
         return dataSource.initialize();
     }
 }

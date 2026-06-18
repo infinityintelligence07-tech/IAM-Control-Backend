@@ -3103,6 +3103,35 @@ export class DocumentosService {
         const valoresBonus = contratoMapeado?.dados_contrato?.bonus?.valores_bonus || {};
         const quantidadeInscricoes = this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado);
 
+        // Fonte primária (alinhada ao card de bônus do frontend): a quantidade vem
+        // de "Quantidade de Inscrições do Imersão Prosperar"; com mais de uma turma
+        // (campo costuma vir vazio) soma as quantidades de "Turmas do Imersão Prosperar".
+        const descricaoTurmasIpr = String(
+            camposVariaveis?.['Turmas do Imersão Prosperar'] || camposVariaveis?.['Turmas do Imersao Prosperar'] || camposVariaveis?.['Turmas do IPR'] || '',
+        );
+        const quantidadesPorTurmaIpr = descricaoTurmasIpr
+            .split('|')
+            .map((entrada) => entrada.trim())
+            .filter(Boolean)
+            .map((entrada) => {
+                const parsed = Number.parseInt(entrada.match(/(\d+)\s*inscri[cç][aã]o/i)?.[1] || '', 10);
+                return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+            });
+        const somaQuantidadesIpr = quantidadesPorTurmaIpr.reduce((acc, valor) => acc + valor, 0);
+        const quantidadeViaCampoIpr = Number.parseInt(
+            String(camposVariaveis?.['Quantidade de Inscrições do Imersão Prosperar'] || camposVariaveis?.['Quantidade de Inscricoes do Imersao Prosperar'] || ''),
+            10,
+        );
+        const quantidadeIpr =
+            quantidadesPorTurmaIpr.length > 1
+                ? somaQuantidadesIpr
+                : Number.isFinite(quantidadeViaCampoIpr) && quantidadeViaCampoIpr > 0
+                  ? quantidadeViaCampoIpr
+                  : somaQuantidadesIpr;
+        if (quantidadeIpr > 0) {
+            return quantidadeIpr;
+        }
+
         const quantidadeBonusDiretaKeys = [
             'Quantidade de Inscrições Bônus',
             'Quantidade de Inscrições Bonus',

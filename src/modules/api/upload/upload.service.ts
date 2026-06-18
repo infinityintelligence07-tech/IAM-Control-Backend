@@ -757,7 +757,11 @@ export class UploadService {
         };
     }
 
-    async importarAlunosMasterclassPlanilha(file: Express.Multer.File, confirmar = false): Promise<ImportarAlunosPlanilhaResponse> {
+    async importarAlunosMasterclassPlanilha(
+        file: Express.Multer.File,
+        confirmar = false,
+        options: { restringirDestinoEsteiraLiberty?: boolean } = {},
+    ): Promise<ImportarAlunosPlanilhaResponse> {
         const startedAt = Date.now();
         const alunosChunkSize = 300;
         const vinculosChunkSize = 250;
@@ -775,11 +779,29 @@ export class UploadService {
             throw new BadRequestException('Formato inválido. Envie um arquivo .xls ou .xlsx');
         }
 
-        const rows = this.parseMasterclassXlsxRows(file.buffer);
-        const parsedRows = this.parseMasterclassSpreadsheetRows(rows);
+        // Importação da esteira do Liberty: só aceita alunos cuja turma de destino seja
+        // Imersão de Negócios (IDN) ou Legacy XP. As demais regras (origem, bônus,
+        // inscrições) seguem idênticas à importação de Masterclass e Time de Vendas.
+        const restringirEsteiraLiberty = options.restringirDestinoEsteiraLiberty === true;
+
+        // Na esteira do Liberty, além do modelo padrão da Masterclass, aceitamos a
+        // planilha do Time de Vendas (aba "Implantacao_Liberty_IAMControl"), que usa
+        // colunas próprias (NOME TITULAR CONTRATO, WHATSAPP, SIGLA EVENTOS, etc.).
+        let rows: any[][];
+        let parsedRows: ReturnType<UploadService['parseMasterclassSpreadsheetRows']>;
+        const libertyImplantacaoRows = restringirEsteiraLiberty ? this.parseLibertyImplantacaoXlsxRows(file.buffer) : null;
+        if (libertyImplantacaoRows) {
+            rows = libertyImplantacaoRows;
+            parsedRows = this.parseLibertyImplantacaoRows(libertyImplantacaoRows);
+        } else {
+            rows = this.parseMasterclassXlsxRows(file.buffer);
+            parsedRows = this.parseMasterclassSpreadsheetRows(rows);
+        }
+        void rows;
         const turmaCodigoMap = await this.buildTurmaCodigoMap();
         const turmaConfrontoMap = await this.buildTurmaConfrontoMap();
         const turmaImersaoProsperarMap = await this.buildTurmaImersaoProsperarMap();
+        const turmaEsteiraLibertyMap = restringirEsteiraLiberty ? await this.buildTurmaEsteiraLibertyMap() : null;
         const turmaLookupCache = new Map<
             string,
             {
@@ -863,6 +885,12 @@ export class UploadService {
             if (!turmaDestinoId) {
                 totalSemTurma++;
                 erros.push(`Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" não encontrada`);
+                continue;
+            }
+            if (restringirEsteiraLiberty && turmaEsteiraLibertyMap?.get(turmaDestinoId) !== true) {
+                erros.push(
+                    `Linha ${row.linha}: turma de destino "${row.turmaDestinoCodigo}" não pertence à esteira do Liberty (Imersão de Negócios ou Legacy XP). Importação permitida apenas para turmas de IDN e Legacy XP.`,
+                );
                 continue;
             }
             const isTurmaDestinoConfronto = turmaConfrontoMap.get(turmaDestinoId) === true;
@@ -1672,6 +1700,138 @@ export class UploadService {
         return parsed;
     }
 
+    /**
+     * Lê a planilha do Time de Vendas usada na esteira do Liberty
+     * (aba "Implantacao_Liberty_IAMControl"). Diferente do modelo padrão da
+     * Masterclass, esta planilha tem colunas próprias: NOME TITULAR CONTRATO,
+     * WHATSAPP, E-MAIL, DATA DA VENDA, SIGLA EVENTOS e Nª DOCUMENTO. Retorna
+     * `null` quando a planilha não está nesse formato (para cair no parser padrão).
+     */
+    private parseLibertyImplantacaoXlsxRows(buffer: Buffer): any[][] | null {
+        const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true, raw: false });
+        if (!workbook.SheetNames.length) return null;
+
+        const normalizeSheetName = (sheetName: string) => this.normalizeText(String(sheetName || '')).replace(/[\s./-]/g, '');
+
+        const hasLibertyImplantacaoHeaders = (rows: any[][]): boolean => {
+            if (!rows.length) return false;
+            const header = (rows[0] || []).map((cell) => this.normalizeText(String(cell || '')));
+            const hasSiglaEventos = header.some((h) => h.includes('SIGLA EVENTOS'));
+            const hasTitular = header.some((h) => h.includes('NOME TITULAR') || h.includes('TITULAR CONTRATO'));
+            const hasContato = header.some((h) => h.includes('WHATSAPP') || h === 'E-MAIL' || h === 'EMAIL');
+            return hasSiglaEventos && hasTitular && hasContato;
+        };
+
+        // SIGLA EVENTOS fica na ~19ª coluna; lemos um pouco além para garantir.
+        const getRowsFromSheet = (sheetName: string): any[][] => this.sheetToRowsWithColumnCap(workbook.Sheets[sheetName], 24);
+
+        // 1) tenta a aba pelo nome conhecido da esteira do Liberty.
+        const candidateByName = workbook.SheetNames.find((sheetName) => {
+            const normalized = normalizeSheetName(sheetName);
+            return normalized.includes('IMPLANTACAOLIBERTY') || (normalized.includes('LIBERTY') && normalized.includes('IAMCONTROL'));
+        });
+        if (candidateByName) {
+            const rows = getRowsFromSheet(candidateByName);
+            if (hasLibertyImplantacaoHeaders(rows)) return rows;
+        }
+
+        // 2) fallback: qualquer aba com a estrutura desta planilha (maior volume).
+        let selectedRows: any[][] | null = null;
+        let selectedDataSize = -1;
+        for (const sheetName of workbook.SheetNames) {
+            const rows = getRowsFromSheet(sheetName);
+            if (!hasLibertyImplantacaoHeaders(rows)) continue;
+            const dataSize = Math.max(0, rows.length - 1);
+            if (dataSize > selectedDataSize) {
+                selectedRows = rows;
+                selectedDataSize = dataSize;
+            }
+        }
+
+        return selectedRows;
+    }
+
+    private parseLibertyImplantacaoRows(rows: any[][]): ReturnType<UploadService['parseMasterclassSpreadsheetRows']> {
+        if (rows.length < 2) {
+            throw new BadRequestException('A planilha precisa conter cabeçalho e dados');
+        }
+
+        const headerRow = (rows[0] || []).map((cell) => this.normalizeText(String(cell || '')));
+        const idxDocumento = headerRow.findIndex((h) => h.includes('DOCUMENTO'));
+        const idxDataVenda = headerRow.findIndex((h) => h.includes('DATA DA VENDA'));
+        const idxNome = headerRow.findIndex((h) => h.includes('NOME TITULAR') || h.includes('TITULAR CONTRATO'));
+        const idxTelefone = headerRow.findIndex((h) => h.includes('WHATSAPP') || h.includes('TELEFONE'));
+        const idxEmail = headerRow.findIndex((h) => h === 'E-MAIL' || h === 'EMAIL' || h.includes('E-MAIL'));
+        const idxSiglaEventos = headerRow.findIndex((h) => h.includes('SIGLA EVENTOS'));
+
+        if ([idxNome, idxTelefone, idxEmail, idxSiglaEventos].some((idx) => idx < 0)) {
+            throw new BadRequestException('Modelo de planilha inválido para importação da esteira do Liberty (Time de Vendas)');
+        }
+
+        const parsed: ReturnType<UploadService['parseMasterclassSpreadsheetRows']> = [];
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i] || [];
+            const documento = idxDocumento >= 0 ? String(row[idxDocumento] ?? '').trim() : '';
+            const dataInclusao = idxDataVenda >= 0 ? String(row[idxDataVenda] ?? '').trim() : '';
+            const nome = String(row[idxNome] ?? '').trim();
+            const telefone = String(row[idxTelefone] ?? '').trim();
+            const email = String(row[idxEmail] ?? '').trim();
+            const siglaEventoRaw = String(row[idxSiglaEventos] ?? '').trim();
+            const turmaDestinoCodigo = this.translateEventoSiglaToTurmaCodigo(siglaEventoRaw);
+
+            // Linha vazia ou de placeholder (ex.: "EDIÇÃO SELECIONE") é ignorada.
+            if (!nome && !telefone && !email && !turmaDestinoCodigo) continue;
+            if (!turmaDestinoCodigo) continue;
+
+            parsed.push({
+                linha: i + 1,
+                // Origem segue o Nª DOCUMENTO (TIMEDEVENDAS_*), tratado como Time de Vendas.
+                turmaOrigemCodigo: documento || 'TIME_DE_VENDAS',
+                dataInclusao,
+                nome,
+                cpfCnpj: '',
+                telefone,
+                email,
+                turmaDestinoCodigo,
+                // Cada linha é um titular: 1 inscrição, sem bônus.
+                quantidadeInscricoes: 1,
+                quantidadeBonusTurma: 0,
+                turmaBonusCodigo: '',
+            });
+        }
+
+        return parsed;
+    }
+
+    /**
+     * Converte a SIGLA EVENTOS da planilha do Time de Vendas no código de turma
+     * usado no IAM Control (SIGLA_TREINAMENTO_SIGLA_POLO_EDICAO):
+     *   - IMERSAO_NEGOCIOS_AM_10 => IDN_AM_10
+     *   - LEGACYXP_17 / LEGACY_XP_AM_17 => LXP_17 / LXP_AM_17
+     * A resolução final (com polo/nome alternativos) acontece em
+     * buildCodigoLookupAlternatives.
+     */
+    private translateEventoSiglaToTurmaCodigo(siglaEvento: string): string {
+        const normalized = this.normalizeCodeKey(siglaEvento);
+        if (!normalized) return '';
+        // Placeholders da planilha não representam turma.
+        if (normalized.includes('SELECIONE')) return '';
+        if (normalized.startsWith('IMERSAO_NEGOCIOS')) {
+            return normalized.replace(/^IMERSAO_NEGOCIOS/, 'IDN');
+        }
+        if (normalized.startsWith('LEGACY_XP')) {
+            return normalized.replace(/^LEGACY_XP/, 'LXP');
+        }
+        if (normalized.startsWith('LEGACYXP')) {
+            return normalized.replace(/^LEGACYXP/, 'LXP');
+        }
+        if (normalized.startsWith('LEGACY')) {
+            return normalized.replace(/^LEGACY/, 'LXP');
+        }
+        return normalized;
+    }
+
     private parseDateFromSpreadsheet(value: string): Date | null {
         const raw = (value || '').trim();
         if (!raw) return null;
@@ -2130,11 +2290,52 @@ export class UploadService {
         if (!codigoNormalizado) return [];
 
         const alternatives = new Set<string>([codigoNormalizado]);
-        const parts = codigoNormalizado.split('_').filter(Boolean);
 
-        // Regra de negócio: para IDN sem polo informado, assume AM (ex.: IDN_6 => IDN_AM_6).
-        if (parts.length === 2 && parts[0] === 'IDN') {
-            alternatives.add(`IDN_AM_${parts[1]}`);
+        // Também aceita a SIGLA EVENTOS da planilha do Time de Vendas sem tradução
+        // prévia (IMERSAO_NEGOCIOS_* => IDN_*, LEGACY(XP)_* => LXP_*).
+        if (codigoNormalizado.startsWith('IMERSAO_NEGOCIOS')) {
+            alternatives.add(codigoNormalizado.replace(/^IMERSAO_NEGOCIOS/, 'IDN'));
+        }
+        if (codigoNormalizado.startsWith('LEGACY_XP')) {
+            alternatives.add(codigoNormalizado.replace(/^LEGACY_XP/, 'LXP'));
+        } else if (codigoNormalizado.startsWith('LEGACYXP')) {
+            alternatives.add(codigoNormalizado.replace(/^LEGACYXP/, 'LXP'));
+        } else if (codigoNormalizado.startsWith('LEGACY')) {
+            alternatives.add(codigoNormalizado.replace(/^LEGACY/, 'LXP'));
+        }
+
+        // Expande cada alternativa atual com regras de polo/nome do treinamento.
+        for (const codigo of Array.from(alternatives)) {
+            const parts = codigo.split('_').filter(Boolean);
+
+            // Regra de negócio: para IDN sem polo informado, assume AM (ex.: IDN_6 => IDN_AM_6).
+            if (parts.length === 2 && parts[0] === 'IDN') {
+                alternatives.add(`IDN_AM_${parts[1]}`);
+            }
+
+            // Legacy XP: aceita sigla curta (LXP) e nome completo (LEGACY_XP), com/sem polo AM.
+            if (parts[0] === 'LXP') {
+                alternatives.add(codigo.replace(/^LXP/, 'LEGACY_XP'));
+                if (parts.length === 2) {
+                    alternatives.add(`LXP_AM_${parts[1]}`);
+                    alternatives.add(`LEGACY_XP_AM_${parts[1]}`);
+                }
+            }
+        }
+
+        // Edição com zero à esquerda na planilha (ex.: IDN_AM_07) deve casar com a
+        // turma cadastrada sem zero (IDN_AM_7). Para cada alternativa, gera também a
+        // versão com a última parte numérica sem zeros à esquerda.
+        for (const codigo of Array.from(alternatives)) {
+            const parts = codigo.split('_').filter(Boolean);
+            const ultima = parts[parts.length - 1];
+            if (parts.length >= 2 && /^\d+$/.test(ultima)) {
+                const semZeros = String(Number(ultima));
+                if (semZeros !== ultima) {
+                    parts[parts.length - 1] = semZeros;
+                    alternatives.add(parts.join('_'));
+                }
+            }
         }
 
         return Array.from(alternatives);
@@ -2433,6 +2634,13 @@ export class UploadService {
             if (!siglaTreinamento || !siglaPolo || !edicao) continue;
             const codigo = `${siglaTreinamento}_${siglaPolo}_${edicao}`;
             map.set(codigo, turma.id);
+            // Variante normalizada (espaços => "_", sem acentos), ex.: sigla
+            // "LEGACY XP" gera também a chave "LEGACY_XP_AM_17" para casar com a
+            // resolução por código normalizado.
+            const codigoNormalizado = this.normalizeCodeKey(codigo);
+            if (codigoNormalizado && !map.has(codigoNormalizado)) {
+                map.set(codigoNormalizado, turma.id);
+            }
         }
 
         return map;
@@ -2469,6 +2677,28 @@ export class UploadService {
             const nomeTreinamento = this.normalizeText(turma.id_treinamento_fk?.treinamento || '');
             const ehImersaoProsperar = sigla === 'IPR' || nomeTreinamento.includes('IMERSAO PROSPERAR');
             map.set(turma.id, ehImersaoProsperar);
+        }
+        return map;
+    }
+
+    /**
+     * Marca quais turmas pertencem à esteira do Liberty: Imersão de Negócios (IDN)
+     * e Legacy XP. Usado na importação da esteira do Liberty para aceitar apenas
+     * turmas de destino desses produtos.
+     */
+    private async buildTurmaEsteiraLibertyMap(): Promise<Map<number, boolean>> {
+        const turmas = await this.uow.turmasRP.find({
+            where: { deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+
+        const map = new Map<number, boolean>();
+        for (const turma of turmas) {
+            const sigla = this.normalizeText(turma.id_treinamento_fk?.sigla_treinamento || '');
+            const nomeTreinamento = this.normalizeText(turma.id_treinamento_fk?.treinamento || '');
+            const ehImersaoNegocios = sigla === 'IDN' || sigla.startsWith('IDN') || nomeTreinamento.includes('IMERSAO DE NEGOCIOS');
+            const ehLegacyXp = sigla.includes('LXP') || sigla.includes('LEGACY') || nomeTreinamento.includes('LEGACY');
+            map.set(turma.id, ehImersaoNegocios || ehLegacyXp);
         }
         return map;
     }

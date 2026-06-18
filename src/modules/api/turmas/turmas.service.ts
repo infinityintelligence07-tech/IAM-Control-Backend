@@ -2386,13 +2386,26 @@ export class TurmasService {
 
                 // Determinar ORIGEM e TIPO DE ORIGEM.
                 const origemAluno = ta.origem_aluno || null;
-                const tipo_origem_label = tipoOrigemLabel(origemAluno);
 
                 // Turma de onde o aluno veio (transferência): prioriza FK explícita, senão histórico.
                 const histTransf = historicoTransferenciaByTurmaAluno.get(String(ta.id));
                 const turmaOrigem = ta.id_turma_transferencia_de_fk || histTransf?.id_turma_de_fk || null;
                 const treinamentoOrigem = turmaOrigem?.id_treinamento_fk;
                 const codigoOrigemPlanilha = (ta.codigo_turma_origem_planilha || '').trim().toUpperCase();
+
+                // "Tipo de Origem" do destino. Uma venda — mudança de produto/treinamento
+                // (ex.: IPR -> Confronto) — deve aparecer como "Vendas" e não como
+                // "Transferência". Transferência real é a remarcação entre edições do
+                // MESMO treinamento. Vendas via Time de Vendas (transferência da turma
+                // para ela mesma) já são sinalizadas por isTimeVendas.
+                const idTreinamentoDestino = treinamento?.id ?? null;
+                const idTreinamentoOrigem = treinamentoOrigem?.id ?? null;
+                const isVendaEvento =
+                    origemAluno === EOrigemAlunos.TRANSFERENCIA &&
+                    Boolean(idTreinamentoOrigem) &&
+                    Boolean(idTreinamentoDestino) &&
+                    idTreinamentoOrigem !== idTreinamentoDestino;
+                const tipo_origem_label = isTimeVendas ? 'Vendas do Time de Vendas' : isVendaEvento ? 'Vendas em Eventos' : tipoOrigemLabel(origemAluno);
 
                 let origem_label: string | undefined;
                 let origem_sigla: string | undefined;

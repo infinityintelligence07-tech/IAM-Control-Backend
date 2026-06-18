@@ -71,4 +71,21 @@ export class UploadController {
         const confirmar = String(body?.confirmar || 'false').toLowerCase() === 'true';
         return this.uploadService.importarAlunosMasterclassPlanilha(file, confirmar);
     }
+
+    @UseGuards(JwtAuthGuard)
+    @Post('alunos-liberty-planilha')
+    @UseInterceptors(
+        FileInterceptor('file', {
+            storage: memoryStorage(),
+            limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+        }),
+    )
+    async uploadAlunosLibertyPlanilha(@UploadedFile() file: Express.Multer.File, @Body() body: any): Promise<ImportarAlunosPlanilhaResponse> {
+        if (!file) throw new BadRequestException('Nenhum arquivo enviado');
+
+        const confirmar = String(body?.confirmar || 'false').toLowerCase() === 'true';
+        // Mesma mecânica da importação de Masterclass/Time de Vendas, restringindo o
+        // destino às turmas da esteira do Liberty (Imersão de Negócios e Legacy XP).
+        return this.uploadService.importarAlunosMasterclassPlanilha(file, confirmar, { restringirDestinoEsteiraLiberty: true });
+    }
 }

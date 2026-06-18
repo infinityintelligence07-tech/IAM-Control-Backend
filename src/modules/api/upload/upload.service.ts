@@ -1247,7 +1247,9 @@ export class UploadService {
                         vinculoPersistido.status_aluno_turma = item.statusFinal;
                         vinculoPersistido.origem_aluno = item.origemFinal;
                         vinculoPersistido.id_aluno_bonus = idAlunoBonus;
-                        vinculoPersistido.id_turma_transferencia_de = item.idTurmaTransferenciaDe;
+                        // Ver comentário no create: importação não é transferência; mantém o
+                        // campo nulo (origem do evento fica em codigo_turma_origem_planilha).
+                        vinculoPersistido.id_turma_transferencia_de = null;
                         vinculoPersistido.codigo_turma_origem_planilha = item.codigoTurmaOrigemPlanilha;
                         updatesToSave.push(vinculoPersistido);
                     }
@@ -1332,7 +1334,12 @@ export class UploadService {
                         status_aluno_turma: item.statusFinal,
                         vaga_bonus: isBonus,
                         id_aluno_bonus: idAlunoBonus,
-                        id_turma_transferencia_de: item.idTurmaTransferenciaDe,
+                        // Importação cria ingresso (COMPROU_INGRESSO) / bônus — nunca uma
+                        // transferência entre turmas. A turma de origem do evento fica em
+                        // codigo_turma_origem_planilha e no historico_transferencias_alunos;
+                        // o campo de transferência fica nulo para não "semear" origem errada
+                        // que seria propagada em transferências futuras.
+                        id_turma_transferencia_de: null,
                         codigo_turma_origem_planilha: item.codigoTurmaOrigemPlanilha,
                     });
                 }

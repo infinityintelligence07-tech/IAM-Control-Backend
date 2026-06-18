@@ -548,11 +548,7 @@ export class TurmasService {
         presentes_count: number;
         inadimplentes_count: number;
     }> {
-        const baseQb = () =>
-            this.uow.turmasAlunosRP
-                .createQueryBuilder('ta')
-                .where('ta.id_turma = :id_turma', { id_turma })
-                .andWhere('ta.deletado_em IS NULL');
+        const baseQb = () => this.uow.turmasAlunosRP.createQueryBuilder('ta').where('ta.id_turma = :id_turma', { id_turma }).andWhere('ta.deletado_em IS NULL');
 
         const extrasCondicao = `(
             ta.vaga_bonus = true
@@ -560,14 +556,7 @@ export class TurmasService {
             OR UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) = 'TRANSBORDO'
         )`;
 
-        const [
-            alunos_count,
-            extras_count,
-            confirmados_count,
-            vindos_transferencia_count,
-            presentes_count,
-            inadimplentes_count,
-        ] = await Promise.all([
+        const [alunos_count, extras_count, confirmados_count, vindos_transferencia_count, presentes_count, inadimplentes_count] = await Promise.all([
             baseQb().getCount(),
             baseQb()
                 .andWhere(extrasCondicao, {
@@ -2309,7 +2298,7 @@ export class TurmasService {
                 order: { id: 'DESC' },
             });
             // Venda do Time de Vendas: registrada como "transferência" da turma para ela mesma (de === para).
-            const historicoTimeVendasByTurmaAluno = new Map<string, Date>();
+            const historicoTimeVendasByTurmaAluno = new Map<string, (typeof historicoTransfs)[number]>();
             // Transferência real (de uma turma diferente da de destino) por turma_aluno de destino.
             const historicoTransferenciaByTurmaAluno = new Map<string, (typeof historicoTransfs)[number]>();
             historicoTransfs.forEach((h) => {
@@ -2319,7 +2308,7 @@ export class TurmasService {
                 const key = String(h.id_turma_aluno_para);
                 if (h.id_turma_de === h.id_turma_para) {
                     if (!historicoTimeVendasByTurmaAluno.has(key)) {
-                        historicoTimeVendasByTurmaAluno.set(key, h.criado_em);
+                        historicoTimeVendasByTurmaAluno.set(key, h);
                     }
                 } else if (!historicoTransferenciaByTurmaAluno.has(key)) {
                     historicoTransferenciaByTurmaAluno.set(key, h);
@@ -2342,6 +2331,34 @@ export class TurmasService {
                     turmasDestinoNoShowAuto.add(idTurmaDestino);
                 }
             });
+
+            // Resolve os nomes dos usuários que realizaram cada operação (criado_por),
+            // para exibir "usuário + data" no ícone de detalhe da operação na trilha.
+            const idsUsuariosOperacao = new Set<number>();
+            const coletarUsuarioOperacao = (id?: number | null) => {
+                if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
+                    idsUsuariosOperacao.add(id);
+                }
+            };
+            turmasAluno.forEach((ta) => {
+                const histTransf = historicoTransferenciaByTurmaAluno.get(String(ta.id));
+                const histTimeVendas = historicoTimeVendasByTurmaAluno.get(String(ta.id));
+                coletarUsuarioOperacao(histTimeVendas?.criado_por ?? histTransf?.criado_por ?? ta.criado_por);
+            });
+            masterclassAluno.forEach((mc) => coletarUsuarioOperacao(mc.criado_por));
+            const nomesUsuariosOperacao = new Map<number, string>();
+            if (idsUsuariosOperacao.size > 0) {
+                try {
+                    const usuariosOperacao = await this.uow.usuariosRP
+                        .createQueryBuilder('usuario')
+                        .select(['usuario.id', 'usuario.nome'])
+                        .where('usuario.id IN (:...ids)', { ids: Array.from(idsUsuariosOperacao) })
+                        .getMany();
+                    usuariosOperacao.forEach((usuario) => nomesUsuariosOperacao.set(usuario.id, usuario.nome));
+                } catch (error) {
+                    this.logger.warn(`turma.trilha.get | Falha ao resolver usuários das operações: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+                }
+            }
 
             // Identifica se a turma de origem é uma Masterclass/Palestra.
             const isMasterclassTurma = (turmaOrigem?: { id_treinamento_fk?: any; edicao_turma?: string | null } | null): boolean => {
@@ -2371,12 +2388,47 @@ export class TurmasService {
                 }
             };
 
+            // Turmas de DESTINO que receberam o aluno por uma VENDA (têm contrato de
+            // venda apontando para elas). Isso distingue uma venda (ex.: IPR -> Confronto,
+            // gerada pelo fluxo de vendas, gravada como TRANSFERENCIA) de uma transferência
+            // real (remarcação manual entre turmas, que não gera contrato).
+            const idsTurmasVendaDestino = new Set<number>();
+            try {
+                const contratosVendaAluno = await this.uow.turmasAlunosTreinamentosContratosRP
+                    .createQueryBuilder('contrato')
+                    .innerJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+                    .innerJoin('tat.id_turma_aluno_fk', 'ta')
+                    .select(['contrato.id', 'contrato.dados_contrato', 'tat.id', 'tat.id_turma_destino'])
+                    .where('contrato.deletado_em IS NULL')
+                    .andWhere('ta.id_aluno = :idAluno', { idAluno: String(id_aluno) })
+                    .getMany();
+
+                contratosVendaAluno.forEach((contrato) => {
+                    const idDestinoTat = Number(contrato.id_turma_aluno_treinamento_fk?.id_turma_destino);
+                    if (Number.isInteger(idDestinoTat) && idDestinoTat > 0) {
+                        idsTurmasVendaDestino.add(idDestinoTat);
+                    }
+                    const dados = (contrato.dados_contrato || {}) as Record<string, unknown>;
+                    const idDestinoDados = Number(dados['fluxo_evento_destino_id_turma']);
+                    if (Number.isInteger(idDestinoDados) && idDestinoDados > 0) {
+                        idsTurmasVendaDestino.add(idDestinoDados);
+                    }
+                });
+            } catch (error) {
+                this.logger.warn(`turma.trilha.get | Falha ao identificar vendas por contrato: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+            }
+
             const trilhaTurmas = turmasAluno.map((ta) => {
                 const turma = ta.id_turma_fk;
                 const treinamento = turma?.id_treinamento_fk;
                 const polo = turma?.id_polo_fk;
                 const origemTimeVendasData = historicoTimeVendasByTurmaAluno.get(String(ta.id));
                 const isTimeVendas = Boolean(origemTimeVendasData);
+                const histTransfRegistro = historicoTransferenciaByTurmaAluno.get(String(ta.id));
+                // Data e usuário da OPERAÇÃO que originou o registro (transferência/venda/criação).
+                const operacao_em = origemTimeVendasData?.criado_em || histTransfRegistro?.criado_em || ta.criado_em;
+                const operacao_por_id = origemTimeVendasData?.criado_por ?? histTransfRegistro?.criado_por ?? ta.criado_por ?? null;
+                const operacao_por_nome = operacao_por_id ? nomesUsuariosOperacao.get(operacao_por_id) || null : null;
 
                 // Destino = a própria turma do vínculo.
                 const localParts: string[] = [];
@@ -2393,18 +2445,12 @@ export class TurmasService {
                 const treinamentoOrigem = turmaOrigem?.id_treinamento_fk;
                 const codigoOrigemPlanilha = (ta.codigo_turma_origem_planilha || '').trim().toUpperCase();
 
-                // "Tipo de Origem" do destino. Uma venda — mudança de produto/treinamento
-                // (ex.: IPR -> Confronto) — deve aparecer como "Vendas" e não como
-                // "Transferência". Transferência real é a remarcação entre edições do
-                // MESMO treinamento. Vendas via Time de Vendas (transferência da turma
-                // para ela mesma) já são sinalizadas por isTimeVendas.
-                const idTreinamentoDestino = treinamento?.id ?? null;
-                const idTreinamentoOrigem = treinamentoOrigem?.id ?? null;
-                const isVendaEvento =
-                    origemAluno === EOrigemAlunos.TRANSFERENCIA &&
-                    Boolean(idTreinamentoOrigem) &&
-                    Boolean(idTreinamentoDestino) &&
-                    idTreinamentoOrigem !== idTreinamentoDestino;
+                // "Tipo de Origem" do destino. Uma VENDA (ex.: IPR -> Confronto) é gravada
+                // como TRANSFERENCIA, mas possui um contrato de venda apontando para a turma
+                // de destino — nesse caso o rótulo deve ser "Vendas em Eventos". Já uma
+                // transferência real (remarcação manual, sem contrato) permanece como
+                // "Transferência". Vendas via Time de Vendas já são sinalizadas por isTimeVendas.
+                const isVendaEvento = origemAluno === EOrigemAlunos.TRANSFERENCIA && Boolean(turma?.id) && idsTurmasVendaDestino.has(turma.id);
                 const tipo_origem_label = isTimeVendas ? 'Vendas do Time de Vendas' : isVendaEvento ? 'Vendas em Eventos' : tipoOrigemLabel(origemAluno);
 
                 let origem_label: string | undefined;
@@ -2446,7 +2492,9 @@ export class TurmasService {
                     id_turma_aluno: ta.id,
                     status_aluno_turma: ta.status_aluno_turma || null,
                     presenca_turma: ta.presenca_turma || null,
-                    criado_em: origemTimeVendasData || histTransf?.criado_em || ta.criado_em,
+                    criado_em: operacao_em,
+                    operacao_em,
+                    operacao_por_nome,
                     tipo: determinarTipo(treinamento),
                     origem_label,
                     origem_sigla,
@@ -2531,6 +2579,8 @@ export class TurmasService {
                     status_aluno_turma: mc.presente ? 'PRESENTE' : null,
                     presenca_turma: mc.presente ? 'PRESENTE' : null,
                     criado_em: mc.criado_em,
+                    operacao_em: mc.criado_em,
+                    operacao_por_nome: mc.criado_por ? nomesUsuariosOperacao.get(mc.criado_por) || null : null,
                     tipo,
                     turma: {
                         id: turma?.id || 0,
@@ -2551,8 +2601,10 @@ export class TurmasService {
                 };
             });
 
-            // Combinar e ordenar por data de criação (mais recente primeiro)
-            const trilhaCompleta = [...trilhaTurmas, ...trilhaMasterclassUnicas].sort((a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime());
+            // Combinar e ordenar pela ordem de registro da operação (mais antigo primeiro / crescente).
+            const trilhaCompleta = [...trilhaTurmas, ...trilhaMasterclassUnicas].sort(
+                (a, b) => new Date(a.operacao_em || a.criado_em).getTime() - new Date(b.operacao_em || b.criado_em).getTime(),
+            );
 
             return trilhaCompleta;
         } catch (error) {
@@ -3213,67 +3265,67 @@ export class TurmasService {
             const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => {
                 const formasAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
                 const veioPorBoleto = formasAluno.includes(EFormasPagamento.BOLETO);
-                const acessor = turmaAluno.id_acessor_fk
-                    ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome }
-                    : null;
-                return ({
-                id: turmaAluno.id,
-                id_turma: turmaAluno.id_turma,
-                id_aluno: turmaAluno.id_aluno,
-                nome_cracha: turmaAluno.nome_cracha,
-                numero_cracha: turmaAluno.numero_cracha,
-                vaga_bonus: turmaAluno.vaga_bonus,
-                origem_aluno: turmaAluno.origem_aluno ?? undefined,
-                origem_canal_ingresso:
-                    turmaAluno.origem_aluno === EOrigemAlunos.COMPROU_INGRESSO ? canalIngressoPorTurmaAlunoId.get(turmaAluno.id) || 'DEMAIS_IMPORTACAO' : undefined,
-                status_aluno_turma: turmaAluno.status_aluno_turma,
-                confirmacao_realizada: turmaAluno.confirmacao_realizada,
-                checkin_realizado: turmaAluno.checkin_realizado,
-                presenca_turma: turmaAluno.presenca_turma,
-                data_inicio_mentoria: datasMentoriaPorTurmaAluno.get(turmaAluno.id)?.inicio ?? null,
-                data_fim_mentoria: datasMentoriaPorTurmaAluno.get(turmaAluno.id)?.fim ?? null,
-                url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
-                pendencia_pagamento: turmaAluno.pendencia_pagamento ?? undefined,
-                quantidade_inscricoes: turmaAluno.quantidade_inscricoes ?? 1,
-                outros_clientes: turmaAluno.outros_clientes ?? [],
-                contrato_duplo: (turmaAluno.quantidade_inscricoes ?? 1) > 1,
-                tem_comprovante_pagamento: Boolean(turmaAluno.url_comprovante_pgto?.trim()),
-                forma_pagamento: this.formatarFormaPagamentoLabel(formasAluno),
-                formas_pagamento: formasAluno,
-                veio_por_boleto: veioPorBoleto,
-                id_acessor: turmaAluno.id_acessor ?? null,
-                acessor,
-                created_at: turmaAluno.criado_em,
-                transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
-                transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
-                aluno: turmaAluno.id_aluno_fk
-                    ? {
-                          id: turmaAluno.id_aluno_fk.id,
-                          nome: turmaAluno.id_aluno_fk.nome,
-                          email: turmaAluno.id_aluno_fk.email,
-                          telefone: turmaAluno.id_aluno_fk.telefone_um,
-                          telefone_um: turmaAluno.id_aluno_fk.telefone_um,
-                          telefone_dois: turmaAluno.id_aluno_fk.telefone_dois,
-                          nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
-                          cpf: turmaAluno.id_aluno_fk.cpf,
-                          instagram: turmaAluno.id_aluno_fk.instagram,
-                          cep: turmaAluno.id_aluno_fk.cep,
-                          logradouro: turmaAluno.id_aluno_fk.logradouro,
-                          complemento: turmaAluno.id_aluno_fk.complemento,
-                          numero: turmaAluno.id_aluno_fk.numero,
-                          bairro: turmaAluno.id_aluno_fk.bairro,
-                          cidade: turmaAluno.id_aluno_fk.cidade,
-                          estado: turmaAluno.id_aluno_fk.estado,
-                          profissao: turmaAluno.id_aluno_fk.profissao,
-                          genero: turmaAluno.id_aluno_fk.genero,
-                          data_nascimento: turmaAluno.id_aluno_fk.data_nascimento,
-                          status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
-                          possui_deficiencia: turmaAluno.id_aluno_fk.possui_deficiencia,
-                          desc_deficiencia: turmaAluno.id_aluno_fk.desc_deficiencia,
-                      }
-                    : undefined,
-                ficha_preenchida: this.isFichaPreenchida(turmaAluno.id_aluno_fk),
-            });
+                const acessor = turmaAluno.id_acessor_fk ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome } : null;
+                return {
+                    id: turmaAluno.id,
+                    id_turma: turmaAluno.id_turma,
+                    id_aluno: turmaAluno.id_aluno,
+                    nome_cracha: turmaAluno.nome_cracha,
+                    numero_cracha: turmaAluno.numero_cracha,
+                    vaga_bonus: turmaAluno.vaga_bonus,
+                    origem_aluno: turmaAluno.origem_aluno ?? undefined,
+                    origem_canal_ingresso:
+                        turmaAluno.origem_aluno === EOrigemAlunos.COMPROU_INGRESSO
+                            ? canalIngressoPorTurmaAlunoId.get(turmaAluno.id) || 'DEMAIS_IMPORTACAO'
+                            : undefined,
+                    status_aluno_turma: turmaAluno.status_aluno_turma,
+                    confirmacao_realizada: turmaAluno.confirmacao_realizada,
+                    checkin_realizado: turmaAluno.checkin_realizado,
+                    presenca_turma: turmaAluno.presenca_turma,
+                    data_inicio_mentoria: datasMentoriaPorTurmaAluno.get(turmaAluno.id)?.inicio ?? null,
+                    data_fim_mentoria: datasMentoriaPorTurmaAluno.get(turmaAluno.id)?.fim ?? null,
+                    url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
+                    pendencia_pagamento: turmaAluno.pendencia_pagamento ?? undefined,
+                    quantidade_inscricoes: turmaAluno.quantidade_inscricoes ?? 1,
+                    outros_clientes: turmaAluno.outros_clientes ?? [],
+                    contrato_duplo: (turmaAluno.quantidade_inscricoes ?? 1) > 1,
+                    tem_comprovante_pagamento: Boolean(turmaAluno.url_comprovante_pgto?.trim()),
+                    forma_pagamento: this.formatarFormaPagamentoLabel(formasAluno),
+                    formas_pagamento: formasAluno,
+                    veio_por_boleto: veioPorBoleto,
+                    id_acessor: turmaAluno.id_acessor ?? null,
+                    acessor,
+                    created_at: turmaAluno.criado_em,
+                    transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
+                    transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
+                    aluno: turmaAluno.id_aluno_fk
+                        ? {
+                              id: turmaAluno.id_aluno_fk.id,
+                              nome: turmaAluno.id_aluno_fk.nome,
+                              email: turmaAluno.id_aluno_fk.email,
+                              telefone: turmaAluno.id_aluno_fk.telefone_um,
+                              telefone_um: turmaAluno.id_aluno_fk.telefone_um,
+                              telefone_dois: turmaAluno.id_aluno_fk.telefone_dois,
+                              nome_cracha: turmaAluno.id_aluno_fk.nome_cracha,
+                              cpf: turmaAluno.id_aluno_fk.cpf,
+                              instagram: turmaAluno.id_aluno_fk.instagram,
+                              cep: turmaAluno.id_aluno_fk.cep,
+                              logradouro: turmaAluno.id_aluno_fk.logradouro,
+                              complemento: turmaAluno.id_aluno_fk.complemento,
+                              numero: turmaAluno.id_aluno_fk.numero,
+                              bairro: turmaAluno.id_aluno_fk.bairro,
+                              cidade: turmaAluno.id_aluno_fk.cidade,
+                              estado: turmaAluno.id_aluno_fk.estado,
+                              profissao: turmaAluno.id_aluno_fk.profissao,
+                              genero: turmaAluno.id_aluno_fk.genero,
+                              data_nascimento: turmaAluno.id_aluno_fk.data_nascimento,
+                              status_aluno_geral: turmaAluno.id_aluno_fk.status_aluno_geral,
+                              possui_deficiencia: turmaAluno.id_aluno_fk.possui_deficiencia,
+                              desc_deficiencia: turmaAluno.id_aluno_fk.desc_deficiencia,
+                          }
+                        : undefined,
+                    ficha_preenchida: this.isFichaPreenchida(turmaAluno.id_aluno_fk),
+                };
             });
 
             const totalPages = Math.ceil(total / limit);
@@ -3336,10 +3388,7 @@ export class TurmasService {
                 numero_cracha: turmaAluno.numero_cracha ?? '',
                 status_aluno_turma: turmaAluno.status_aluno_turma ?? undefined,
                 origem_aluno: turmaAluno.origem_aluno ?? undefined,
-                created_at:
-                    turmaAluno.criado_em instanceof Date
-                        ? turmaAluno.criado_em.toISOString()
-                        : String(turmaAluno.criado_em ?? ''),
+                created_at: turmaAluno.criado_em instanceof Date ? turmaAluno.criado_em.toISOString() : String(turmaAluno.criado_em ?? ''),
             }));
 
             return { data, total: data.length };
@@ -3710,14 +3759,16 @@ export class TurmasService {
             where: { id_turma: id_turma_destino, id_aluno: turmaAlunoOrigem.id_aluno, deletado_em: null },
         });
         const nomeCracha = turmaAlunoOrigem.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome || 'Aluno';
-        // Preserva a primeira turma de origem ao longo de múltiplas transferências.
-        const idTurmaOrigemHistorica = turmaAlunoOrigem.id_turma_transferencia_de ?? turmaOrigem.id;
+        // Registra a turma de origem IMEDIATA desta transferência (e não a "primeira da
+        // cadeia"). Assim, "transferido/recebido de" reflete o salto real. A trilha completa
+        // de saltos continua disponível em historico_transferencias_alunos.
+        const idTurmaOrigemImediata = turmaOrigem.id;
 
         let turmaAlunoDestinoSalvo: any;
         if (jaNaTurmaDestino) {
             // Se já existir vínculo na turma destino, reaproveita-o e marca como vindo de transferência.
             jaNaTurmaDestino.origem_aluno = EOrigemAlunos.TRANSFERENCIA;
-            jaNaTurmaDestino.id_turma_transferencia_de = jaNaTurmaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
+            jaNaTurmaDestino.id_turma_transferencia_de = idTurmaOrigemImediata;
             jaNaTurmaDestino.nome_cracha = jaNaTurmaDestino.nome_cracha || nomeCracha;
             jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             jaNaTurmaDestino.confirmacao_realizada = false;
@@ -3735,7 +3786,7 @@ export class TurmasService {
                 status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
                 confirmacao_realizada: false,
                 checkin_realizado: false,
-                id_turma_transferencia_de: idTurmaOrigemHistorica,
+                id_turma_transferencia_de: idTurmaOrigemImediata,
             });
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
         }
@@ -4160,7 +4211,8 @@ export class TurmasService {
             throw new NotFoundException('Turma de origem não encontrada');
         }
 
-        const idTurmaOrigemHistorica = turmaAlunoOrigem.id_turma_transferencia_de ?? turmaOrigem.id;
+        // Turma de origem imediata (não a primeira da cadeia) — ver transferirAluno.
+        const idTurmaOrigemImediata = turmaOrigem.id;
         const existenteNaCancelada = await this.uow.turmasAlunosRP.findOne({
             where: {
                 id_turma: turmaCancelada.id,
@@ -4189,14 +4241,14 @@ export class TurmasService {
                 outros_clientes: turmaAlunoOrigem.outros_clientes ?? [],
                 comprovante_pagamento_base64: turmaAlunoOrigem.comprovante_pagamento_base64,
                 url_comprovante_pgto: turmaAlunoOrigem.url_comprovante_pgto,
-                id_turma_transferencia_de: idTurmaOrigemHistorica,
+                id_turma_transferencia_de: idTurmaOrigemImediata,
             });
         } else {
             matriculaDestino.status_aluno_turma = EStatusAlunosTurmas.CANCELADO;
             matriculaDestino.confirmacao_realizada = false;
             matriculaDestino.checkin_realizado = false;
             matriculaDestino.presenca_turma = null;
-            matriculaDestino.id_turma_transferencia_de = matriculaDestino.id_turma_transferencia_de ?? idTurmaOrigemHistorica;
+            matriculaDestino.id_turma_transferencia_de = idTurmaOrigemImediata;
         }
         matriculaDestino = await this.uow.turmasAlunosRP.save(matriculaDestino);
 

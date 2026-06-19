@@ -668,6 +668,10 @@ export class AlunoTurmaResponseDto {
     origem_aluno?: string;
     /** Distinção de canal para origem COMPROU_INGRESSO */
     origem_canal_ingresso?: 'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO';
+    /** Canal reclassificado (MESMA regra do dashboard e da planilha): Bônus, Cortesia/Sorteio, Transferência, Masterclass, Time de Vendas, Transbordo, Liberty, Demais Vendas. */
+    canal?: string;
+    /** Categoria do dashboard: 'Extra' ou 'Compra de Ingresso'. */
+    categoria?: string;
     status_aluno_turma?: string;
     confirmacao_realizada?: boolean;
     checkin_realizado?: boolean;
@@ -852,10 +856,14 @@ export class AlunosTurmaListResponseDto {
     totalPages: number;
 }
 
-/** Campos mínimos para exportação XLSX (sem comprovantes, transferências ou canal de ingresso). */
+/** Campos mínimos para exportação XLSX (sem comprovantes ou transferências); inclui canal/categoria do dashboard. */
 export class AlunoTurmaExportItemDto {
     nome: string;
     email: string;
+    /** Canal reclassificado (mesma regra do dashboard): Bônus, Cortesia/Sorteio, Transferência, Masterclass, Time de Vendas, Transbordo, Liberty, Demais Vendas. */
+    canal?: string;
+    /** Categoria do dashboard: 'Extra' ou 'Compra de Ingresso'. */
+    categoria?: string;
     telefone_um?: string;
     telefone_dois?: string;
     nome_cracha?: string;

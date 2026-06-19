@@ -3380,6 +3380,8 @@ export class TurmasService {
             const formasPagamentoPorTurmaAlunoId = await this.resolverFormasPagamentoPorTurmaAluno(id_turma, turmaAlunoIds);
             // Acessor efetivo (carrega junto nas transferências quando a matrícula atual não tem o próprio).
             const acessorPorTurmaAlunoId = await this.resolverAcessorPorTurmaAluno(id_turma, turmaAlunoIds);
+            // Canal/categoria reclassificados (MESMA regra do dashboard e da planilha), para a lista exibir igual.
+            const classificacaoPorTurmaAlunoId = await this.getClassificacaoOrigemPorTurmaAluno(id_turma, turmaAlunoIds);
 
             const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => {
                 const formasAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
@@ -3398,6 +3400,8 @@ export class TurmasService {
                         turmaAluno.origem_aluno === EOrigemAlunos.COMPROU_INGRESSO
                             ? canalIngressoPorTurmaAlunoId.get(turmaAluno.id) || 'DEMAIS_IMPORTACAO'
                             : undefined,
+                    canal: classificacaoPorTurmaAlunoId.get(turmaAluno.id)?.canal,
+                    categoria: classificacaoPorTurmaAlunoId.get(turmaAluno.id)?.categoria,
                     status_aluno_turma: turmaAluno.status_aluno_turma,
                     confirmacao_realizada: turmaAluno.confirmacao_realizada,
                     checkin_realizado: turmaAluno.checkin_realizado,
@@ -3466,7 +3470,112 @@ export class TurmasService {
         }
     }
 
-    /** Listagem enxuta para exportação XLSX — uma query, sem comprovantes base64 nem subqueries de canal. */
+    /**
+     * Classifica cada aluno da turma no MESMO canal usado pelo dashboard (buckets mutuamente
+     * exclusivos por prioridade), retornando o rótulo do canal e a categoria (Extra/Compra de ingresso).
+     * Espelha exatamente a partição de `getTurmaStatusResumo` (bônus > cortesia/sorteio > time de vendas
+     * > transbordo > liberty > masterclass > transferência > demais). TRANSBORDO/LIBERTY = compra de ingresso.
+     */
+    private async getClassificacaoOrigemPorTurmaAluno(id_turma: number, turmaAlunoIds?: string[]): Promise<Map<string, { canal: string; categoria: string }>> {
+        const isTruthyPgBool = (v: unknown): boolean => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
+        const labelPorBucket: Record<string, string> = {
+            bonus: 'Bônus',
+            cortesia_sorteio: 'Cortesia/Sorteio',
+            transferencia: 'Transferência',
+            masterclass: 'Masterclass',
+            time_vendas: 'Time de Vendas',
+            transbordo: 'Transbordo',
+            liberty: 'Liberty',
+            importacao: 'Demais Vendas',
+        };
+        // Espelha o card de Extras do dashboard: extras = bônus + cortesia/sorteio + transferência.
+        const bucketsExtra = new Set(['bonus', 'cortesia_sorteio', 'transferencia']);
+
+        if (turmaAlunoIds && turmaAlunoIds.length === 0) {
+            return new Map();
+        }
+
+        const qb = this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .select('ta.id', 'id')
+            .addSelect('ta.origem_aluno', 'origem_aluno')
+            .addSelect('ta.vaga_bonus', 'vaga_bonus')
+            .addSelect('ta.codigo_turma_origem_planilha', 'codigo')
+            .addSelect(
+                `(EXISTS (
+                    SELECT 1 FROM historico_transferencias_alunos h
+                    WHERE h.id_turma_aluno_para = ta.id
+                      AND h.id_turma_para = :id_turma AND h.id_turma_de = :id_turma
+                      AND h.deletado_em IS NULL
+                ))`,
+                'hist_time_vendas',
+            )
+            .addSelect(
+                `(
+                    COALESCE((
+                        SELECT ((tr.tipo_palestra = true OR tr.tipo_treinamento = false)
+                                OR (t_de.edicao_turma IS NOT NULL AND LEFT(UPPER(TRIM(t_de.edicao_turma)), 3) = 'MC_'))
+                        FROM historico_transferencias_alunos h
+                        INNER JOIN turmas t_de ON t_de.id = h.id_turma_de
+                        INNER JOIN treinamentos tr ON tr.id = t_de.id_treinamento
+                        WHERE h.id_turma_aluno_para = ta.id AND h.id_turma_para = :id_turma
+                          AND h.id_turma_de <> :id_turma AND h.deletado_em IS NULL
+                        ORDER BY h.id DESC LIMIT 1
+                    ), false)
+                    OR (
+                        ta.id_turma_transferencia_de IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM turmas t_td
+                            INNER JOIN treinamentos tr_td ON tr_td.id = t_td.id_treinamento
+                            WHERE t_td.id = ta.id_turma_transferencia_de AND t_td.deletado_em IS NULL
+                              AND (tr_td.tipo_palestra = true OR tr_td.tipo_treinamento = false
+                                   OR (t_td.edicao_turma IS NOT NULL AND LEFT(UPPER(TRIM(t_td.edicao_turma)), 3) = 'MC_'))
+                        )
+                    )
+                    OR (ta.codigo_turma_origem_planilha IS NOT NULL AND LEFT(UPPER(TRIM(ta.codigo_turma_origem_planilha)), 3) = 'MC_')
+                )`,
+                'origem_eh_mc',
+            )
+            .where('ta.id_turma = :id_turma', { id_turma })
+            .andWhere('ta.deletado_em IS NULL')
+            .setParameter('id_turma', id_turma);
+
+        if (turmaAlunoIds && turmaAlunoIds.length > 0) {
+            qb.andWhere('ta.id IN (:...turmaAlunoIds)', { turmaAlunoIds });
+        }
+
+        const rows = await qb.getRawMany();
+
+        const mapa = new Map<string, { canal: string; categoria: string }>();
+        for (const row of rows) {
+            const origemAluno = Object.values(EOrigemAlunos).includes(row.origem_aluno as EOrigemAlunos) ? (row.origem_aluno as EOrigemAlunos) : null;
+            const vagaBonus = Boolean(row.vaga_bonus);
+            const codigo = String(row.codigo || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim()
+                .toUpperCase();
+            const histTimeVendas = isTruthyPgBool(row.hist_time_vendas);
+            const origemEhMc = isTruthyPgBool(row.origem_eh_mc);
+
+            let bucket = 'importacao';
+            if (vagaBonus || origemAluno === EOrigemAlunos.ALUNO_BONUS) bucket = 'bonus';
+            else if (origemAluno === EOrigemAlunos.CORTESIA || origemAluno === EOrigemAlunos.SORTEIO) bucket = 'cortesia_sorteio';
+            else if (histTimeVendas) bucket = 'time_vendas';
+            else if (codigo === 'TRANSBORDO') bucket = 'transbordo';
+            else if (codigo === 'LIBERTY') bucket = 'liberty';
+            else if (origemEhMc) bucket = 'masterclass';
+            else if (origemAluno === EOrigemAlunos.TRANSFERENCIA) bucket = 'transferencia';
+
+            mapa.set(String(row.id), {
+                canal: labelPorBucket[bucket] ?? 'Demais Vendas',
+                categoria: bucketsExtra.has(bucket) ? 'Extra' : 'Compra de Ingresso',
+            });
+        }
+        return mapa;
+    }
+
+    /** Listagem enxuta para exportação XLSX — sem comprovantes base64; inclui canal/categoria do dashboard. */
     async getAlunosTurmaExport(id_turma: number): Promise<AlunosTurmaExportResponseDto> {
         try {
             const turma = await this.uow.turmasRP.findOne({
@@ -3499,17 +3608,25 @@ export class TurmasService {
                 order: { criado_em: 'DESC' },
             });
 
-            const data = turmasAlunos.map((turmaAluno) => ({
-                nome: turmaAluno.id_aluno_fk?.nome ?? '',
-                email: turmaAluno.id_aluno_fk?.email ?? '',
-                telefone_um: turmaAluno.id_aluno_fk?.telefone_um ?? undefined,
-                telefone_dois: turmaAluno.id_aluno_fk?.telefone_dois ?? undefined,
-                nome_cracha: turmaAluno.nome_cracha ?? '',
-                numero_cracha: turmaAluno.numero_cracha ?? '',
-                status_aluno_turma: turmaAluno.status_aluno_turma ?? undefined,
-                origem_aluno: turmaAluno.origem_aluno ?? undefined,
-                created_at: turmaAluno.criado_em instanceof Date ? turmaAluno.criado_em.toISOString() : String(turmaAluno.criado_em ?? ''),
-            }));
+            // Canal/categoria reclassificados (mesma regra do dashboard) para os totais da planilha baterem com os indicadores.
+            const classificacao = await this.getClassificacaoOrigemPorTurmaAluno(id_turma);
+
+            const data = turmasAlunos.map((turmaAluno) => {
+                const classe = classificacao.get(String(turmaAluno.id));
+                return {
+                    nome: turmaAluno.id_aluno_fk?.nome ?? '',
+                    email: turmaAluno.id_aluno_fk?.email ?? '',
+                    telefone_um: turmaAluno.id_aluno_fk?.telefone_um ?? undefined,
+                    telefone_dois: turmaAluno.id_aluno_fk?.telefone_dois ?? undefined,
+                    nome_cracha: turmaAluno.nome_cracha ?? '',
+                    numero_cracha: turmaAluno.numero_cracha ?? '',
+                    status_aluno_turma: turmaAluno.status_aluno_turma ?? undefined,
+                    origem_aluno: turmaAluno.origem_aluno ?? undefined,
+                    canal: classe?.canal ?? 'Demais Vendas',
+                    categoria: classe?.categoria ?? 'Compra de Ingresso',
+                    created_at: turmaAluno.criado_em instanceof Date ? turmaAluno.criado_em.toISOString() : String(turmaAluno.criado_em ?? ''),
+                };
+            });
 
             return { data, total: data.length };
         } catch (error) {

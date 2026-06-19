@@ -263,6 +263,17 @@ export class DocumentosController {
         });
     }
 
+    @Post('public/contratos-banco/:id/sincronizar-bonus-ipr')
+    sincronizarBonusIprContratoHistorico(
+        @Param('id') id: string,
+        @Body()
+        body: {
+            linhas?: Array<{ id_turma: number; quantidade: number; edicao_turma?: string }>;
+        },
+    ) {
+        return this.documentosService.sincronizarBonusIprCamposContratoHistorico(id, body?.linhas || []);
+    }
+
     @Post('admin/cache/historico/clear')
     @UseGuards(JwtAuthGuard)
     limparCachesHistorico() {

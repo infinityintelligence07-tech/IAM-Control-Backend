@@ -2797,6 +2797,46 @@ export class DocumentosService {
         };
     }
 
+    async sincronizarBonusIprCamposContratoHistorico(
+        contratoId: string,
+        linhas: Array<{ id_turma: number; quantidade: number; edicao_turma?: string }>,
+    ): Promise<{ atualizado: boolean }> {
+        const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+            where: { id: contratoId, deletado_em: IsNull() },
+        });
+        if (!contrato) {
+            throw new NotFoundException('Contrato não encontrado');
+        }
+
+        const dadosContrato = { ...(contrato.dados_contrato || {}) };
+        const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
+        const linhasValidas = linhas.filter((linha) => linha.id_turma > 0 && linha.quantidade > 0);
+        const total = linhasValidas.reduce((acc, linha) => acc + linha.quantidade, 0);
+
+        if (total <= 0) {
+            delete camposVariaveis['Quantidade de Inscrições do Imersão Prosperar'];
+            delete camposVariaveis['Quantidade de Inscricoes do Imersao Prosperar'];
+            delete camposVariaveis['Turmas do Imersão Prosperar'];
+            delete camposVariaveis['Turmas do Imersao Prosperar'];
+            delete camposVariaveis['Turmas do IPR'];
+        } else {
+            camposVariaveis['Quantidade de Inscrições do Imersão Prosperar'] = String(total);
+            const partes = linhasValidas.map(
+                (linha, index) =>
+                    `Turma ${index + 1}: ${String(linha.edicao_turma || '').trim()} (${linha.quantidade} inscrição(ões))`,
+            );
+            camposVariaveis['Turmas do Imersão Prosperar'] = partes.join('|');
+        }
+
+        dadosContrato.campos_variaveis = camposVariaveis;
+        await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
+            dados_contrato: dadosContrato,
+        });
+        this.contratosBancoCache.clear();
+
+        return { atualizado: true };
+    }
+
     private async obterMarcadorAtualizacaoHistorico(): Promise<string> {
         const [contratoRaw, turmaAlunoRaw] = await Promise.all([
             this.uow.turmasAlunosTreinamentosContratosRP
@@ -3130,6 +3170,13 @@ export class DocumentosService {
                   : somaQuantidadesIpr;
         if (quantidadeIpr > 0) {
             return quantidadeIpr;
+        }
+
+        const bonusMatriculasQuantidade = Number(
+            (contratoMapeado as { bonus_ipr_inscricoes_quantidade?: number }).bonus_ipr_inscricoes_quantidade || 0,
+        );
+        if (bonusMatriculasQuantidade > 0) {
+            return bonusMatriculasQuantidade;
         }
 
         const quantidadeBonusDiretaKeys = [
@@ -4008,6 +4055,7 @@ export class DocumentosService {
             const cacheTurmaPorId = new Map<number, Turmas | null>();
             const cacheTurmaOrigemPorTurmaAluno = new Map<string, Turmas | null>();
             const cacheTurmaOrigemIprPorAluno = new Map<number, Turmas | null>();
+            const cacheBonusIprPorComprador = new Map<number, { quantidade: number; descricao: string }>();
             const fallbackContextoPorContratoId = new Map<
                 string,
                 {
@@ -4280,6 +4328,64 @@ export class DocumentosService {
                     const idsSemIpr = idsAlunoIpr.filter((idAluno) => !cacheTurmaOrigemIprPorAluno.has(idAluno));
                     await preencherCacheIpr(true, idsSemIpr);
                 }
+
+                if (idsAlunoIpr.length > 0) {
+                    const idsCompradorBonus = idsAlunoIpr.map((id) => String(id));
+                    const bonusMatriculasIpr = await this.uow.turmasAlunosRP
+                        .createQueryBuilder('turma_aluno_bonus')
+                        .leftJoinAndSelect('turma_aluno_bonus.id_turma_fk', 'turma_bonus')
+                        .leftJoinAndSelect('turma_bonus.id_treinamento_fk', 'treinamento_bonus')
+                        .where('turma_aluno_bonus.id_aluno_bonus IN (:...idsCompradorBonus)', {
+                            idsCompradorBonus,
+                        })
+                        .andWhere('turma_aluno_bonus.origem_aluno = :origemBonus', {
+                            origemBonus: EOrigemAlunos.ALUNO_BONUS,
+                        })
+                        .andWhere('turma_aluno_bonus.deletado_em IS NULL')
+                        .andWhere('turma_bonus.deletado_em IS NULL')
+                        .andWhere(
+                            "(LOWER(COALESCE(treinamento_bonus.treinamento, '')) LIKE :imersao OR LOWER(COALESCE(treinamento_bonus.treinamento, '')) LIKE :imersaoAcento OR LOWER(COALESCE(treinamento_bonus.sigla_treinamento, '')) = :ipr)",
+                            {
+                                imersao: '%imersao prosperar%',
+                                imersaoAcento: '%imersão prosperar%',
+                                ipr: 'ipr',
+                            },
+                        )
+                        .getMany();
+
+                    const bonusPorComprador = new Map<number, string[]>();
+                    const bonusQuantidadePorComprador = new Map<number, number>();
+                    bonusMatriculasIpr.forEach((matricula) => {
+                        const idComprador = Number(matricula?.id_aluno_bonus || 0);
+                        if (!idComprador) return;
+                        bonusQuantidadePorComprador.set(
+                            idComprador,
+                            (bonusQuantidadePorComprador.get(idComprador) || 0) + 1,
+                        );
+                        const edicao = String(matricula?.id_turma_fk?.edicao_turma || '').trim();
+                        const lista = bonusPorComprador.get(idComprador) || [];
+                        if (edicao) lista.push(edicao);
+                        bonusPorComprador.set(idComprador, lista);
+                    });
+
+                    bonusQuantidadePorComprador.forEach((quantidade, idComprador) => {
+                        const edicoes = bonusPorComprador.get(idComprador) || [];
+                        const edicoesUnicas = Array.from(new Set(edicoes)).sort((a, b) => {
+                            const numA = Number.parseInt(a.match(/\d+/)?.[0] || '', 10);
+                            const numB = Number.parseInt(b.match(/\d+/)?.[0] || '', 10);
+                            if (Number.isFinite(numA) && Number.isFinite(numB) && numA !== numB) {
+                                return numA - numB;
+                            }
+                            return a.localeCompare(b, 'pt-BR', { numeric: true });
+                        });
+                        cacheBonusIprPorComprador.set(idComprador, {
+                            quantidade,
+                            descricao: edicoesUnicas.length
+                                ? `Imersão Prosperar - ${edicoesUnicas.join(', ')}`
+                                : '',
+                        });
+                    });
+                }
             }
 
             const contratosMapeados = await Promise.all(
@@ -4415,6 +4521,7 @@ export class DocumentosService {
                     const criadosPorUnicos = Array.from(new Set(criadosPorValidos.map((value) => String(value))));
                     const criadoPorConsolidado = criadoPorContrato ?? criadoPorTurmaAlunoTreinamento ?? criadoPorTurmaAluno ?? null;
                     const criadoPorDivergente = criadosPorUnicos.length > 1;
+                    const bonusIprResumo = cacheBonusIprPorComprador.get(idAlunoContrato);
 
                     return Promise.resolve({
                         id: contrato.id,
@@ -4429,6 +4536,8 @@ export class DocumentosService {
                         fluxo_evento_destino_id_treinamento: turmaDestinoEvento?.id_treinamento ?? turmaAlunoTreinamento?.id_treinamento ?? null,
                         fluxo_evento_destino_treinamento: fluxoEventoDestinoTreinamento,
                         fluxo_evento_destino_turma: fluxoEventoDestinoTurma,
+                        bonus_ipr_inscricoes_quantidade: bonusIprResumo?.quantidade ?? 0,
+                        bonus_ipr_inscricoes_descricao: bonusIprResumo?.descricao ?? '',
                         status_ass_aluno: contrato.status_ass_aluno,
                         status_ass_test_um: contrato.status_ass_test_um,
                         status_ass_test_dois: contrato.status_ass_test_dois,

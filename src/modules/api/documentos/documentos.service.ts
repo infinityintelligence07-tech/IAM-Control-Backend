@@ -2822,8 +2822,7 @@ export class DocumentosService {
         } else {
             camposVariaveis['Quantidade de Inscrições do Imersão Prosperar'] = String(total);
             const partes = linhasValidas.map(
-                (linha, index) =>
-                    `Turma ${index + 1}: ${String(linha.edicao_turma || '').trim()} (${linha.quantidade} inscrição(ões))`,
+                (linha, index) => `Turma ${index + 1}: ${String(linha.edicao_turma || '').trim()} (${linha.quantidade} inscrição(ões))`,
             );
             camposVariaveis['Turmas do Imersão Prosperar'] = partes.join('|');
         }
@@ -3172,9 +3171,7 @@ export class DocumentosService {
             return quantidadeIpr;
         }
 
-        const bonusMatriculasQuantidade = Number(
-            (contratoMapeado as { bonus_ipr_inscricoes_quantidade?: number }).bonus_ipr_inscricoes_quantidade || 0,
-        );
+        const bonusMatriculasQuantidade = Number((contratoMapeado as { bonus_ipr_inscricoes_quantidade?: number }).bonus_ipr_inscricoes_quantidade || 0);
         if (bonusMatriculasQuantidade > 0) {
             return bonusMatriculasQuantidade;
         }
@@ -4358,10 +4355,7 @@ export class DocumentosService {
                     bonusMatriculasIpr.forEach((matricula) => {
                         const idComprador = Number(matricula?.id_aluno_bonus || 0);
                         if (!idComprador) return;
-                        bonusQuantidadePorComprador.set(
-                            idComprador,
-                            (bonusQuantidadePorComprador.get(idComprador) || 0) + 1,
-                        );
+                        bonusQuantidadePorComprador.set(idComprador, (bonusQuantidadePorComprador.get(idComprador) || 0) + 1);
                         const edicao = String(matricula?.id_turma_fk?.edicao_turma || '').trim();
                         const lista = bonusPorComprador.get(idComprador) || [];
                         if (edicao) lista.push(edicao);
@@ -4380,9 +4374,7 @@ export class DocumentosService {
                         });
                         cacheBonusIprPorComprador.set(idComprador, {
                             quantidade,
-                            descricao: edicoesUnicas.length
-                                ? `Imersão Prosperar - ${edicoesUnicas.join(', ')}`
-                                : '',
+                            descricao: edicoesUnicas.length ? `Imersão Prosperar - ${edicoesUnicas.join(', ')}` : '',
                         });
                     });
                 }

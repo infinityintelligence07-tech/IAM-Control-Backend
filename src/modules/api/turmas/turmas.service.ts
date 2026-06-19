@@ -550,10 +550,10 @@ export class TurmasService {
     }> {
         const baseQb = () => this.uow.turmasAlunosRP.createQueryBuilder('ta').where('ta.id_turma = :id_turma', { id_turma }).andWhere('ta.deletado_em IS NULL');
 
+        // TRANSBORDO NÃO conta como extra: aluno de transbordo comprou ingresso (entra como venda/Demais Vendas).
         const extrasCondicao = `(
             ta.vaga_bonus = true
             OR ta.origem_aluno IN (:...origensExtra)
-            OR UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) = 'TRANSBORDO'
         )`;
 
         const [alunos_count, extras_count, confirmados_count, vindos_transferencia_count, presentes_count, inadimplentes_count] = await Promise.all([
@@ -764,7 +764,8 @@ export class TurmasService {
             .select('ta.id_turma', 'id_turma')
             .addSelect('COUNT(*)::int', 'total')
             .addSelect(
-                `SUM(CASE WHEN ta.vaga_bonus = true OR ta.origem_aluno IN (:...origensExtras) OR UPPER(COALESCE(ta.codigo_turma_origem_planilha, '')) = :origemTransbordo THEN 1 ELSE 0 END)::int`,
+                // TRANSBORDO NÃO conta como extra: aluno de transbordo comprou ingresso (entra como venda/Demais Vendas).
+                `SUM(CASE WHEN ta.vaga_bonus = true OR ta.origem_aluno IN (:...origensExtras) THEN 1 ELSE 0 END)::int`,
                 'inscricoes_extras',
             )
             .addSelect(`SUM(CASE WHEN ta.id_turma_transferencia_para IS NULL AND ta.status_aluno_turma IN (:...stConfirm) THEN 1 ELSE 0 END)::int`, 'confirmados')
@@ -776,7 +777,6 @@ export class TurmasService {
             .addSelect(`SUM(CASE WHEN aluno.status_aluno_geral = :inad2 THEN 1 ELSE 0 END)::int`, 'inadimplentes')
             .setParameter('stConfirm', stConfirm)
             .setParameter('origensExtras', [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO])
-            .setParameter('origemTransbordo', 'TRANSBORDO')
             .setParameter('origemTr', EOrigemAlunos.TRANSFERENCIA)
             .setParameter('pres', EPresencaTurmas.PRESENTE)
             .setParameter('inad', EStatusAlunosGeral.INADIMPLENTE)

@@ -44,7 +44,8 @@ export class UnitOfWorkService {
      * transferência, inclusão manual). Falhas são apenas logadas para não interromper o fluxo.
      *
      * Obs.: a definição de "extras" espelha `TurmasService.getContadoresListagemPorTurmas`
-     * (bônus + transferência + sorteio + transbordo). Mantenha as duas em sincronia.
+     * (bônus + transferência + sorteio). TRANSBORDO NÃO é extra (compra de ingresso/venda).
+     * Mantenha as duas em sincronia.
      */
     async bumparPicoMetricasTurmas(ids: Array<number | string | null | undefined>): Promise<void> {
         const idsValidos = Array.from(new Set((ids || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)));
@@ -64,7 +65,6 @@ export class UnitOfWorkService {
                             CASE
                                 WHEN ta."vaga_bonus" = true
                                     OR ta."origem_aluno" IN ('ALUNO_BONUS', 'TRANSFERENCIA', 'SORTEIO')
-                                    OR UPPER(COALESCE(ta."codigo_turma_origem_planilha", '')) = 'TRANSBORDO'
                                 THEN 1 ELSE 0
                             END
                         )::int AS extras

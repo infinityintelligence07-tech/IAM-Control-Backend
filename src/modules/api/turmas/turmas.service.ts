@@ -3034,10 +3034,12 @@ export class TurmasService {
 
     /**
      * Resolve, para cada matrícula (turmas_alunos) informada, as formas de pagamento do contrato
-     * que trouxe o aluno para a turma. Cobre três caminhos de ligação:
+     * que trouxe o aluno para a turma. A informação "anda" junto com o aluno conforme ele é
+     * transferido entre turmas: percorremos toda a cadeia de transferências (para trás, via
+     * `id_turma_transferencia_de`) até encontrar o contrato de origem. Cobre os caminhos:
      *  - venda registrada na própria matrícula;
-     *  - venda cuja turma DESTINO é esta turma (mesmo aluno na origem);
-     *  - transferência: contrato na matrícula da turma de origem (id_turma_transferencia_de).
+     *  - venda cuja turma DESTINO é uma turma da cadeia (mesmo aluno na origem);
+     *  - transferência (1 ou N saltos): contrato em qualquer matrícula anterior do mesmo aluno.
      * Retorna um Map<id_turma_aluno, string[] (códigos EFormasPagamento)>.
      */
     private async resolverFormasPagamentoPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, string[]>> {
@@ -3049,45 +3051,67 @@ export class TurmasService {
         try {
             const linhas: Array<{ id_ta: string; dados_contrato: any }> = await this.uow.turmasAlunosRP.query(
                 `
-                WITH alvo AS (
-                    SELECT ta.id AS id_ta, ta.id_aluno, ta.id_turma, ta.id_turma_transferencia_de
+                WITH RECURSIVE alvo AS (
+                    SELECT ta.id AS id_ta
                     FROM turmas_alunos ta
                     WHERE ta.id_turma = $1
                       AND ta.id = ANY($2::bigint[])
                       AND ta.deletado_em IS NULL
                 ),
-                contratos AS (
-                    SELECT a.id_ta, c.id AS id_contrato, c.criado_em, c.dados_contrato
+                -- Cadeia de matrículas do mesmo aluno seguindo as transferências para trás.
+                -- "visitados" evita ciclos (transferências de ida e volta) e a consequente
+                -- explosão exponencial da recursão.
+                cadeia AS (
+                    SELECT
+                        a.id_ta AS id_alvo,
+                        ta.id AS id_ta_chain,
+                        ta.id_aluno,
+                        ta.id_turma AS turma_chain,
+                        ta.id_turma_transferencia_de,
+                        1 AS profundidade,
+                        ARRAY[ta.id] AS visitados
                     FROM alvo a
+                    JOIN turmas_alunos ta ON ta.id = a.id_ta
+                    UNION ALL
+                    SELECT
+                        c.id_alvo,
+                        ta_prev.id,
+                        ta_prev.id_aluno,
+                        ta_prev.id_turma,
+                        ta_prev.id_turma_transferencia_de,
+                        c.profundidade + 1,
+                        c.visitados || ta_prev.id
+                    FROM cadeia c
+                    JOIN turmas_alunos ta_prev
+                      ON ta_prev.id_turma = c.id_turma_transferencia_de
+                     AND ta_prev.id_aluno = c.id_aluno
+                    WHERE c.id_turma_transferencia_de IS NOT NULL
+                      AND c.profundidade < 20
+                      AND NOT (ta_prev.id = ANY(c.visitados))
+                ),
+                contratos AS (
+                    SELECT c.id_alvo AS id_ta, c.profundidade, ctr.id AS id_contrato, ctr.criado_em, ctr.dados_contrato
+                    FROM cadeia c
                     JOIN turmas_alunos_treinamentos tat
                       ON tat.deletado_em IS NULL
                      AND (
-                          tat.id_turma_aluno = a.id_ta
+                          tat.id_turma_aluno = c.id_ta_chain
                           OR (
-                              tat.id_turma_destino = a.id_turma
+                              tat.id_turma_destino = c.turma_chain
                               AND EXISTS (
                                   SELECT 1 FROM turmas_alunos ta_o
                                   WHERE ta_o.id = tat.id_turma_aluno
-                                    AND ta_o.id_aluno = a.id_aluno
-                              )
-                          )
-                          OR (
-                              a.id_turma_transferencia_de IS NOT NULL
-                              AND EXISTS (
-                                  SELECT 1 FROM turmas_alunos ta_t
-                                  WHERE ta_t.id = tat.id_turma_aluno
-                                    AND ta_t.id_turma = a.id_turma_transferencia_de
-                                    AND ta_t.id_aluno = a.id_aluno
+                                    AND ta_o.id_aluno = c.id_aluno
                               )
                           )
                      )
-                    JOIN turmas_alunos_treinamentos_contratos c
-                      ON c.id_turma_aluno_treinamento = tat.id
-                     AND c.deletado_em IS NULL
+                    JOIN turmas_alunos_treinamentos_contratos ctr
+                      ON ctr.id_turma_aluno_treinamento = tat.id
+                     AND ctr.deletado_em IS NULL
                 )
                 SELECT DISTINCT ON (id_ta) id_ta, dados_contrato
                 FROM contratos
-                ORDER BY id_ta, criado_em DESC, id_contrato DESC
+                ORDER BY id_ta, profundidade ASC, criado_em DESC, id_contrato DESC
                 `,
                 [id_turma, turmaAlunoIds],
             );
@@ -3097,6 +3121,81 @@ export class TurmasService {
             }
         } catch (error) {
             this.logger.error('turma.aluno.forma_pagamento | Falha ao resolver formas de pagamento', error instanceof Error ? error.stack : undefined);
+        }
+
+        return resultado;
+    }
+
+    /**
+     * Resolve o acessor "efetivo" de cada matrícula. Assim como a forma de pagamento, o acessor
+     * acompanha o aluno conforme ele é transferido entre turmas: quando a matrícula atual não tem
+     * acessor próprio, percorremos a cadeia de transferências (para trás) e usamos o acessor da
+     * matrícula anterior mais próxima que o possua. Retorna Map<id_turma_aluno, { id, nome }>.
+     */
+    private async resolverAcessorPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, { id: number; nome: string }>> {
+        const resultado = new Map<string, { id: number; nome: string }>();
+        if (!turmaAlunoIds || turmaAlunoIds.length === 0) {
+            return resultado;
+        }
+
+        try {
+            const linhas: Array<{ id_ta: string; id_acessor: number; nome_acessor: string }> = await this.uow.turmasAlunosRP.query(
+                `
+                WITH RECURSIVE alvo AS (
+                    SELECT ta.id AS id_ta
+                    FROM turmas_alunos ta
+                    WHERE ta.id_turma = $1
+                      AND ta.id = ANY($2::bigint[])
+                      AND ta.deletado_em IS NULL
+                ),
+                cadeia AS (
+                    SELECT
+                        a.id_ta AS id_alvo,
+                        ta.id AS id_ta_chain,
+                        ta.id_aluno,
+                        ta.id_acessor,
+                        ta.id_turma_transferencia_de,
+                        1 AS profundidade,
+                        ARRAY[ta.id] AS visitados
+                    FROM alvo a
+                    JOIN turmas_alunos ta ON ta.id = a.id_ta
+                    UNION ALL
+                    SELECT
+                        c.id_alvo,
+                        ta_prev.id,
+                        ta_prev.id_aluno,
+                        ta_prev.id_acessor,
+                        ta_prev.id_turma_transferencia_de,
+                        c.profundidade + 1,
+                        c.visitados || ta_prev.id
+                    FROM cadeia c
+                    JOIN turmas_alunos ta_prev
+                      ON ta_prev.id_turma = c.id_turma_transferencia_de
+                     AND ta_prev.id_aluno = c.id_aluno
+                    WHERE c.id_turma_transferencia_de IS NOT NULL
+                      AND c.profundidade < 20
+                      AND NOT (ta_prev.id = ANY(c.visitados))
+                ),
+                acessores AS (
+                    SELECT c.id_alvo AS id_ta, c.profundidade, u.id AS id_acessor, u.nome AS nome_acessor
+                    FROM cadeia c
+                    JOIN usuarios u ON u.id = c.id_acessor
+                    WHERE c.id_acessor IS NOT NULL
+                )
+                SELECT DISTINCT ON (id_ta) id_ta, id_acessor, nome_acessor
+                FROM acessores
+                ORDER BY id_ta, profundidade ASC
+                `,
+                [id_turma, turmaAlunoIds],
+            );
+
+            for (const linha of linhas) {
+                if (linha.id_acessor != null) {
+                    resultado.set(String(linha.id_ta), { id: Number(linha.id_acessor), nome: linha.nome_acessor });
+                }
+            }
+        } catch (error) {
+            this.logger.error('turma.aluno.acessor | Falha ao resolver acessor', error instanceof Error ? error.stack : undefined);
         }
 
         return resultado;
@@ -3261,11 +3360,16 @@ export class TurmasService {
 
             // Forma(s) de pagamento do contrato que trouxe cada aluno para a turma.
             const formasPagamentoPorTurmaAlunoId = await this.resolverFormasPagamentoPorTurmaAluno(id_turma, turmaAlunoIds);
+            // Acessor efetivo (carrega junto nas transferências quando a matrícula atual não tem o próprio).
+            const acessorPorTurmaAlunoId = await this.resolverAcessorPorTurmaAluno(id_turma, turmaAlunoIds);
 
             const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => {
                 const formasAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
                 const veioPorBoleto = formasAluno.includes(EFormasPagamento.BOLETO);
-                const acessor = turmaAluno.id_acessor_fk ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome } : null;
+                const acessorResolvido = acessorPorTurmaAlunoId.get(turmaAluno.id) ?? null;
+                const acessor = turmaAluno.id_acessor_fk
+                    ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome }
+                    : acessorResolvido;
                 return {
                     id: turmaAluno.id,
                     id_turma: turmaAluno.id_turma,
@@ -3293,7 +3397,7 @@ export class TurmasService {
                     forma_pagamento: this.formatarFormaPagamentoLabel(formasAluno),
                     formas_pagamento: formasAluno,
                     veio_por_boleto: veioPorBoleto,
-                    id_acessor: turmaAluno.id_acessor ?? null,
+                    id_acessor: turmaAluno.id_acessor ?? acessorResolvido?.id ?? null,
                     acessor,
                     created_at: turmaAluno.criado_em,
                     transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
@@ -3773,6 +3877,8 @@ export class TurmasService {
             jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             jaNaTurmaDestino.confirmacao_realizada = false;
             jaNaTurmaDestino.checkin_realizado = false;
+            // Acessor acompanha o aluno na transferência (mantém o existente, se já houver).
+            jaNaTurmaDestino.id_acessor = jaNaTurmaDestino.id_acessor ?? turmaAlunoOrigem.id_acessor ?? null;
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(jaNaTurmaDestino);
         } else {
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
@@ -3787,6 +3893,8 @@ export class TurmasService {
                 confirmacao_realizada: false,
                 checkin_realizado: false,
                 id_turma_transferencia_de: idTurmaOrigemImediata,
+                // Acessor acompanha o aluno na transferência.
+                id_acessor: turmaAlunoOrigem.id_acessor ?? null,
             });
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
         }
@@ -4242,6 +4350,7 @@ export class TurmasService {
                 comprovante_pagamento_base64: turmaAlunoOrigem.comprovante_pagamento_base64,
                 url_comprovante_pgto: turmaAlunoOrigem.url_comprovante_pgto,
                 id_turma_transferencia_de: idTurmaOrigemImediata,
+                id_acessor: turmaAlunoOrigem.id_acessor ?? null,
             });
         } else {
             matriculaDestino.status_aluno_turma = EStatusAlunosTurmas.CANCELADO;
@@ -4249,6 +4358,7 @@ export class TurmasService {
             matriculaDestino.checkin_realizado = false;
             matriculaDestino.presenca_turma = null;
             matriculaDestino.id_turma_transferencia_de = idTurmaOrigemImediata;
+            matriculaDestino.id_acessor = matriculaDestino.id_acessor ?? turmaAlunoOrigem.id_acessor ?? null;
         }
         matriculaDestino = await this.uow.turmasAlunosRP.save(matriculaDestino);
 

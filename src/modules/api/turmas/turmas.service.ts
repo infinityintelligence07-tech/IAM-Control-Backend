@@ -3052,42 +3052,51 @@ export class TurmasService {
             const linhas: Array<{ id_ta: string; dados_contrato: any }> = await this.uow.turmasAlunosRP.query(
                 `
                 WITH RECURSIVE alvo AS (
-                    SELECT ta.id AS id_ta
+                    SELECT ta.id AS id_ta, ta.id_aluno
                     FROM turmas_alunos ta
                     WHERE ta.id_turma = $1
                       AND ta.id = ANY($2::bigint[])
                       AND ta.deletado_em IS NULL
                 ),
+                -- Uma matrícula "canônica" por (turma, aluno): a mais recente. Garante que a
+                -- travessia da cadeia seja determinística (1 predecessor por turma), evitando
+                -- ramificações/explosão quando há matrículas duplicadas do mesmo aluno na turma.
+                canonica AS (
+                    SELECT DISTINCT ON (ta.id_turma, ta.id_aluno)
+                        ta.id, ta.id_turma, ta.id_aluno, ta.id_turma_transferencia_de
+                    FROM turmas_alunos ta
+                    WHERE ta.id_aluno IN (SELECT id_aluno FROM alvo)
+                    ORDER BY ta.id_turma, ta.id_aluno, ta.criado_em DESC, ta.id DESC
+                ),
                 -- Cadeia de matrículas do mesmo aluno seguindo as transferências para trás.
-                -- "visitados" evita ciclos (transferências de ida e volta) e a consequente
-                -- explosão exponencial da recursão.
+                -- "turmas_visitadas" evita ciclos (transferências de ida e volta).
                 cadeia AS (
                     SELECT
                         a.id_ta AS id_alvo,
-                        ta.id AS id_ta_chain,
-                        ta.id_aluno,
-                        ta.id_turma AS turma_chain,
-                        ta.id_turma_transferencia_de,
+                        base.id AS id_ta_chain,
+                        base.id_aluno,
+                        base.id_turma AS turma_chain,
+                        base.id_turma_transferencia_de,
                         1 AS profundidade,
-                        ARRAY[ta.id] AS visitados
+                        ARRAY[base.id_turma] AS turmas_visitadas
                     FROM alvo a
-                    JOIN turmas_alunos ta ON ta.id = a.id_ta
+                    JOIN turmas_alunos base ON base.id = a.id_ta
                     UNION ALL
                     SELECT
                         c.id_alvo,
-                        ta_prev.id,
-                        ta_prev.id_aluno,
-                        ta_prev.id_turma,
-                        ta_prev.id_turma_transferencia_de,
+                        canon.id,
+                        canon.id_aluno,
+                        canon.id_turma,
+                        canon.id_turma_transferencia_de,
                         c.profundidade + 1,
-                        c.visitados || ta_prev.id
+                        c.turmas_visitadas || canon.id_turma
                     FROM cadeia c
-                    JOIN turmas_alunos ta_prev
-                      ON ta_prev.id_turma = c.id_turma_transferencia_de
-                     AND ta_prev.id_aluno = c.id_aluno
+                    JOIN canonica canon
+                      ON canon.id_aluno = c.id_aluno
+                     AND canon.id_turma = c.id_turma_transferencia_de
                     WHERE c.id_turma_transferencia_de IS NOT NULL
                       AND c.profundidade < 20
-                      AND NOT (ta_prev.id = ANY(c.visitados))
+                      AND NOT (c.id_turma_transferencia_de = ANY(c.turmas_visitadas))
                 ),
                 contratos AS (
                     SELECT c.id_alvo AS id_ta, c.profundidade, ctr.id AS id_contrato, ctr.criado_em, ctr.dados_contrato
@@ -3142,39 +3151,48 @@ export class TurmasService {
             const linhas: Array<{ id_ta: string; id_acessor: number; nome_acessor: string }> = await this.uow.turmasAlunosRP.query(
                 `
                 WITH RECURSIVE alvo AS (
-                    SELECT ta.id AS id_ta
+                    SELECT ta.id AS id_ta, ta.id_aluno
                     FROM turmas_alunos ta
                     WHERE ta.id_turma = $1
                       AND ta.id = ANY($2::bigint[])
                       AND ta.deletado_em IS NULL
                 ),
+                -- Matrícula canônica por (turma, aluno): mais recente. Torna a travessia
+                -- determinística (1 predecessor por turma), sem ramificação/explosão.
+                canonica AS (
+                    SELECT DISTINCT ON (ta.id_turma, ta.id_aluno)
+                        ta.id, ta.id_turma, ta.id_aluno, ta.id_acessor, ta.id_turma_transferencia_de
+                    FROM turmas_alunos ta
+                    WHERE ta.id_aluno IN (SELECT id_aluno FROM alvo)
+                    ORDER BY ta.id_turma, ta.id_aluno, ta.criado_em DESC, ta.id DESC
+                ),
                 cadeia AS (
                     SELECT
                         a.id_ta AS id_alvo,
-                        ta.id AS id_ta_chain,
-                        ta.id_aluno,
-                        ta.id_acessor,
-                        ta.id_turma_transferencia_de,
+                        base.id_aluno,
+                        base.id_acessor,
+                        base.id_turma,
+                        base.id_turma_transferencia_de,
                         1 AS profundidade,
-                        ARRAY[ta.id] AS visitados
+                        ARRAY[base.id_turma] AS turmas_visitadas
                     FROM alvo a
-                    JOIN turmas_alunos ta ON ta.id = a.id_ta
+                    JOIN turmas_alunos base ON base.id = a.id_ta
                     UNION ALL
                     SELECT
                         c.id_alvo,
-                        ta_prev.id,
-                        ta_prev.id_aluno,
-                        ta_prev.id_acessor,
-                        ta_prev.id_turma_transferencia_de,
+                        canon.id_aluno,
+                        canon.id_acessor,
+                        canon.id_turma,
+                        canon.id_turma_transferencia_de,
                         c.profundidade + 1,
-                        c.visitados || ta_prev.id
+                        c.turmas_visitadas || canon.id_turma
                     FROM cadeia c
-                    JOIN turmas_alunos ta_prev
-                      ON ta_prev.id_turma = c.id_turma_transferencia_de
-                     AND ta_prev.id_aluno = c.id_aluno
+                    JOIN canonica canon
+                      ON canon.id_aluno = c.id_aluno
+                     AND canon.id_turma = c.id_turma_transferencia_de
                     WHERE c.id_turma_transferencia_de IS NOT NULL
                       AND c.profundidade < 20
-                      AND NOT (ta_prev.id = ANY(c.visitados))
+                      AND NOT (c.id_turma_transferencia_de = ANY(c.turmas_visitadas))
                 ),
                 acessores AS (
                     SELECT c.id_alvo AS id_ta, c.profundidade, u.id AS id_acessor, u.nome AS nome_acessor
@@ -3367,9 +3385,7 @@ export class TurmasService {
                 const formasAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
                 const veioPorBoleto = formasAluno.includes(EFormasPagamento.BOLETO);
                 const acessorResolvido = acessorPorTurmaAlunoId.get(turmaAluno.id) ?? null;
-                const acessor = turmaAluno.id_acessor_fk
-                    ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome }
-                    : acessorResolvido;
+                const acessor = turmaAluno.id_acessor_fk ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome } : acessorResolvido;
                 return {
                     id: turmaAluno.id,
                     id_turma: turmaAluno.id_turma,

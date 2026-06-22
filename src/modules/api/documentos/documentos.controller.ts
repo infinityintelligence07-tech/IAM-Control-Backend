@@ -274,6 +274,19 @@ export class DocumentosController {
         return this.documentosService.sincronizarBonusIprCamposContratoHistorico(id, body?.linhas || []);
     }
 
+    // Atualiza apenas as observações internas (uso do sistema) da venda, sem
+    // alterar as observações do contrato propriamente dito.
+    @Post('public/contratos-banco/:id/observacoes-sistema')
+    atualizarObservacoesSistemaContrato(
+        @Param('id') id: string,
+        @Body()
+        body: {
+            observacoes?: string;
+        },
+    ) {
+        return this.documentosService.atualizarObservacoesSistemaContratoHistorico(id, body?.observacoes ?? '');
+    }
+
     @Post('admin/cache/historico/clear')
     @UseGuards(JwtAuthGuard)
     limparCachesHistorico() {

@@ -2836,6 +2836,38 @@ export class DocumentosService {
         return { atualizado: true };
     }
 
+    // Persiste/edita somente a observação interna (uso do sistema) da venda na
+    // coluna dados_contrato, sem tocar nas observações do contrato.
+    async atualizarObservacoesSistemaContratoHistorico(
+        contratoId: string,
+        observacoes: string,
+    ): Promise<{ atualizado: boolean }> {
+        const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+            where: { id: contratoId, deletado_em: IsNull() },
+        });
+        if (!contrato) {
+            throw new NotFoundException('Contrato não encontrado');
+        }
+
+        const dadosContrato = { ...(contrato.dados_contrato || {}) };
+        const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
+        const texto = (observacoes || '').trim();
+
+        if (texto) {
+            camposVariaveis['Observações Internas (uso do sistema)'] = texto;
+        } else {
+            delete camposVariaveis['Observações Internas (uso do sistema)'];
+        }
+
+        dadosContrato.campos_variaveis = camposVariaveis;
+        await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
+            dados_contrato: dadosContrato,
+        });
+        this.contratosBancoCache.clear();
+
+        return { atualizado: true };
+    }
+
     private async obterMarcadorAtualizacaoHistorico(): Promise<string> {
         const [contratoRaw, turmaAlunoRaw] = await Promise.all([
             this.uow.turmasAlunosTreinamentosContratosRP

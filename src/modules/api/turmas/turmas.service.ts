@@ -27,6 +27,9 @@ import {
     AlunoTurmaHistoricoResponseDto,
     CreateAlunoTurmaHistoricoDto,
     AlunoTurmaHistoricoTemplateDto,
+    AlunoHistoricoObservacoesResponseDto,
+    AlunoHistoricoObservacaoItemDto,
+    AlunoHistoricoTurmaFiltroDto,
 } from './dto/turmas.dto';
 import { FindManyOptions, FindOptionsSelect, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -461,6 +464,7 @@ export class TurmasService {
         id_turma_transferencia_para: true,
         id_turma_transferencia_de: true,
         codigo_turma_origem_planilha: true,
+        transferido_por_robo: true,
         id_acessor: true,
         criado_em: true,
         id_acessor_fk: {
@@ -1278,7 +1282,13 @@ export class TurmasService {
         await this.tentarCongelarTurmaSePassouDataFinal(turmaOrigem.id);
 
         // No-show de ingresso comprado: o aluno NÃO sai da turma de origem, apenas é replicado para o destino.
-        await this.transferirAluno(turmaAluno.id, proximaTurmaMesmoPolo.id, userId, { manterNaOrigem: true });
+        // `transferidoPorRobo` marca a matrícula de destino para exibir a tag "Transferido por robô".
+        const matriculaDestino = await this.transferirAluno(turmaAluno.id, proximaTurmaMesmoPolo.id, userId, {
+            manterNaOrigem: true,
+            transferidoPorRobo: true,
+        });
+
+        const descricaoRobo = `Aluno transferido automaticamente pelo robô para a próxima turma do mesmo polo após no-show em IPR (turma de origem congelada).`;
 
         await this.registrarLogAlunoTurma(
             {
@@ -1286,11 +1296,12 @@ export class TurmasService {
                 id_turma: turmaOrigem.id,
                 id_aluno: turmaAluno.id_aluno,
                 tipo_acao: 'TRANSFERENCIA',
-                titulo: 'Transferência automática por no-show (IPR)',
-                descricao: `Aluno transferido automaticamente para a próxima turma do mesmo polo após no-show em IPR.`,
+                titulo: 'Transferido por robô (no-show IPR)',
+                descricao: descricaoRobo,
                 template_key: TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR,
                 detalhes: {
                     regra: 'IPR_NO_SHOW_COMPRA_INGRESSO_UMA_VEZ',
+                    transferido_por_robo: true,
                     id_turma_origem: turmaOrigem.id,
                     id_turma_destino: proximaTurmaMesmoPolo.id,
                     id_polo: turmaOrigem.id_polo,
@@ -1299,6 +1310,31 @@ export class TurmasService {
             },
             userId,
         );
+
+        // Também registra na matrícula de DESTINO, para a informação aparecer no histórico do
+        // aluno na turma onde ele passa a constar (e ficar fácil de visualizar).
+        if (matriculaDestino?.id) {
+            await this.registrarLogAlunoTurma(
+                {
+                    id_turma_aluno: matriculaDestino.id,
+                    id_turma: proximaTurmaMesmoPolo.id,
+                    id_aluno: turmaAluno.id_aluno,
+                    tipo_acao: 'TRANSFERENCIA',
+                    titulo: 'Transferido por robô (no-show IPR)',
+                    descricao: descricaoRobo,
+                    template_key: TEMPLATE_AUTO_TRANSFERENCIA_NO_SHOW_IPR,
+                    detalhes: {
+                        regra: 'IPR_NO_SHOW_COMPRA_INGRESSO_UMA_VEZ',
+                        transferido_por_robo: true,
+                        id_turma_origem: turmaOrigem.id,
+                        id_turma_destino: proximaTurmaMesmoPolo.id,
+                        id_polo: turmaOrigem.id_polo,
+                        id_treinamento: turmaOrigem.id_treinamento,
+                    },
+                },
+                userId,
+            );
+        }
 
         this.logger.log(
             `turma.aluno.no_show.auto_transfer | Transferência automática concluída aluno=${turmaAluno.id_aluno} origem=${turmaOrigem.id} destino=${proximaTurmaMesmoPolo.id}`,
@@ -2151,6 +2187,7 @@ export class TurmasService {
             origem_edicao?: string;
             tipo_origem_label?: string;
             tipo_origem_detalhe?: string;
+            transferido_por_robo?: boolean;
             situacao?: 'ativo' | 'transferido' | 'cancelado';
             turma: {
                 id: number;
@@ -2501,6 +2538,7 @@ export class TurmasService {
                     origem_edicao,
                     tipo_origem_label,
                     tipo_origem_detalhe,
+                    transferido_por_robo: ta.transferido_por_robo === true,
                     situacao,
                     turma: {
                         id: turma?.id || 0,
@@ -3043,7 +3081,31 @@ export class TurmasService {
      * Retorna um Map<id_turma_aluno, string[] (códigos EFormasPagamento)>.
      */
     private async resolverFormasPagamentoPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, string[]>> {
+        const dadosContratoPorTurmaAluno = await this.resolverDadosContratoPorTurmaAluno(id_turma, turmaAlunoIds);
         const resultado = new Map<string, string[]>();
+        for (const [idTa, dadosContrato] of dadosContratoPorTurmaAluno.entries()) {
+            resultado.set(idTa, this.extrairFormasDeContrato(dadosContrato));
+        }
+        return resultado;
+    }
+
+    /**
+     * Extrai a observação interna da venda ("uso do sistema") do contrato — o mesmo texto
+     * editável no Histórico de Vendas. Fica em `dados_contrato.campos_variaveis`.
+     */
+    private extrairObservacaoVendaDeContrato(dadosContrato: any): string {
+        const camposVariaveis = dadosContrato?.campos_variaveis;
+        const texto = camposVariaveis?.['Observações Internas (uso do sistema)'];
+        return typeof texto === 'string' ? texto.trim() : '';
+    }
+
+    /**
+     * Resolve, para cada matrícula (turmas_alunos), o `dados_contrato` do contrato que trouxe o
+     * aluno para a turma, percorrendo a cadeia de transferências para trás. Base compartilhada
+     * para derivar formas de pagamento e a observação interna da venda.
+     */
+    private async resolverDadosContratoPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, any>> {
+        const resultado = new Map<string, any>();
         if (!turmaAlunoIds || turmaAlunoIds.length === 0) {
             return resultado;
         }
@@ -3126,10 +3188,10 @@ export class TurmasService {
             );
 
             for (const linha of linhas) {
-                resultado.set(String(linha.id_ta), this.extrairFormasDeContrato(linha.dados_contrato));
+                resultado.set(String(linha.id_ta), linha.dados_contrato);
             }
         } catch (error) {
-            this.logger.error('turma.aluno.forma_pagamento | Falha ao resolver formas de pagamento', error instanceof Error ? error.stack : undefined);
+            this.logger.error('turma.aluno.contrato | Falha ao resolver dados do contrato', error instanceof Error ? error.stack : undefined);
         }
 
         return resultado;
@@ -3376,8 +3438,18 @@ export class TurmasService {
                 }
             }
 
-            // Forma(s) de pagamento do contrato que trouxe cada aluno para a turma.
-            const formasPagamentoPorTurmaAlunoId = await this.resolverFormasPagamentoPorTurmaAluno(id_turma, turmaAlunoIds);
+            // Dados do contrato que trouxe cada aluno para a turma (resolvido uma única vez):
+            // dele derivamos a(s) forma(s) de pagamento e a observação interna da venda.
+            const dadosContratoPorTurmaAlunoId = await this.resolverDadosContratoPorTurmaAluno(id_turma, turmaAlunoIds);
+            const formasPagamentoPorTurmaAlunoId = new Map<string, string[]>();
+            const observacaoVendaPorTurmaAlunoId = new Map<string, string>();
+            for (const [idTa, dadosContrato] of dadosContratoPorTurmaAlunoId.entries()) {
+                formasPagamentoPorTurmaAlunoId.set(idTa, this.extrairFormasDeContrato(dadosContrato));
+                const observacao = this.extrairObservacaoVendaDeContrato(dadosContrato);
+                if (observacao) {
+                    observacaoVendaPorTurmaAlunoId.set(idTa, observacao);
+                }
+            }
             // Acessor efetivo (carrega junto nas transferências quando a matrícula atual não tem o próprio).
             const acessorPorTurmaAlunoId = await this.resolverAcessorPorTurmaAluno(id_turma, turmaAlunoIds);
             // Canal/categoria reclassificados (MESMA regra do dashboard e da planilha), para a lista exibir igual.
@@ -3420,6 +3492,8 @@ export class TurmasService {
                     id_acessor: turmaAluno.id_acessor ?? acessorResolvido?.id ?? null,
                     acessor,
                     created_at: turmaAluno.criado_em,
+                    transferido_por_robo: turmaAluno.transferido_por_robo === true,
+                    observacao_venda: observacaoVendaPorTurmaAlunoId.get(turmaAluno.id) ?? undefined,
                     transferencia_para_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_para_fk),
                     transferencia_de_turma: this.mapTurmaToTransferenciaTag(turmaAluno.id_turma_transferencia_de_fk),
                     aluno: turmaAluno.id_aluno_fk
@@ -3883,7 +3957,12 @@ export class TurmasService {
      * Transfere o aluno para outra turma (inclusive de outro treinamento, exceto palestras).
      * Remove o vínculo ativo da turma de origem (soft delete), mantendo lastro no histórico de transferências.
      */
-    async transferirAluno(id_turma_aluno: string, id_turma_destino: number, userId?: number, opts?: { manterNaOrigem?: boolean }): Promise<AlunoTurmaResponseDto> {
+    async transferirAluno(
+        id_turma_aluno: string,
+        id_turma_destino: number,
+        userId?: number,
+        opts?: { manterNaOrigem?: boolean; transferidoPorRobo?: boolean },
+    ): Promise<AlunoTurmaResponseDto> {
         const turmaAlunoOrigem = await this.uow.turmasAlunosRP.findOne({
             where: { id: id_turma_aluno, deletado_em: null },
             relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
@@ -4012,6 +4091,9 @@ export class TurmasService {
             jaNaTurmaDestino.checkin_realizado = false;
             // Acessor acompanha o aluno na transferência (mantém o existente, se já houver).
             jaNaTurmaDestino.id_acessor = jaNaTurmaDestino.id_acessor ?? turmaAlunoOrigem.id_acessor ?? null;
+            if (opts?.transferidoPorRobo) {
+                jaNaTurmaDestino.transferido_por_robo = true;
+            }
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(jaNaTurmaDestino);
         } else {
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma_destino);
@@ -4028,6 +4110,7 @@ export class TurmasService {
                 id_turma_transferencia_de: idTurmaOrigemImediata,
                 // Acessor acompanha o aluno na transferência.
                 id_acessor: turmaAlunoOrigem.id_acessor ?? null,
+                transferido_por_robo: opts?.transferidoPorRobo === true,
             });
             turmaAlunoDestinoSalvo = await this.uow.turmasAlunosRP.save(turmaAlunoDestino);
         }
@@ -4224,6 +4307,106 @@ export class TurmasService {
 
         return {
             data,
+            templates: ALUNO_TURMA_HISTORICO_TEMPLATES,
+        };
+    }
+
+    /**
+     * Histórico de observações/operações agregado por aluno (todas as turmas em que ele esteve),
+     * com rótulo da turma (treinamento/sigla - edição) para permitir filtro por turma no cadastro do aluno.
+     */
+    async getHistoricoObservacoesAluno(id_aluno: number): Promise<AlunoHistoricoObservacoesResponseDto> {
+        const aluno = await this.uow.alunosRP.findOne({
+            where: { id: id_aluno },
+            withDeleted: true,
+            select: ['id'] as any,
+        });
+
+        if (!aluno) {
+            throw new NotFoundException('Aluno não encontrado.');
+        }
+
+        const raw = await this.uow.historicoAlunosTurmasLogsRP
+            .createQueryBuilder('h')
+            .leftJoin('usuarios', 'u', 'u.id = h.criado_por')
+            .leftJoin('turmas', 't', 't.id = h.id_turma')
+            .leftJoin('treinamentos', 'tr', 'tr.id = t.id_treinamento')
+            .where('h.id_aluno = :id_aluno', { id_aluno: String(id_aluno) })
+            .andWhere('h.deletado_em IS NULL')
+            .orderBy('h.data_acao', 'DESC')
+            .addOrderBy('h.id', 'DESC')
+            .select([
+                'h.id AS id',
+                'h.id_turma_aluno AS id_turma_aluno',
+                'h.id_turma AS id_turma',
+                'h.id_aluno AS id_aluno',
+                'h.tipo_acao AS tipo_acao',
+                'h.titulo AS titulo',
+                'h.descricao AS descricao',
+                'h.template_key AS template_key',
+                'h.detalhes AS detalhes',
+                'h.criado_por AS criado_por',
+                'h.data_acao AS data_acao',
+                'h.criado_em AS criado_em',
+                'u.nome AS nome_usuario',
+                't.edicao_turma AS edicao_turma',
+                'tr.treinamento AS treinamento_nome',
+                'tr.sigla_treinamento AS sigla_treinamento',
+            ])
+            .getRawMany();
+
+        const construirLabelTurma = (item: {
+            treinamento_nome?: string | null;
+            sigla_treinamento?: string | null;
+            edicao_turma?: string | null;
+            id_turma: number;
+        }): string => {
+            const base = (item.sigla_treinamento || item.treinamento_nome || '').toString().trim();
+            const edicao = (item.edicao_turma || '').toString().trim();
+            if (base && edicao) return `${base} - ${edicao}`;
+            if (base) return base;
+            if (edicao) return edicao;
+            return `Turma ${item.id_turma}`;
+        };
+
+        const data: AlunoHistoricoObservacaoItemDto[] = raw.map((item) => ({
+            id: String(item.id),
+            id_turma_aluno: String(item.id_turma_aluno),
+            id_turma: Number(item.id_turma),
+            id_aluno: String(item.id_aluno),
+            tipo_acao: String(item.tipo_acao),
+            titulo: String(item.titulo),
+            descricao: item.descricao ? String(item.descricao) : null,
+            template_key: item.template_key ? String(item.template_key) : null,
+            detalhes: (item.detalhes as Record<string, unknown>) || {},
+            criado_por: item.criado_por ? Number(item.criado_por) : null,
+            nome_usuario: item.nome_usuario ? String(item.nome_usuario) : null,
+            data_acao: item.data_acao ? new Date(item.data_acao) : new Date(),
+            criado_em: item.criado_em ? new Date(item.criado_em) : new Date(),
+            turma_label: construirLabelTurma({ ...item, id_turma: Number(item.id_turma) }),
+            treinamento_nome: item.treinamento_nome ? String(item.treinamento_nome) : null,
+            sigla_treinamento: item.sigla_treinamento ? String(item.sigla_treinamento) : null,
+            edicao_turma: item.edicao_turma ? String(item.edicao_turma) : null,
+        }));
+
+        const turmasMap = new Map<number, AlunoHistoricoTurmaFiltroDto>();
+        for (const item of data) {
+            if (!turmasMap.has(item.id_turma)) {
+                turmasMap.set(item.id_turma, {
+                    id_turma: item.id_turma,
+                    label: item.turma_label,
+                    treinamento_nome: item.treinamento_nome ?? null,
+                    sigla_treinamento: item.sigla_treinamento ?? null,
+                    edicao_turma: item.edicao_turma ?? null,
+                });
+            }
+        }
+
+        const turmas = Array.from(turmasMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+
+        return {
+            data,
+            turmas,
             templates: ALUNO_TURMA_HISTORICO_TEMPLATES,
         };
     }
@@ -4595,7 +4778,7 @@ export class TurmasService {
         return String(matriculaDestino.id);
     }
 
-    async removeAlunoTurma(id_turma_aluno: string, userId?: number): Promise<void> {
+    async removeAlunoTurma(id_turma_aluno: string, userId?: number, motivo?: string): Promise<void> {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id_turma_aluno },
@@ -4610,6 +4793,7 @@ export class TurmasService {
                 throw new BadRequestException('Não é possível remover alunos de uma turma encerrada. O registro permanece congelado para a trilha do aluno.');
             }
 
+            const motivoLimpo = motivo?.trim();
             await this.registrarLogAlunoTurma(
                 {
                     id_turma_aluno: turmaAluno.id,
@@ -4617,10 +4801,11 @@ export class TurmasService {
                     id_aluno: turmaAluno.id_aluno,
                     tipo_acao: 'REMOCAO',
                     titulo: 'Aluno removido da turma',
-                    descricao: 'Matrícula removida manualmente.',
+                    descricao: motivoLimpo ? `Motivo: ${motivoLimpo}` : 'Matrícula removida manualmente.',
                     detalhes: {
                         nome_aluno: turmaAluno.id_aluno_fk?.nome,
                         status_aluno_turma: turmaAluno.status_aluno_turma,
+                        motivo: motivoLimpo || null,
                     },
                 },
                 userId,
@@ -5497,6 +5682,10 @@ export class TurmasService {
                 };
                 const changesCancel = this.buildAlunoTurmaChanges(beforeSnapshot, afterCancelSnapshot);
                 turmaAluno.presenca_turma = null;
+                const motivoCancelamento = updateAlunoDto.motivo_cancelamento?.trim();
+                const descricaoAlteracoes = changesCancel.length
+                    ? changesCancel.map((item) => `${item.campo}: ${item.de} -> ${item.para}`).join(' | ')
+                    : 'Status alterado para CANCELADO.';
                 await this.registrarLogAlunoTurma(
                     {
                         id_turma_aluno: turmaAluno.id,
@@ -5504,10 +5693,8 @@ export class TurmasService {
                         id_aluno: turmaAluno.id_aluno,
                         tipo_acao: 'CANCELAMENTO',
                         titulo: 'Inscrição cancelada',
-                        descricao: changesCancel.length
-                            ? changesCancel.map((item) => `${item.campo}: ${item.de} -> ${item.para}`).join(' | ')
-                            : 'Status alterado para CANCELADO.',
-                        detalhes: { alteracoes: changesCancel },
+                        descricao: motivoCancelamento ? `Motivo: ${motivoCancelamento}` : descricaoAlteracoes,
+                        detalhes: { alteracoes: changesCancel, motivo: motivoCancelamento || null },
                     },
                     userId,
                 );

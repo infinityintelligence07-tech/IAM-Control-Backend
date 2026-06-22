@@ -88,6 +88,14 @@ export class TurmasAlunos extends BaseEntity {
     codigo_turma_origem_planilha: string | null;
 
     /**
+     * Marca a matrícula criada por uma transferência AUTOMÁTICA do robô (auto-transferência de
+     * no-show de ingresso comprado quando a turma de origem é congelada). Usado para exibir o
+     * ícone de "Transferido por robô" ao lado do nome do aluno na listagem da turma.
+     */
+    @Column({ type: 'boolean', name: 'transferido_por_robo', default: false, nullable: false })
+    transferido_por_robo: boolean;
+
+    /**
      * Acessor (usuário do sistema) responsável por acompanhar este aluno na turma.
      * Coluna opcional, definida apenas para alunos que entraram por boleto.
      */

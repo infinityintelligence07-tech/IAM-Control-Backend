@@ -20,6 +20,26 @@ import { validateBase64ImageField } from '../shared/image-base64.validator';
 export class AlunosService {
     constructor(private readonly uow: UnitOfWorkService) {}
 
+    /**
+     * Retorna o conjunto de ids de alunos que tiveram ao menos um cancelamento (status CANCELADO)
+     * em alguma turma — incluindo matrículas soft-deletadas, já que o cancelamento faz soft delete.
+     */
+    private async getAlunosComCancelamento(alunoIds: number[]): Promise<Set<number>> {
+        if (alunoIds.length === 0) {
+            return new Set<number>();
+        }
+
+        const rows = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .withDeleted()
+            .select('DISTINCT ta.id_aluno', 'id_aluno')
+            .where('ta.id_aluno IN (:...ids)', { ids: alunoIds })
+            .andWhere('ta.status_aluno_turma = :status', { status: 'CANCELADO' })
+            .getRawMany<{ id_aluno: string | number }>();
+
+        return new Set<number>(rows.map((row) => Number(row.id_aluno)));
+    }
+
     async findAll(filters: GetAlunosDto): Promise<AlunosListResponseDto> {
         const { page = 1, limit = 10, nome, email, cpf, status_aluno_geral, id_polo } = filters;
 
@@ -71,6 +91,9 @@ export class AlunosService {
 
             console.log(`Encontrados ${alunos.length} alunos de um total de ${total}`);
 
+            // Identifica quais alunos da página já tiveram algum cancelamento (uma única consulta).
+            const alunosComCancelamento = await this.getAlunosComCancelamento(alunos.map((aluno) => aluno.id));
+
             // Transformar dados para o formato de resposta
             const alunosResponse: AlunoResponseDto[] = alunos.map((aluno) => ({
                 id: aluno.id,
@@ -101,6 +124,7 @@ export class AlunosService {
                 id_treinamento_bonus: aluno.id_treinamento_bonus,
                 created_at: aluno.criado_em,
                 updated_at: aluno.atualizado_em,
+                teve_cancelamento: alunosComCancelamento.has(aluno.id),
                 polo: aluno.id_polo_fk
                     ? {
                           id: aluno.id_polo_fk.id,
@@ -150,6 +174,8 @@ export class AlunosService {
                 return null;
             }
 
+            const alunosComCancelamento = await this.getAlunosComCancelamento([aluno.id]);
+
             return {
                 id: aluno.id,
                 id_polo: aluno.id_polo,
@@ -179,6 +205,7 @@ export class AlunosService {
                 id_treinamento_bonus: aluno.id_treinamento_bonus,
                 created_at: aluno.criado_em,
                 updated_at: aluno.atualizado_em,
+                teve_cancelamento: alunosComCancelamento.has(aluno.id),
                 polo: aluno.id_polo_fk
                     ? {
                           id: aluno.id_polo_fk.id,

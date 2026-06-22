@@ -67,6 +67,8 @@ export class AlunoResponseDto {
     id_treinamento_bonus?: number;
     created_at: Date;
     updated_at: Date;
+    /** Indica que o aluno teve ao menos um cancelamento em alguma turma (em qualquer momento). */
+    teve_cancelamento?: boolean;
     polo?: {
         id: number;
         nome: string;

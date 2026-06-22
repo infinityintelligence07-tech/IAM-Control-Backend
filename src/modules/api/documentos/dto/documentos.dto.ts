@@ -199,6 +199,13 @@ export class CriarContratoZapSignDto {
     compradores_adicionais?: CompradorAdicionalDto[];
 
     @IsOptional()
+    @IsBoolean()
+    pendencia_pagamento?: boolean; // Pendência de pagamento marcada no ato da venda
+
+    @IsOptional()
+    quantidade_inscricoes?: number; // Quantidade de inscrições da venda
+
+    @IsOptional()
     campos_variaveis?: Record<string, string>; // Campos variáveis do contrato
 
     @IsOptional()

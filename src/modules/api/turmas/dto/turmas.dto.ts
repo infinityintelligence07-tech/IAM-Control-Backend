@@ -529,6 +529,13 @@ export class UpdateAlunoTurmaDto {
     @IsEnum(EStatusAlunosTurmas)
     status_aluno_turma?: EStatusAlunosTurmas;
 
+    // Motivo informado pelo usuário ao cancelar a matrícula do aluno na turma.
+    // Registrado no histórico de observações agregado do aluno.
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    motivo_cancelamento?: string;
+
     @IsOptional()
     @IsEnum(EOrigemAlunos)
     origem_aluno?: EOrigemAlunos;
@@ -707,6 +714,10 @@ export class AlunoTurmaResponseDto {
     /** Indicador leve na listagem (sem carregar o base64). */
     tem_comprovante_pagamento?: boolean;
     created_at: Date;
+    /** true quando a matrícula foi criada por uma transferência automática do robô (no-show IPR em turma congelada). */
+    transferido_por_robo?: boolean;
+    /** Observação interna da venda ("uso do sistema") trazida do contrato, quando houver. */
+    observacao_venda?: string;
     /** Tag "Transferência Para": turma para a qual o aluno foi transferido (permanece na turma atual com esta referência). */
     transferencia_para_turma?: {
         id: number;
@@ -824,6 +835,38 @@ export class AlunoTurmaHistoricoItemDto {
 
 export class AlunoTurmaHistoricoResponseDto {
     data: AlunoTurmaHistoricoItemDto[];
+    templates: AlunoTurmaHistoricoTemplateDto[];
+}
+
+export class RemoveAlunoTurmaDto {
+    // Motivo informado pelo usuário ao remover a matrícula do aluno da turma.
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    motivo?: string;
+}
+
+/** Item do histórico de observações agregado por aluno (todas as turmas). */
+export class AlunoHistoricoObservacaoItemDto extends AlunoTurmaHistoricoItemDto {
+    /** Rótulo da turma onde a operação ocorreu: "<treinamento|sigla> - <edição>". */
+    turma_label: string;
+    treinamento_nome?: string | null;
+    sigla_treinamento?: string | null;
+    edicao_turma?: string | null;
+}
+
+/** Turma disponível como filtro no histórico de observações do aluno. */
+export class AlunoHistoricoTurmaFiltroDto {
+    id_turma: number;
+    label: string;
+    treinamento_nome?: string | null;
+    sigla_treinamento?: string | null;
+    edicao_turma?: string | null;
+}
+
+export class AlunoHistoricoObservacoesResponseDto {
+    data: AlunoHistoricoObservacaoItemDto[];
+    turmas: AlunoHistoricoTurmaFiltroDto[];
     templates: AlunoTurmaHistoricoTemplateDto[];
 }
 

@@ -57,6 +57,7 @@ export class DocumentosService {
                 treinamentos_origem: string[];
                 turmas_origem: string[];
                 turmas_destino: string[];
+                turmas_destino_por_origem: Record<string, string[]>;
             };
         }
     >();
@@ -710,6 +711,14 @@ export class DocumentosService {
                     turma_origem: idTurmaOrigemContrato ? { id: idTurmaOrigemContrato } : null,
                     fluxo_evento_destino_id_turma: criarContratoDto.id_turma_destino ? Number(criarContratoDto.id_turma_destino) : null,
                     compradores_adicionais: criarContratoDto.compradores_adicionais || [],
+                    // Snapshot da venda usado pelo Histórico de Vendas como fonte da
+                    // pendência/quantidade quando a matrícula vinculada ao contrato é
+                    // a de origem (e não a de destino onde a pendência foi marcada).
+                    turma_aluno: {
+                        pendencia_pagamento: criarContratoDto.pendencia_pagamento ?? false,
+                        quantidade_inscricoes: criarContratoDto.quantidade_inscricoes ?? 1,
+                        outros_clientes: criarContratoDto.compradores_adicionais || [],
+                    },
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
                     testemunhas: (() => {
@@ -2730,6 +2739,7 @@ export class DocumentosService {
         treinamentos_origem: string[];
         turmas_origem: string[];
         turmas_destino: string[];
+        turmas_destino_por_origem: Record<string, string[]>;
     } | null {
         const registro = this.opcoesOrigemCache.get(chave);
         if (!registro) return null;
@@ -2748,6 +2758,7 @@ export class DocumentosService {
             treinamentos_origem: string[];
             turmas_origem: string[];
             turmas_destino: string[];
+            turmas_destino_por_origem: Record<string, string[]>;
         },
     ): void {
         const agora = Date.now();
@@ -2838,10 +2849,7 @@ export class DocumentosService {
 
     // Persiste/edita somente a observação interna (uso do sistema) da venda na
     // coluna dados_contrato, sem tocar nas observações do contrato.
-    async atualizarObservacoesSistemaContratoHistorico(
-        contratoId: string,
-        observacoes: string,
-    ): Promise<{ atualizado: boolean }> {
+    async atualizarObservacoesSistemaContratoHistorico(contratoId: string, observacoes: string): Promise<{ atualizado: boolean }> {
         const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
             where: { id: contratoId, deletado_em: IsNull() },
         });
@@ -2901,6 +2909,7 @@ export class DocumentosService {
         treinamentos_origem: string[];
         turmas_origem: string[];
         turmas_destino: string[];
+        turmas_destino_por_origem: Record<string, string[]>;
     }> {
         const cacheKey = this.montarChaveCacheOpcoesOrigem(filtros);
         const cacheHit = this.lerCacheOpcoesOrigem(cacheKey);
@@ -2924,21 +2933,48 @@ export class DocumentosService {
         const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
         const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
 
-        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
-            where: {
-                deletado_em: null,
-                ...(aplicarFiltroPeriodo ? { criado_em: Between(dataInicioPeriodo, dataFimPeriodo) } : {}),
-            },
-            relations: [
-                'id_turma_aluno_treinamento_fk',
-                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
-                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
-                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_fk',
-                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_turma_fk.id_treinamento_fk',
-                'id_turma_aluno_treinamento_fk.id_treinamento_fk',
-            ],
-            order: { criado_em: 'DESC' },
-        });
+        // Consulta enxuta via QueryBuilder: seleciona apenas as colunas usadas
+        // para montar as opções de filtro. O `find` com relações carregava a
+        // entidade completa do contrato (colunas TEXT pesadas como
+        // assinatura/foto base64) e do aluno (url_foto), o que estourava o
+        // timeout do frontend — especialmente no modo "turma" (sem período),
+        // que percorre TODOS os contratos.
+        const contratosQuery = this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('contrato')
+            .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+            .leftJoin('tat.id_turma_aluno_fk', 'turma_aluno')
+            .leftJoin('turma_aluno.id_aluno_fk', 'aluno')
+            .leftJoin('turma_aluno.id_turma_fk', 'turma_destino')
+            .leftJoin('turma_destino.id_treinamento_fk', 'treinamento_destino')
+            .select([
+                'contrato.id',
+                'contrato.dados_contrato',
+                'contrato.zapsign_document_status',
+                'contrato.criado_em',
+                'tat.id',
+                'tat.id_turma_destino',
+                'turma_aluno.id',
+                'turma_aluno.id_turma',
+                'turma_aluno.pendencia_pagamento',
+                'aluno.id',
+                'aluno.nome',
+                'aluno.email',
+                'turma_destino.id',
+                'turma_destino.edicao_turma',
+                'treinamento_destino.id',
+                'treinamento_destino.treinamento',
+            ])
+            .where('contrato.deletado_em IS NULL')
+            .orderBy('contrato.criado_em', 'DESC');
+
+        if (aplicarFiltroPeriodo) {
+            contratosQuery.andWhere('contrato.criado_em BETWEEN :dataInicioPeriodo AND :dataFimPeriodo', {
+                dataInicioPeriodo,
+                dataFimPeriodo,
+            });
+        }
+
+        const contratos = await contratosQuery.getMany();
 
         const termoBusca = this.normalizarTexto(filtros?.search);
         const treinamentoOrigemSelecionado = this.normalizarTexto(filtros?.treinamento_origem);
@@ -3053,6 +3089,9 @@ export class DocumentosService {
         const treinamentos = new Set<string>();
         const turmasOrigem = new Set<string>();
         const turmasDestino = new Set<string>();
+        // Mapa origem -> destinos com vendas: usado para filtrar as turmas de
+        // destino conforme a(s) turma(s) de origem selecionada(s) no frontend.
+        const turmasDestinoPorOrigem = new Map<string, Set<string>>();
 
         contratos.forEach((contrato) => {
             const contratoAny = contrato as any;
@@ -3076,7 +3115,11 @@ export class DocumentosService {
                         0,
                 ) || 0;
             const fallbackDestinoViaId = turmasDestinoPorId.get(idTurmaDestinoViaDadosContrato);
-            const turmaDestino = String(this.extrairTurmaDestinoServidor(contratoAny) || fallbackDestinoViaId?.turma || '').trim();
+            // A turma de destino é sempre listada como "Treinamento - Edição";
+            // por isso a resolução pela turma (id -> treinamento + edição) tem
+            // prioridade sobre os textos crus de campos_variaveis (que muitas
+            // vezes guardam só o número da edição).
+            const turmaDestino = String(fallbackDestinoViaId?.turma || this.extrairTurmaDestinoServidor(contratoAny) || '').trim();
             const nomeAluno = this.normalizarTexto(alunoRelacao?.nome || dadosContrato?.aluno?.nome);
             const emailAluno = this.normalizarTexto(alunoRelacao?.email || dadosContrato?.aluno?.email);
             const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento || dadosContrato?.turma_aluno?.pendencia_pagamento);
@@ -3109,6 +3152,12 @@ export class DocumentosService {
 
             if (turmaDestino && !turmaEhInvalida(turmaDestino)) {
                 turmasDestino.add(turmaDestino);
+
+                if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
+                    const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
+                    destinosDaOrigem.add(turmaDestino);
+                    turmasDestinoPorOrigem.set(turmaOrigem, destinosDaOrigem);
+                }
             }
         });
 
@@ -3123,11 +3172,16 @@ export class DocumentosService {
         const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
         const turmasOrigemOrdenadas = this.ordenarListaTurmasHistorico(turmasOrigem);
         const turmasDestinoOrdenadas = this.ordenarListaTurmasHistorico(turmasDestino);
+        const turmasDestinoPorOrigemOrdenadas: Record<string, string[]> = {};
+        turmasDestinoPorOrigem.forEach((destinos, origem) => {
+            turmasDestinoPorOrigemOrdenadas[origem] = this.ordenarListaTurmasHistorico(destinos);
+        });
 
         const resultado = {
             treinamentos_origem: treinamentosOrdenados,
             turmas_origem: turmasOrigemOrdenadas,
             turmas_destino: turmasDestinoOrdenadas,
+            turmas_destino_por_origem: turmasDestinoPorOrigemOrdenadas,
         };
         this.salvarCacheOpcoesOrigem(cacheKey, resultado);
 
@@ -3470,7 +3524,12 @@ export class DocumentosService {
                 const contratoMapeado = {
                     turma_aluno: {
                         quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
-                        pendencia_pagamento: row.pendencia_pagamento === true || String(row.pendencia_pagamento).toLowerCase() === 'true',
+                        // OR com o snapshot em dados_contrato.turma_aluno: a matrícula
+                        // vinculada (origem) costuma vir com pendência = false explícito.
+                        pendencia_pagamento:
+                            row.pendencia_pagamento === true ||
+                            String(row.pendencia_pagamento).toLowerCase() === 'true' ||
+                            Boolean((turmaAlunoDados as { pendencia_pagamento?: boolean })?.pendencia_pagamento),
                         outros_clientes: Array.isArray(outrosClientesRaw) ? outrosClientesRaw : [],
                     },
                     dados_contrato: dadosContrato,
@@ -3710,8 +3769,15 @@ export class DocumentosService {
             const termoBuscaFiltro = this.normalizarTexto(filtros?.search);
             const statusFiltro = this.normalizarTexto(filtros?.status);
             const treinamentoOrigemFiltro = this.normalizarTexto(filtros?.treinamento_origem);
-            const turmaOrigemFiltro = this.normalizarTexto(filtros?.turma_origem);
-            const turmaDestinoFiltro = this.normalizarTexto(filtros?.turma_destino);
+            // Aceita múltiplas turmas separadas por "|" (multi-seleção no frontend).
+            const turmasOrigemFiltro = String(filtros?.turma_origem || '')
+                .split('|')
+                .map((valor) => this.normalizarTexto(valor))
+                .filter(Boolean);
+            const turmasDestinoFiltro = String(filtros?.turma_destino || '')
+                .split('|')
+                .map((valor) => this.normalizarTexto(valor))
+                .filter(Boolean);
             const filtroTurmaAtivo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
@@ -3749,10 +3815,10 @@ export class DocumentosService {
                 ta.id_turma::text,
                 ''
             ), '')::int`;
+            // A turma de destino é sempre normalizada como "Treinamento - Edição"
+            // (resolvendo pela turma), com prioridade sobre os textos crus de
+            // campos_variaveis. Mantém a lista de opções e o filtro consistentes.
             const turmaDestinoSql = `LOWER(TRIM(COALESCE(
-                NULLIF(contrato.dados_contrato->>'fluxo_evento_destino_turma', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Destino', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Destino', ''),
                 CASE
                     WHEN treinamento_destino_evento.treinamento IS NOT NULL AND turma_destino_evento.edicao_turma IS NOT NULL
                         THEN CONCAT(treinamento_destino_evento.treinamento, ' - ', turma_destino_evento.edicao_turma)
@@ -3760,8 +3826,12 @@ export class DocumentosService {
                         THEN CONCAT(treinamento_destino_tat.treinamento, ' - ', turma_destino_tat.edicao_turma)
                     WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
                         THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
-                    ELSE COALESCE(treinamento_destino_evento.treinamento, treinamento_destino_tat.treinamento, treinamento_destino.treinamento, '')
+                    ELSE NULL
                 END,
+                NULLIF(contrato.dados_contrato->>'fluxo_evento_destino_turma', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Destino', ''),
+                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Destino', ''),
+                COALESCE(treinamento_destino_evento.treinamento, treinamento_destino_tat.treinamento, treinamento_destino.treinamento, ''),
                 ''
             )))`;
             const canalTextoSql = `LOWER(CONCAT_WS(' ',
@@ -3860,15 +3930,15 @@ export class DocumentosService {
                 });
             }
 
-            if (filtroTurmaAtivo && turmaOrigemFiltro) {
-                baseQb.andWhere(`${turmaOrigemSql} = :turmaOrigemFiltro`, {
-                    turmaOrigemFiltro,
+            if (filtroTurmaAtivo && turmasOrigemFiltro.length > 0) {
+                baseQb.andWhere(`${turmaOrigemSql} IN (:...turmasOrigemFiltro)`, {
+                    turmasOrigemFiltro,
                 });
             }
 
-            if (filtroTurmaAtivo && turmaDestinoFiltro) {
-                baseQb.andWhere(`${turmaDestinoSql} = :turmaDestinoFiltro`, {
-                    turmaDestinoFiltro,
+            if (filtroTurmaAtivo && turmasDestinoFiltro.length > 0) {
+                baseQb.andWhere(`${turmaDestinoSql} IN (:...turmasDestinoFiltro)`, {
+                    turmasDestinoFiltro,
                 });
             }
 
@@ -4531,7 +4601,10 @@ export class DocumentosService {
                     const fluxoEventoOrigemTurma = formatarTurmaEvento(turmaOrigemEvento);
                     const fluxoEventoDestinoTurma = formatarTurmaEvento(turmaDestinoEvento);
                     const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
-                    const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
+                    // A matrícula vinculada ao contrato (origem) costuma vir com
+                    // pendência = false explícito; por isso fazemos OR com o snapshot
+                    // salvo em dados_contrato.turma_aluno (marcado no ato da venda).
+                    const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento) || Boolean(turmaAlunoDadosContrato.pendencia_pagamento);
                     const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
                     const contratoDuplo = quantidadeInscricoes > 1;
                     const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];

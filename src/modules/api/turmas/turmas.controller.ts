@@ -22,6 +22,8 @@ import {
     TurmaTimesResponseDto,
     AlunoTurmaHistoricoResponseDto,
     CreateAlunoTurmaHistoricoDto,
+    RemoveAlunoTurmaDto,
+    AlunoHistoricoObservacoesResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
@@ -145,6 +147,12 @@ export class TurmasController {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         await this.turmasService.createAlunoTurmaHistorico(id_turma_aluno, dto, userId);
         return { message: 'Histórico registrado com sucesso.' };
+    }
+
+    @Get('aluno/:id_aluno/historico-observacoes')
+    @UseGuards(JwtAuthGuard)
+    async getHistoricoObservacoesAluno(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<AlunoHistoricoObservacoesResponseDto> {
+        return this.turmasService.getHistoricoObservacoesAluno(id_aluno);
     }
 
     @Get('opcoes-transferencia/:id_turma_aluno')
@@ -377,11 +385,12 @@ export class TurmasController {
     async removeAlunoTurma(
         @Param('id', ParseIntPipe) id_turma: number,
         @Param('id_turma_aluno') id_turma_aluno: string,
+        @Body() dto: RemoveAlunoTurmaDto,
         @Req() req: any,
     ): Promise<{ message: string }> {
         console.log('Removendo aluno da turma:', id_turma_aluno);
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
-        await this.turmasService.removeAlunoTurma(id_turma_aluno, userId);
+        await this.turmasService.removeAlunoTurma(id_turma_aluno, userId, dto?.motivo);
         return { message: 'Aluno removido da turma com sucesso' };
     }
 }

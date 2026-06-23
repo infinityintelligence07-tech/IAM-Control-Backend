@@ -389,7 +389,6 @@ export class DocumentosService {
                     id_turma: idTurmaParaCracha,
                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO, // Origem padrão
                     status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
-                    nome_cracha: aluno.nome_cracha || aluno.nome,
                     numero_cracha: numeroCracha,
                 });
                 turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
@@ -5008,7 +5007,6 @@ export class DocumentosService {
                     id_turma: idTurmaParaCracha,
                     origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
                     status_aluno_turma: EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO,
-                    nome_cracha: aluno.nome_cracha || aluno.nome,
                     numero_cracha: numeroCracha,
                 });
                 turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);

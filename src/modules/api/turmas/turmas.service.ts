@@ -318,7 +318,7 @@ export class TurmasService {
                 'hs.criado_por AS criado_por',
                 'hs.criado_em AS criado_em',
                 'a.nome AS nome_aluno',
-                'ta.nome_cracha AS nome_cracha',
+                'a.nome_cracha AS nome_cracha',
                 't.edicao_turma AS edicao_turma',
                 't.cidade AS cidade_turma',
                 'ps.descricao AS descricao_presente',
@@ -458,7 +458,6 @@ export class TurmasService {
         status_aluno_turma: true,
         confirmacao_realizada: true,
         checkin_realizado: true,
-        nome_cracha: true,
         numero_cracha: true,
         presenca_turma: true,
         vaga_bonus: true,
@@ -2107,7 +2106,7 @@ export class TurmasService {
                 id: turmaAluno.id,
                 id_aluno: turmaAluno.id_aluno,
                 id_turma: turmaAluno.id_turma,
-                nome_cracha: turmaAluno.nome_cracha,
+                nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha || turmaAluno.id_aluno_fk?.nome || '',
                 numero_cracha: turmaAluno.numero_cracha,
                 vaga_bonus: turmaAluno.vaga_bonus,
                 status_aluno_turma: turmaAluno.status_aluno_turma,
@@ -3466,7 +3465,7 @@ export class TurmasService {
                     id: turmaAluno.id,
                     id_turma: turmaAluno.id_turma,
                     id_aluno: turmaAluno.id_aluno,
-                    nome_cracha: turmaAluno.nome_cracha,
+                    nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha || turmaAluno.id_aluno_fk?.nome || '',
                     numero_cracha: turmaAluno.numero_cracha,
                     vaga_bonus: turmaAluno.vaga_bonus,
                     origem_aluno: turmaAluno.origem_aluno ?? undefined,
@@ -3672,7 +3671,6 @@ export class TurmasService {
                 select: {
                     id: true,
                     id_aluno: true,
-                    nome_cracha: true,
                     numero_cracha: true,
                     status_aluno_turma: true,
                     origem_aluno: true,
@@ -3680,6 +3678,7 @@ export class TurmasService {
                     id_aluno_fk: {
                         id: true,
                         nome: true,
+                        nome_cracha: true,
                         email: true,
                         telefone_um: true,
                         telefone_dois: true,
@@ -3698,7 +3697,7 @@ export class TurmasService {
                     email: turmaAluno.id_aluno_fk?.email ?? '',
                     telefone_um: turmaAluno.id_aluno_fk?.telefone_um ?? undefined,
                     telefone_dois: turmaAluno.id_aluno_fk?.telefone_dois ?? undefined,
-                    nome_cracha: turmaAluno.nome_cracha ?? '',
+                    nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha || turmaAluno.id_aluno_fk?.nome || '',
                     numero_cracha: turmaAluno.numero_cracha ?? '',
                     status_aluno_turma: turmaAluno.status_aluno_turma ?? undefined,
                     origem_aluno: turmaAluno.origem_aluno ?? undefined,
@@ -3801,8 +3800,8 @@ export class TurmasService {
             // Gerar número de crachá único para esta turma
             const numeroCracha = await this.generateUniqueCrachaNumber(id_turma);
 
-            // Usar nome do crachá fornecido ou o padrão do aluno (obrigatório na entidade)
-            const nomeCracha = addAlunoDto.nome_cracha?.trim() || aluno.nome_cracha?.trim() || aluno.nome?.trim() || 'Aluno';
+            // O "como gostaria de ser chamado" agora vem exclusivamente do cadastro do aluno.
+            const nomeCracha = aluno.nome_cracha?.trim() || aluno.nome?.trim() || 'Aluno';
 
             // Debug: Log dos dados recebidos
             this.logger.debug(`turma.aluno.add | Adicionando aluno id=${String(addAlunoDto.id_aluno)} na turma id=${id_turma}`);
@@ -3811,7 +3810,6 @@ export class TurmasService {
             const dadosParaSalvar = {
                 id_turma,
                 id_aluno: addAlunoDto.id_aluno as any,
-                nome_cracha: nomeCracha,
                 numero_cracha: numeroCracha,
                 vaga_bonus: addAlunoDto.vaga_bonus || false,
                 origem_aluno: (addAlunoDto.origem_aluno as EOrigemAlunos) || EOrigemAlunos.COMPROU_INGRESSO,
@@ -3841,7 +3839,7 @@ export class TurmasService {
                     detalhes: {
                         origem_aluno: turmaAlunoSalva.origem_aluno,
                         status_aluno_turma: turmaAlunoSalva.status_aluno_turma,
-                        nome_cracha: turmaAlunoSalva.nome_cracha,
+                        nome_cracha: nomeCracha,
                         numero_cracha: turmaAlunoSalva.numero_cracha,
                     },
                 },
@@ -3871,7 +3869,7 @@ export class TurmasService {
                 id: turmaAlunoCompleta.id,
                 id_turma: turmaAlunoCompleta.id_turma,
                 id_aluno: turmaAlunoCompleta.id_aluno,
-                nome_cracha: turmaAlunoCompleta.nome_cracha,
+                nome_cracha: turmaAlunoCompleta.id_aluno_fk?.nome_cracha || turmaAlunoCompleta.id_aluno_fk?.nome || '',
                 numero_cracha: turmaAlunoCompleta.numero_cracha,
                 vaga_bonus: turmaAlunoCompleta.vaga_bonus,
                 confirmacao_realizada: turmaAlunoCompleta.confirmacao_realizada,
@@ -4043,7 +4041,7 @@ export class TurmasService {
                 id: matriculaDestinoCompleta.id,
                 id_turma: matriculaDestinoCompleta.id_turma,
                 id_aluno: matriculaDestinoCompleta.id_aluno,
-                nome_cracha: matriculaDestinoCompleta.nome_cracha,
+                nome_cracha: matriculaDestinoCompleta.id_aluno_fk?.nome_cracha || matriculaDestinoCompleta.id_aluno_fk?.nome || '',
                 numero_cracha: matriculaDestinoCompleta.numero_cracha,
                 vaga_bonus: matriculaDestinoCompleta.vaga_bonus,
                 origem_aluno: matriculaDestinoCompleta.origem_aluno,
@@ -4080,7 +4078,6 @@ export class TurmasService {
         const jaNaTurmaDestino = await this.uow.turmasAlunosRP.findOne({
             where: { id_turma: id_turma_destino, id_aluno: turmaAlunoOrigem.id_aluno, deletado_em: null },
         });
-        const nomeCracha = turmaAlunoOrigem.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome_cracha || turmaAlunoOrigem.id_aluno_fk?.nome || 'Aluno';
         // Registra a turma de origem IMEDIATA desta transferência (e não a "primeira da
         // cadeia"). Assim, "transferido/recebido de" reflete o salto real. A trilha completa
         // de saltos continua disponível em historico_transferencias_alunos.
@@ -4091,7 +4088,6 @@ export class TurmasService {
             // Se já existir vínculo na turma destino, reaproveita-o e marca como vindo de transferência.
             jaNaTurmaDestino.origem_aluno = EOrigemAlunos.TRANSFERENCIA;
             jaNaTurmaDestino.id_turma_transferencia_de = idTurmaOrigemImediata;
-            jaNaTurmaDestino.nome_cracha = jaNaTurmaDestino.nome_cracha || nomeCracha;
             jaNaTurmaDestino.status_aluno_turma = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
             jaNaTurmaDestino.confirmacao_realizada = false;
             jaNaTurmaDestino.checkin_realizado = false;
@@ -4106,7 +4102,6 @@ export class TurmasService {
             const turmaAlunoDestino = this.uow.turmasAlunosRP.create({
                 id_turma: id_turma_destino,
                 id_aluno: turmaAlunoOrigem.id_aluno,
-                nome_cracha: nomeCracha,
                 numero_cracha: numeroCracha,
                 vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
                 origem_aluno: EOrigemAlunos.TRANSFERENCIA,
@@ -4189,7 +4184,7 @@ export class TurmasService {
             id: turmaAlunoCompleta.id,
             id_turma: turmaAlunoCompleta.id_turma,
             id_aluno: turmaAlunoCompleta.id_aluno,
-            nome_cracha: turmaAlunoCompleta.nome_cracha,
+            nome_cracha: turmaAlunoCompleta.id_aluno_fk?.nome_cracha || turmaAlunoCompleta.id_aluno_fk?.nome || '',
             numero_cracha: turmaAlunoCompleta.numero_cracha,
             vaga_bonus: turmaAlunoCompleta.vaga_bonus,
             status_aluno_turma: turmaAlunoCompleta.status_aluno_turma,
@@ -4658,7 +4653,6 @@ export class TurmasService {
                 id_turma: turmaCancelada.id,
                 id_aluno: turmaAlunoOrigem.id_aluno,
                 id_aluno_bonus: turmaAlunoOrigem.id_aluno_bonus,
-                nome_cracha: turmaAlunoOrigem.nome_cracha,
                 numero_cracha: numeroCracha,
                 vaga_bonus: turmaAlunoOrigem.vaga_bonus ?? false,
                 origem_aluno: turmaAlunoOrigem.origem_aluno,
@@ -5583,7 +5577,7 @@ export class TurmasService {
             const statusAnterior = turmaAluno.status_aluno_turma;
             const presencaAnterior = turmaAluno.presenca_turma;
             const beforeSnapshot = {
-                nome_cracha: turmaAluno.nome_cracha,
+                nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                 pendencia_pagamento: turmaAluno.pendencia_pagamento,
                 quantidade_inscricoes: turmaAluno.quantidade_inscricoes,
@@ -5597,9 +5591,8 @@ export class TurmasService {
             };
 
             // Atualizar campos fornecidos
+            // O "como gostaria de ser chamado" agora vive apenas no cadastro do aluno.
             if (updateAlunoDto.nome_cracha !== undefined) {
-                turmaAluno.nome_cracha = updateAlunoDto.nome_cracha;
-                // Mantém o "como gostaria de ser chamado" sincronizado com o cadastro do aluno.
                 if (turmaAluno.id_aluno_fk && turmaAluno.id_aluno_fk.nome_cracha !== updateAlunoDto.nome_cracha) {
                     turmaAluno.id_aluno_fk.nome_cracha = updateAlunoDto.nome_cracha;
                     await this.uow.alunosRP.update({ id: turmaAluno.id_aluno_fk.id }, { nome_cracha: updateAlunoDto.nome_cracha });
@@ -5689,7 +5682,7 @@ export class TurmasService {
             if (solicitouCancelamento) {
                 const afterCancelSnapshot = {
                     ...beforeSnapshot,
-                    nome_cracha: turmaAluno.nome_cracha,
+                    nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha,
                     url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
                     pendencia_pagamento: turmaAluno.pendencia_pagamento,
                     quantidade_inscricoes: turmaAluno.quantidade_inscricoes,
@@ -5725,7 +5718,7 @@ export class TurmasService {
                     id: turmaAluno.id,
                     id_turma: turmaAluno.id_turma,
                     id_aluno: turmaAluno.id_aluno,
-                    nome_cracha: turmaAluno.nome_cracha,
+                    nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha || turmaAluno.id_aluno_fk?.nome || '',
                     numero_cracha: turmaAluno.numero_cracha,
                     vaga_bonus: turmaAluno.vaga_bonus,
                     origem_aluno: turmaAluno.origem_aluno,
@@ -5754,7 +5747,7 @@ export class TurmasService {
 
             const turmaAlunoAtualizada = await this.uow.turmasAlunosRP.save(turmaAluno);
             const afterSnapshot = {
-                nome_cracha: turmaAlunoAtualizada.nome_cracha,
+                nome_cracha: turmaAlunoAtualizada.id_aluno_fk?.nome_cracha,
                 url_comprovante_pgto: turmaAlunoAtualizada.url_comprovante_pgto,
                 pendencia_pagamento: turmaAlunoAtualizada.pendencia_pagamento,
                 quantidade_inscricoes: turmaAlunoAtualizada.quantidade_inscricoes,
@@ -5800,7 +5793,7 @@ export class TurmasService {
                 id: turmaAlunoAtualizada.id,
                 id_turma: turmaAlunoAtualizada.id_turma,
                 id_aluno: turmaAlunoAtualizada.id_aluno,
-                nome_cracha: turmaAlunoAtualizada.nome_cracha,
+                nome_cracha: turmaAlunoAtualizada.id_aluno_fk?.nome_cracha || turmaAlunoAtualizada.id_aluno_fk?.nome || '',
                 numero_cracha: turmaAlunoAtualizada.numero_cracha,
                 vaga_bonus: turmaAlunoAtualizada.vaga_bonus,
                 origem_aluno: turmaAlunoAtualizada.origem_aluno,

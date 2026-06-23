@@ -561,9 +561,9 @@ export class UploadService {
                 : [];
 
         const vinculoByKey = new Map<string, (typeof vinculosExistentes)[number]>(
-            vinculosExistentes.map((v) => [`${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`, v]),
+            vinculosExistentes.map((v) => [`${v.id_turma}|${v.id_aluno}`, v]),
         );
-        const runtimeVinculoKeys = new Set(vinculosExistentes.map((v) => `${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`));
+        const runtimeVinculoKeys = new Set(vinculosExistentes.map((v) => `${v.id_turma}|${v.id_aluno}`));
 
         const numerosCrachaExistentes = turmaIdsDestino.length
             ? await this.uow.turmasAlunosRP.find({
@@ -585,7 +585,6 @@ export class UploadService {
         const createsToSave: Array<{
             id_turma: number;
             id_aluno: string;
-            nome_cracha: string;
             numero_cracha: string;
             origem_aluno: EOrigemAlunos;
             status_aluno_turma: EStatusAlunosTurmas;
@@ -598,7 +597,7 @@ export class UploadService {
                 const aluno = alunoByEmail.get(item.email) || null;
 
                 const alunoId = aluno ? String(aluno.id) : '';
-                const vinculoKey = `${item.turmaDestinoId}|${alunoId}|${item.nomeCracha}`;
+                const vinculoKey = `${item.turmaDestinoId}|${alunoId}`;
                 const existeVinculo = Boolean(aluno && runtimeVinculoKeys.has(vinculoKey));
                 const vinculoPersistido = aluno ? vinculoByKey.get(vinculoKey) : undefined;
 
@@ -658,7 +657,6 @@ export class UploadService {
                     createsToSave.push({
                         id_turma: item.turmaDestinoId,
                         id_aluno: String(aluno.id),
-                        nome_cracha: item.nomeCracha,
                         numero_cracha: numeroCracha,
                         origem_aluno: item.origemFinal,
                         status_aluno_turma: item.statusFinal,
@@ -667,7 +665,7 @@ export class UploadService {
                     });
                 }
 
-                runtimeVinculoKeys.add(`${item.turmaDestinoId}|${aluno.id}|${item.nomeCracha}`);
+                runtimeVinculoKeys.add(`${item.turmaDestinoId}|${aluno.id}`);
                 totalCriadas++;
                 preview.push({
                     linha: item.linha,
@@ -1190,9 +1188,9 @@ export class UploadService {
                 : [];
 
         const vinculoByKey = new Map<string, (typeof vinculosExistentes)[number]>(
-            vinculosExistentes.map((v) => [`${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`, v]),
+            vinculosExistentes.map((v) => [`${v.id_turma}|${v.id_aluno}`, v]),
         );
-        const runtimeVinculoKeys = new Set(vinculosExistentes.map((v) => `${v.id_turma}|${v.id_aluno}|${v.nome_cracha}`));
+        const runtimeVinculoKeys = new Set(vinculosExistentes.map((v) => `${v.id_turma}|${v.id_aluno}`));
 
         const numerosCrachaExistentes = turmaIdsDestino.length
             ? await this.uow.turmasAlunosRP.find({
@@ -1216,7 +1214,6 @@ export class UploadService {
         const createsToSave: Array<{
             id_turma: number;
             id_aluno: string;
-            nome_cracha: string;
             numero_cracha: string;
             origem_aluno: EOrigemAlunos;
             status_aluno_turma: EStatusAlunosTurmas;
@@ -1231,7 +1228,7 @@ export class UploadService {
             try {
                 const aluno = alunoByEmail.get(item.email) || null;
                 const alunoId = aluno ? String(aluno.id) : '';
-                const vinculoKey = `${item.turmaDestinoId}|${alunoId}|${item.nomeCracha}`;
+                const vinculoKey = `${item.turmaDestinoId}|${alunoId}`;
                 const existeVinculo = Boolean(aluno && runtimeVinculoKeys.has(vinculoKey));
                 const vinculoPersistido = aluno ? vinculoByKey.get(vinculoKey) : undefined;
                 const isBonus = item.origemFinal === EOrigemAlunos.ALUNO_BONUS;
@@ -1337,7 +1334,6 @@ export class UploadService {
                     createsToSave.push({
                         id_turma: item.turmaDestinoId,
                         id_aluno: String(aluno.id),
-                        nome_cracha: item.nomeCracha,
                         numero_cracha: numeroCracha,
                         origem_aluno: item.origemFinal,
                         status_aluno_turma: item.statusFinal,
@@ -1353,7 +1349,7 @@ export class UploadService {
                     });
                 }
 
-                runtimeVinculoKeys.add(`${item.turmaDestinoId}|${aluno.id}|${item.nomeCracha}`);
+                runtimeVinculoKeys.add(`${item.turmaDestinoId}|${aluno.id}`);
                 totalCriadas++;
                 preview.push({
                     linha: item.linha,
@@ -1409,7 +1405,7 @@ export class UploadService {
                           },
                       })
                     : [];
-            const vinculoSalvoByKey = new Map(vinculosSalvos.map((vinculo) => [`${vinculo.id_turma}|${vinculo.id_aluno}|${vinculo.nome_cracha}`, vinculo]));
+            const vinculoSalvoByKey = new Map(vinculosSalvos.map((vinculo) => [`${vinculo.id_turma}|${vinculo.id_aluno}`, vinculo]));
 
             const idsAlunosNumericos = Array.from(new Set(Array.from(alunoByEmail.values()).map((aluno) => aluno.id)));
             const historicosExistentes =
@@ -1432,7 +1428,7 @@ export class UploadService {
                 const aluno = alunoByEmail.get(cand.email);
                 if (!aluno) continue;
 
-                const vinculoKey = `${cand.turmaDestinoId}|${String(aluno.id)}|${cand.nomeCracha}`;
+                const vinculoKey = `${cand.turmaDestinoId}|${String(aluno.id)}`;
                 const vinculoSalvo = vinculoSalvoByKey.get(vinculoKey);
                 if (!vinculoSalvo) continue;
 

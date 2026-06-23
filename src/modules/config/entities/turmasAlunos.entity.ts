@@ -57,9 +57,6 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'boolean', name: 'checkin_realizado', default: false, nullable: false })
     checkin_realizado: boolean;
 
-    @Column({ type: 'varchar', name: 'nome_cracha', nullable: false })
-    nome_cracha: string;
-
     @Column({ type: 'varchar', name: 'numero_cracha', nullable: false })
     numero_cracha: string;
 

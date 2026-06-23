@@ -82,6 +82,7 @@ const ALUNO_TURMA_HISTORICO_TEMPLATES: AlunoTurmaHistoricoTemplateDto[] = [
 const TURMA_STATUS_TIPOS_SNAPSHOT: string[] = [
     'inscritos',
     'origem_masterclass',
+    'origem_presente',
     'origem_bonus',
     'origem_cortesia_sorteio',
     'origem_time_vendas',
@@ -555,6 +556,7 @@ export class TurmasService {
         const baseQb = () => this.uow.turmasAlunosRP.createQueryBuilder('ta').where('ta.id_turma = :id_turma', { id_turma }).andWhere('ta.deletado_em IS NULL');
 
         // TRANSBORDO NÃO conta como extra: aluno de transbordo comprou ingresso (entra como venda/Demais Vendas).
+        // PRESENTE (importação Masterclass) conta como extra.
         const extrasCondicao = `(
             ta.vaga_bonus = true
             OR ta.origem_aluno IN (:...origensExtra)
@@ -564,7 +566,7 @@ export class TurmasService {
             baseQb().getCount(),
             baseQb()
                 .andWhere(extrasCondicao, {
-                    origensExtra: [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO],
+                    origensExtra: [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.PRESENTE],
                 })
                 .getCount(),
             baseQb()
@@ -780,7 +782,7 @@ export class TurmasService {
             )
             .addSelect(`SUM(CASE WHEN aluno.status_aluno_geral = :inad2 THEN 1 ELSE 0 END)::int`, 'inadimplentes')
             .setParameter('stConfirm', stConfirm)
-            .setParameter('origensExtras', [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO])
+            .setParameter('origensExtras', [EOrigemAlunos.ALUNO_BONUS, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.PRESENTE])
             .setParameter('origemTr', EOrigemAlunos.TRANSFERENCIA)
             .setParameter('pres', EPresencaTurmas.PRESENTE)
             .setParameter('inad', EStatusAlunosGeral.INADIMPLENTE)
@@ -3553,6 +3555,7 @@ export class TurmasService {
     private async getClassificacaoOrigemPorTurmaAluno(id_turma: number, turmaAlunoIds?: string[]): Promise<Map<string, { canal: string; categoria: string }>> {
         const isTruthyPgBool = (v: unknown): boolean => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
         const labelPorBucket: Record<string, string> = {
+            presente: 'Presente',
             bonus: 'Bônus',
             cortesia_sorteio: 'Cortesia/Sorteio',
             transferencia: 'Transferência',
@@ -3562,8 +3565,8 @@ export class TurmasService {
             liberty: 'Liberty',
             importacao: 'Demais Vendas',
         };
-        // Espelha o card de Extras do dashboard: extras = bônus + cortesia/sorteio + transferência.
-        const bucketsExtra = new Set(['bonus', 'cortesia_sorteio', 'transferencia']);
+        // Espelha o card de Extras do dashboard: extras = presente + bônus + cortesia/sorteio + transferência.
+        const bucketsExtra = new Set(['presente', 'bonus', 'cortesia_sorteio', 'transferencia']);
 
         if (turmaAlunoIds && turmaAlunoIds.length === 0) {
             return new Map();
@@ -3633,7 +3636,10 @@ export class TurmasService {
             const origemEhMc = isTruthyPgBool(row.origem_eh_mc);
 
             let bucket = 'importacao';
-            if (vagaBonus || origemAluno === EOrigemAlunos.ALUNO_BONUS) bucket = 'bonus';
+            // Presente (importação Masterclass): origem própria, conta como extra. Tem prioridade
+            // sobre os demais buckets (inclusive MC_*) para não ser reclassificado.
+            if (origemAluno === EOrigemAlunos.PRESENTE) bucket = 'presente';
+            else if (vagaBonus || origemAluno === EOrigemAlunos.ALUNO_BONUS) bucket = 'bonus';
             else if (origemAluno === EOrigemAlunos.CORTESIA || origemAluno === EOrigemAlunos.SORTEIO) bucket = 'cortesia_sorteio';
             else if (histTimeVendas) bucket = 'time_vendas';
             else if (codigo === 'TRANSBORDO') bucket = 'transbordo';
@@ -4944,6 +4950,7 @@ export class TurmasService {
             .getRawMany();
 
         let origemMasterclass = 0;
+        let origemPresente = 0;
         let origemBonus = 0;
         let origemCortesiaSorteio = 0;
         let origemTimeVendas = 0;
@@ -4966,6 +4973,13 @@ export class TurmasService {
                 .toUpperCase();
             /** Origem externa é MC/palestra: alinha a `isPalestra` usada em findById (tipo_palestra ou tipo_treinamento false) */
             const origemEhPalestraMc = row.origem_turma_eh_palestra_ou_masterclass;
+
+            // Presente (importação Masterclass): origem própria que conta como extra.
+            // Prioridade máxima para não ser reclassificada como MC/Demais Vendas.
+            if (origemAluno === EOrigemAlunos.PRESENTE) {
+                origemPresente += 1;
+                continue;
+            }
 
             if (vagaBonus || origemAluno === EOrigemAlunos.ALUNO_BONUS) {
                 origemBonus += 1;
@@ -5031,6 +5045,7 @@ export class TurmasService {
             id_turma,
             inscritos,
             origem_masterclass: origemMasterclass,
+            origem_presente: origemPresente,
             origem_bonus: origemBonus,
             origem_time_vendas: origemTimeVendas,
             origem_transbordo: origemTransbordo,
@@ -5106,11 +5121,17 @@ export class TurmasService {
             case 'inscritos':
                 titulo = 'Inscritos';
                 break;
+            case 'origem_presente':
+                titulo = 'Origem: Presente';
+                qb.andWhere('ta.origem_aluno = :origemPresente', {
+                    origemPresente: EOrigemAlunos.PRESENTE,
+                });
+                break;
             case 'origem_masterclass':
                 titulo = 'Origem: Masterclass';
                 qb.andWhere('ta.vaga_bonus = false');
                 qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclMc))', {
-                    origemExclMc: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
+                    origemExclMc: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.PRESENTE],
                 });
                 qb.andWhere(
                     `NOT EXISTS (
@@ -5194,7 +5215,7 @@ export class TurmasService {
                 titulo = 'Origem: Time de vendas';
                 qb.andWhere('ta.vaga_bonus = false');
                 qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclTv))', {
-                    origemExclTv: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO],
+                    origemExclTv: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.PRESENTE],
                 });
                 qb.andWhere(
                     `EXISTS (
@@ -5234,7 +5255,7 @@ export class TurmasService {
                     origemBonus: EOrigemAlunos.ALUNO_BONUS,
                 });
                 qb.andWhere('(ta.origem_aluno IS NULL OR ta.origem_aluno NOT IN (:...origemExclDemais))', {
-                    origemExclDemais: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.TRANSFERENCIA],
+                    origemExclDemais: [EOrigemAlunos.CORTESIA, EOrigemAlunos.SORTEIO, EOrigemAlunos.TRANSFERENCIA, EOrigemAlunos.PRESENTE],
                 });
                 qb.andWhere("UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, ''))) NOT IN (:...origensPlanilhaExclDemais)", {
                     origensPlanilhaExclDemais: ['TRANSBORDO', 'LIBERTY'],

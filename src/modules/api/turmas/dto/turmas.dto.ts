@@ -945,6 +945,8 @@ export class TurmaStatusResumoResponseDto {
     id_turma: number;
     inscritos: number;
     origem_masterclass: number;
+    /** Presente (importação Masterclass): conta como extra. */
+    origem_presente: number;
     origem_bonus: number;
     origem_time_vendas: number;
     origem_transbordo: number;

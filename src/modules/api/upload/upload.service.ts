@@ -904,6 +904,9 @@ export class UploadService {
             const isBonusOrigemMasterclass = origemMasterclass.isBonusOrigem && !origemEhMasterclass;
             const codigoOrigem = this.normalizeCodeKey(origemMasterclass.codigoParaLookup || row.turmaOrigemCodigo);
             const origemVenda = origemMasterclass.isTimeDeVendas;
+            // Estratégia "Presente": todas as inscrições da linha entram com origem PRESENTE
+            // (extra), sem virar bônus/transferência e sem código de turma de origem.
+            const origemEhPresente = origemMasterclass.isPresenteOrigem;
             const origemRaw = String(row.turmaOrigemCodigo || '').trim();
             const exibirCodigoExtraido =
                 Boolean(origemMasterclass.codigoParaLookup) && this.normalizeCodeKey(origemRaw) !== this.normalizeCodeKey(origemMasterclass.codigoParaLookup);
@@ -986,7 +989,8 @@ export class UploadService {
             // "Evento" = origem que não é Masterclass (MC_*), nem Imersão de Negócios
             // (IDN_*), nem Time de Vendas, nem origem-bônus explícita, e possui código
             // (ex.: IPR_*, CONF_*, MG_*).
-            const origemEhEvento = !origemEhMasterclass && !origemEhImersaoNegocios && !origemVenda && !isBonusOrigemMasterclass && Boolean(codigoOrigem);
+            const origemEhEvento =
+                !origemEhMasterclass && !origemEhImersaoNegocios && !origemVenda && !isBonusOrigemMasterclass && !origemEhPresente && Boolean(codigoOrigem);
             // Regra: destino IPR (Imersão Prosperar) + origem de evento — a 1ª inscrição
             // é compra (COMPROU_INGRESSO) e as demais entram como bônus do titular
             // ("nome bonus N", com o mesmo complemento no e-mail). Nos demais casos
@@ -1007,7 +1011,8 @@ export class UploadService {
                 // quando a regra evento→IPR se aplica. O índice de bônus reinicia em 1.
                 const ehBonusEventoIPR = aplicarBonusEventoIPR && !isPrimeiraInscricao;
                 const bonusIndex = numeroInscricao - 1;
-                const isBonusInscricao = isBonusOrigemMasterclass || ehBonusEventoIPR;
+                // Presente nunca é bônus: mantém o sufixo "insc N" e a origem PRESENTE.
+                const isBonusInscricao = !origemEhPresente && (isBonusOrigemMasterclass || ehBonusEventoIPR);
 
                 let nomeCracha: string;
                 let emailCandidato: string;
@@ -1045,7 +1050,11 @@ export class UploadService {
                     modoConfronto: isTurmaDestinoConfronto,
                     statusPlanilha: `INCLUSAO:${row.dataInclusao || '-'}`,
                     statusFinal: statusImportacao,
-                    origemFinal: isBonusInscricao ? EOrigemAlunos.ALUNO_BONUS : EOrigemAlunos.COMPROU_INGRESSO,
+                    origemFinal: origemEhPresente
+                        ? EOrigemAlunos.PRESENTE
+                        : isBonusInscricao
+                        ? EOrigemAlunos.ALUNO_BONUS
+                        : EOrigemAlunos.COMPROU_INGRESSO,
                     idTurmaTransferenciaDe,
                     codigoTurmaOrigemPlanilha,
                     titularBonusEmail: ehBonusEventoIPR ? emailNormalizado : undefined,
@@ -2354,9 +2363,11 @@ export class UploadService {
         codigoTurmaOrigemPlanilha: string | null;
         isTimeDeVendas: boolean;
         isBonusOrigem: boolean;
+        isPresenteOrigem: boolean;
     } {
         const original = String(origemRaw || '').trim();
         const normalizedCode = this.normalizeCodeKey(original);
+        const normalizedText = this.normalizeText(original);
         const isTimeDeVendas = normalizedCode.includes('TIME_DE_VENDAS') || normalizedCode.includes('TIMEDEVENDAS');
 
         if (isTimeDeVendas) {
@@ -2366,6 +2377,20 @@ export class UploadService {
                 codigoTurmaOrigemPlanilha: null,
                 isTimeDeVendas: true,
                 isBonusOrigem: false,
+                isPresenteOrigem: false,
+            };
+        }
+
+        // Estratégia "Presente": origem própria (não é transferência nem bônus). Conta como
+        // aluno extra e influencia a meta. Identificada pelo texto "PRESENTE" na coluna de origem.
+        if (normalizedText.includes('PRESENTE')) {
+            return {
+                codigoParaLookup: '',
+                descricao: 'Presente',
+                codigoTurmaOrigemPlanilha: null,
+                isTimeDeVendas: false,
+                isBonusOrigem: false,
+                isPresenteOrigem: true,
             };
         }
 
@@ -2377,6 +2402,7 @@ export class UploadService {
                 codigoTurmaOrigemPlanilha: bonusTurmaCodigo.slice(0, 255),
                 isTimeDeVendas: false,
                 isBonusOrigem: true,
+                isPresenteOrigem: false,
             };
         }
 
@@ -2386,6 +2412,7 @@ export class UploadService {
             codigoTurmaOrigemPlanilha: original.slice(0, 255) || null,
             isTimeDeVendas: false,
             isBonusOrigem: false,
+            isPresenteOrigem: false,
         };
     }
 

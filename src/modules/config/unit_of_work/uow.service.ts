@@ -64,7 +64,7 @@ export class UnitOfWorkService {
                         SUM(
                             CASE
                                 WHEN ta."vaga_bonus" = true
-                                    OR ta."origem_aluno" IN ('ALUNO_BONUS', 'TRANSFERENCIA', 'SORTEIO')
+                                    OR ta."origem_aluno" IN ('ALUNO_BONUS', 'TRANSFERENCIA', 'SORTEIO', 'PRESENTE')
                                 THEN 1 ELSE 0
                             END
                         )::int AS extras

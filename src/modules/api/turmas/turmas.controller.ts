@@ -24,6 +24,8 @@ import {
     CreateAlunoTurmaHistoricoDto,
     RemoveAlunoTurmaDto,
     AlunoHistoricoObservacoesResponseDto,
+    GetExtratoMovimentacaoDto,
+    ExtratoMovimentacaoResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
@@ -109,6 +111,12 @@ export class TurmasController {
         const limitNum = limit ? parseInt(limit.toString()) : 10;
         const searchStr = typeof search === 'string' && search.trim() ? search.trim() : undefined;
         return await this.turmasService.getAlunosDisponiveis(id_turma, pageNum, limitNum, searchStr);
+    }
+
+    @Get('extrato-movimentacao')
+    @UseGuards(JwtAuthGuard)
+    async getExtratoMovimentacao(@Query() filtros: GetExtratoMovimentacaoDto): Promise<ExtratoMovimentacaoResponseDto> {
+        return this.turmasService.getExtratoMovimentacaoTurmas(filtros);
     }
 
     @Get('bonus-comprador/:id_aluno_comprador')

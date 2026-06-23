@@ -1043,3 +1043,92 @@ export class SoftDeleteTurmaDto {
     })
     atualizado_por?: number;
 }
+
+/**
+ * Helper de Transform: aceita "1,2,3" (string CSV) ou ["1","2"] (array) e devolve number[].
+ */
+const transformToNumberArray = ({ value }: { value: unknown }): number[] => {
+    if (value === null || value === undefined || value === '') return [];
+    const raw = Array.isArray(value) ? value : String(value).split(',');
+    return raw
+        .map((item) => parseInt(String(item).trim(), 10))
+        .filter((n) => !Number.isNaN(n));
+};
+
+/** Filtros do extrato de movimentação de turmas (acompanhamento extratificado). */
+export class GetExtratoMovimentacaoDto {
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    data_inicio: string; // YYYY-MM-DD
+
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    data_final: string; // YYYY-MM-DD
+
+    @IsOptional()
+    @IsArray()
+    @Transform(transformToNumberArray)
+    treinamento_ids?: number[];
+
+    @IsOptional()
+    @IsArray()
+    @Transform(transformToNumberArray)
+    turma_ids?: number[];
+}
+
+/** Detalhe de uma categoria/motivo dentro de entrada ou saída. */
+export class ExtratoMovimentacaoDetalheDto {
+    /** Rótulo da categoria (ex.: Masterclass, Time de Vendas, Cancelamento, Transferência). */
+    label: string;
+    /** Quantidade de alunos nessa categoria no período/dia. */
+    total: number;
+}
+
+/** Movimentação de um único dia dentro do período (quebra diária). */
+export class ExtratoMovimentacaoDiaDto {
+    /** Data do dia no formato YYYY-MM-DD. */
+    data: string;
+    saldo_inicial: number;
+    entrada: number;
+    saida: number;
+    saldo_final: number;
+    /** Percentual de variação do dia: (entrada - saída) / saldo_inicial * 100. */
+    performance: number;
+    entrada_detalhes: ExtratoMovimentacaoDetalheDto[];
+    saida_detalhes: ExtratoMovimentacaoDetalheDto[];
+}
+
+/** Linha do extrato: uma turma agregada no período, com quebra diária. */
+export class ExtratoMovimentacaoTurmaDto {
+    id_turma: number;
+    /** Rótulo da turma: "<treinamento> - <edição>". */
+    turma_label: string;
+    treinamento_nome?: string | null;
+    sigla_treinamento?: string | null;
+    edicao_turma?: string | null;
+    /** Saldo no início do período. */
+    saldo: number;
+    entrada: number;
+    saida: number;
+    /** Resultado/saldo final = saldo + entrada - saída. */
+    resultado: number;
+    /** Performance do período: (entrada - saída) / saldo * 100. */
+    performance: number;
+    entrada_detalhes: ExtratoMovimentacaoDetalheDto[];
+    saida_detalhes: ExtratoMovimentacaoDetalheDto[];
+    por_dia: ExtratoMovimentacaoDiaDto[];
+}
+
+export class ExtratoMovimentacaoResponseDto {
+    data_inicio: string;
+    data_final: string;
+    data: ExtratoMovimentacaoTurmaDto[];
+    /** Totais consolidados de todas as turmas filtradas. */
+    totais: {
+        saldo: number;
+        entrada: number;
+        saida: number;
+        resultado: number;
+        performance: number;
+    };
+}

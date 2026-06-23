@@ -30,6 +30,11 @@ import {
     AlunoHistoricoObservacoesResponseDto,
     AlunoHistoricoObservacaoItemDto,
     AlunoHistoricoTurmaFiltroDto,
+    GetExtratoMovimentacaoDto,
+    ExtratoMovimentacaoResponseDto,
+    ExtratoMovimentacaoTurmaDto,
+    ExtratoMovimentacaoDiaDto,
+    ExtratoMovimentacaoDetalheDto,
 } from './dto/turmas.dto';
 import { FindManyOptions, FindOptionsSelect, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -4255,6 +4260,290 @@ export class TurmasService {
         return { data };
     }
 
+    /**
+     * Extrato extratificado de movimentação de turmas (acompanhamento/conferência).
+     * Para cada turma dentro do período, calcula saldo (no início do período), entrada,
+     * saída, resultado (= saldo + entrada - saída) e performance (%), com detalhamento por
+     * canal (entrada) e por motivo (saída) e a quebra diária encadeada.
+     *
+     * Fontes: `historico_alunos_turmas_logs` (CRIACAO/CANCELAMENTO/REMOCAO) e
+     * `historico_transferencias_alunos` (entrada/saída por transferência). Cancelamentos geram
+     * transferência para a turma CANCELADA — por isso transferências cujo destino é uma turma
+     * especial (CANCELADA etc.) são ignoradas como saída de transferência (já contadas como
+     * cancelamento), evitando dupla contagem.
+     */
+    async getExtratoMovimentacaoTurmas(filtros: GetExtratoMovimentacaoDto): Promise<ExtratoMovimentacaoResponseDto> {
+        try {
+            const dataInicioStr = (filtros?.data_inicio || '').trim();
+            const dataFinalStr = (filtros?.data_final || '').trim();
+            if (!dataInicioStr || !dataFinalStr) {
+                throw new BadRequestException('Informe o período (data_inicio e data_final).');
+            }
+            const start = new Date(`${dataInicioStr}T00:00:00`);
+            const endInclusive = new Date(`${dataFinalStr}T23:59:59.999`);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(endInclusive.getTime()) || start > endInclusive) {
+                throw new BadRequestException('Período inválido.');
+            }
+            const agora = new Date();
+            // Reconstrução do saldo inicial usa todos os movimentos do início do período até agora.
+            const reconUpper = agora > endInclusive ? agora : endInclusive;
+
+            const treinamentoIds = (filtros.treinamento_ids || []).filter((n) => Number.isFinite(n));
+            const turmaIds = (filtros.turma_ids || []).filter((n) => Number.isFinite(n));
+            const hasScope = treinamentoIds.length > 0 || turmaIds.length > 0;
+
+            const EDICOES_ESPECIAIS = ['SEM_TURMA', 'SEM_TURMAS', 'INADIMPLENTE', 'JURIDICA', 'JURIDICO', 'CANCELADA'];
+
+            // Turmas "especiais" (CANCELADA etc.): usadas para diferenciar cancelamento de transferência real.
+            const specialRows = await this.uow.turmasRP
+                .createQueryBuilder('t')
+                .select('t.id', 'id')
+                .where(`UPPER(TRIM(COALESCE(t.edicao_turma, ''))) IN (:...edicoes)`, { edicoes: EDICOES_ESPECIAIS })
+                .getRawMany<{ id: number }>();
+            const specialSet = new Set(specialRows.map((r) => Number(r.id)));
+
+            // Turmas candidatas (exclui especiais).
+            const turmaQb = this.uow.turmasRP
+                .createQueryBuilder('t')
+                .leftJoinAndSelect('t.id_treinamento_fk', 'tr')
+                .where('t.deletado_em IS NULL')
+                .andWhere(`(t.edicao_turma IS NULL OR UPPER(TRIM(t.edicao_turma)) NOT IN (:...edicoes))`, { edicoes: EDICOES_ESPECIAIS });
+            if (turmaIds.length > 0) turmaQb.andWhere('t.id IN (:...turmaIds)', { turmaIds });
+            if (treinamentoIds.length > 0) turmaQb.andWhere('t.id_treinamento IN (:...treinamentoIds)', { treinamentoIds });
+            const turmas = await turmaQb.getMany();
+            const ids = turmas.map((t) => t.id);
+
+            if (ids.length === 0) {
+                return {
+                    data_inicio: dataInicioStr,
+                    data_final: dataFinalStr,
+                    data: [],
+                    totais: { saldo: 0, entrada: 0, saida: 0, resultado: 0, performance: 0 },
+                };
+            }
+
+            // Saldo atual real por turma (matrículas ativas).
+            const saldoRows = await this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .select('ta.id_turma', 'id_turma')
+                .addSelect('COUNT(*)', 'total')
+                .where('ta.id_turma IN (:...ids)', { ids })
+                .andWhere('ta.deletado_em IS NULL')
+                .groupBy('ta.id_turma')
+                .getRawMany<{ id_turma: number; total: string }>();
+            const saldoAtualMap = new Map<number, number>();
+            for (const r of saldoRows) saldoAtualMap.set(Number(r.id_turma), Number(r.total));
+
+            // Movimentos a partir dos logs (CRIACAO/CANCELAMENTO/REMOCAO) no intervalo [start, reconUpper].
+            const logRows = await this.uow.historicoAlunosTurmasLogsRP
+                .createQueryBuilder('l')
+                .select('l.id_turma', 'id_turma')
+                .addSelect('l.id_turma_aluno', 'id_turma_aluno')
+                .addSelect('l.tipo_acao', 'tipo_acao')
+                .addSelect(`to_char(l.data_acao, 'YYYY-MM-DD')`, 'dia')
+                .where('l.id_turma IN (:...ids)', { ids })
+                .andWhere(`l.tipo_acao IN ('CRIACAO', 'CANCELAMENTO', 'REMOCAO')`)
+                .andWhere('l.data_acao >= :start', { start })
+                .andWhere('l.data_acao <= :reconUpper', { reconUpper })
+                .andWhere('l.deletado_em IS NULL')
+                .getRawMany<{ id_turma: number; id_turma_aluno: string; tipo_acao: string; dia: string }>();
+
+            // Movimentos de transferência (entrada/saída) no intervalo.
+            const transferRows = await this.uow.historicoTransferenciasRP
+                .createQueryBuilder('h')
+                .select('h.id_turma_de', 'id_turma_de')
+                .addSelect('h.id_turma_para', 'id_turma_para')
+                .addSelect(`to_char(h.criado_em, 'YYYY-MM-DD')`, 'dia')
+                .where('(h.id_turma_de IN (:...ids) OR h.id_turma_para IN (:...ids))', { ids })
+                .andWhere('h.id_turma_de <> h.id_turma_para')
+                .andWhere('h.deletado_em IS NULL')
+                .andWhere('h.criado_em >= :start', { start })
+                .andWhere('h.criado_em <= :reconUpper', { reconUpper })
+                .getRawMany<{ id_turma_de: number; id_turma_para: number; dia: string }>();
+
+            type Mov = { dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string; id_turma_aluno?: string; classificarCanal?: boolean };
+            const movsPorTurma = new Map<number, Mov[]>();
+            const pushMov = (idTurma: number, mov: Mov) => {
+                const arr = movsPorTurma.get(idTurma);
+                if (arr) arr.push(mov);
+                else movsPorTurma.set(idTurma, [mov]);
+            };
+            const idsSet = new Set(ids);
+
+            // CRIACAO -> entrada (canal a classificar); CANCELAMENTO/REMOCAO -> saída.
+            const criacaoIdsPorTurma = new Map<number, Set<string>>();
+            for (const row of logRows) {
+                const idTurma = Number(row.id_turma);
+                if (row.tipo_acao === 'CRIACAO') {
+                    pushMov(idTurma, {
+                        dia: row.dia,
+                        tipo: 'ENTRADA',
+                        categoria: 'Demais Vendas',
+                        id_turma_aluno: String(row.id_turma_aluno),
+                        classificarCanal: true,
+                    });
+                    const set = criacaoIdsPorTurma.get(idTurma) ?? new Set<string>();
+                    set.add(String(row.id_turma_aluno));
+                    criacaoIdsPorTurma.set(idTurma, set);
+                } else if (row.tipo_acao === 'CANCELAMENTO') {
+                    pushMov(idTurma, { dia: row.dia, tipo: 'SAIDA', categoria: 'Cancelamento' });
+                } else if (row.tipo_acao === 'REMOCAO') {
+                    pushMov(idTurma, { dia: row.dia, tipo: 'SAIDA', categoria: 'Exclusão/Remoção' });
+                }
+            }
+
+            for (const row of transferRows) {
+                const de = Number(row.id_turma_de);
+                const para = Number(row.id_turma_para);
+                // Entrada por transferência recebida.
+                if (idsSet.has(para)) {
+                    pushMov(para, { dia: row.dia, tipo: 'ENTRADA', categoria: 'Transferência' });
+                }
+                // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
+                if (idsSet.has(de) && !specialSet.has(para)) {
+                    pushMov(de, { dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência' });
+                }
+            }
+
+            // Classificação de canal (mesma regra do dashboard) para as entradas por nova inscrição.
+            const canalPorTurmaAluno = new Map<string, string>(); // key `${idTurma}:${idTurmaAluno}`
+            for (const [idTurma, set] of criacaoIdsPorTurma.entries()) {
+                const idsAlunos = Array.from(set);
+                if (idsAlunos.length === 0) continue;
+                const classif = await this.getClassificacaoOrigemPorTurmaAluno(idTurma, idsAlunos);
+                for (const idAluno of idsAlunos) {
+                    canalPorTurmaAluno.set(`${idTurma}:${idAluno}`, classif.get(idAluno)?.canal || 'Demais Vendas');
+                }
+            }
+
+            // Dias do período (para a quebra diária encadeada).
+            const diasPeriodo: string[] = [];
+            {
+                const cur = new Date(start);
+                while (cur <= endInclusive) {
+                    diasPeriodo.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`);
+                    cur.setDate(cur.getDate() + 1);
+                }
+            }
+
+            const round1 = (n: number) => Math.round(n * 10) / 10;
+            const calcPerformance = (saldoInicial: number, entrada: number, saida: number): number => {
+                const diff = entrada - saida;
+                if (saldoInicial > 0) return round1((diff / saldoInicial) * 100);
+                if (diff === 0) return 0;
+                return diff > 0 ? 100 : -100;
+            };
+            const agruparDetalhes = (movs: Mov[], tipo: 'ENTRADA' | 'SAIDA', idTurma: number): ExtratoMovimentacaoDetalheDto[] => {
+                const mapa = new Map<string, number>();
+                for (const m of movs) {
+                    if (m.tipo !== tipo) continue;
+                    let label = m.categoria;
+                    if (tipo === 'ENTRADA' && m.classificarCanal && m.id_turma_aluno) {
+                        label = canalPorTurmaAluno.get(`${idTurma}:${m.id_turma_aluno}`) || 'Demais Vendas';
+                    }
+                    mapa.set(label, (mapa.get(label) ?? 0) + 1);
+                }
+                return Array.from(mapa.entries())
+                    .map(([label, total]) => ({ label, total }))
+                    .sort((a, b) => b.total - a.total);
+            };
+
+            const data: ExtratoMovimentacaoTurmaDto[] = [];
+            for (const turma of turmas) {
+                const movs = movsPorTurma.get(turma.id) ?? [];
+                const saldoAtual = saldoAtualMap.get(turma.id) ?? 0;
+
+                // Reconstrução: saldo no início do período = saldo atual - net(movimentos do início até agora).
+                const sinceStartEntrada = movs.filter((m) => m.tipo === 'ENTRADA').length;
+                const sinceStartSaida = movs.filter((m) => m.tipo === 'SAIDA').length;
+                const saldoInicio = saldoAtual - (sinceStartEntrada - sinceStartSaida);
+
+                // Movimentos dentro do período exibido [start, end].
+                const movsPeriodo = movs.filter((m) => m.dia >= dataInicioStr && m.dia <= dataFinalStr);
+                const entradaPeriodo = movsPeriodo.filter((m) => m.tipo === 'ENTRADA').length;
+                const saidaPeriodo = movsPeriodo.filter((m) => m.tipo === 'SAIDA').length;
+
+                // Período sem movimentação e sem filtro explícito: omite para não poluir.
+                if (!hasScope && movsPeriodo.length === 0) continue;
+
+                const resultado = saldoInicio + entradaPeriodo - saidaPeriodo;
+                const performance = calcPerformance(saldoInicio, entradaPeriodo, saidaPeriodo);
+
+                // Quebra diária encadeada.
+                const porDiaMap = new Map<string, Mov[]>();
+                for (const m of movsPeriodo) {
+                    const arr = porDiaMap.get(m.dia);
+                    if (arr) arr.push(m);
+                    else porDiaMap.set(m.dia, [m]);
+                }
+                const por_dia: ExtratoMovimentacaoDiaDto[] = [];
+                let running = saldoInicio;
+                for (const dia of diasPeriodo) {
+                    const movsDia = porDiaMap.get(dia) ?? [];
+                    const e = movsDia.filter((m) => m.tipo === 'ENTRADA').length;
+                    const s = movsDia.filter((m) => m.tipo === 'SAIDA').length;
+                    const inicial = running;
+                    const finalDia = inicial + e - s;
+                    running = finalDia;
+                    if (e === 0 && s === 0) continue;
+                    por_dia.push({
+                        data: dia,
+                        saldo_inicial: inicial,
+                        entrada: e,
+                        saida: s,
+                        saldo_final: finalDia,
+                        performance: calcPerformance(inicial, e, s),
+                        entrada_detalhes: agruparDetalhes(movsDia, 'ENTRADA', turma.id),
+                        saida_detalhes: agruparDetalhes(movsDia, 'SAIDA', turma.id),
+                    });
+                }
+
+                const treinamentoNome = turma.id_treinamento_fk?.treinamento ?? null;
+                const sigla = turma.id_treinamento_fk?.sigla_treinamento ?? null;
+                const edicao = turma.edicao_turma ?? null;
+                const labelBase = treinamentoNome || sigla || `Turma ${turma.id}`;
+                const turma_label = edicao ? `${labelBase} - ${edicao}` : labelBase;
+
+                data.push({
+                    id_turma: turma.id,
+                    turma_label,
+                    treinamento_nome: treinamentoNome,
+                    sigla_treinamento: sigla,
+                    edicao_turma: edicao,
+                    saldo: saldoInicio,
+                    entrada: entradaPeriodo,
+                    saida: saidaPeriodo,
+                    resultado,
+                    performance,
+                    entrada_detalhes: agruparDetalhes(movsPeriodo, 'ENTRADA', turma.id),
+                    saida_detalhes: agruparDetalhes(movsPeriodo, 'SAIDA', turma.id),
+                    por_dia,
+                });
+            }
+
+            // Ordena por maior movimentação (entrada + saída) desc, depois por nome.
+            data.sort((a, b) => b.entrada + b.saida - (a.entrada + a.saida) || a.turma_label.localeCompare(b.turma_label));
+
+            const totais = data.reduce(
+                (acc, t) => {
+                    acc.saldo += t.saldo;
+                    acc.entrada += t.entrada;
+                    acc.saida += t.saida;
+                    acc.resultado += t.resultado;
+                    return acc;
+                },
+                { saldo: 0, entrada: 0, saida: 0, resultado: 0, performance: 0 },
+            );
+            totais.performance = calcPerformance(totais.saldo, totais.entrada, totais.saida);
+
+            return { data_inicio: dataInicioStr, data_final: dataFinalStr, data, totais };
+        } catch (error) {
+            if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+            this.logger.error(`Erro ao gerar extrato de movimentação de turmas: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+            throw new BadRequestException(error instanceof Error ? error.message : 'Erro desconhecido');
+        }
+    }
+
     async getAlunoTurmaHistorico(id_turma_aluno: string): Promise<AlunoTurmaHistoricoResponseDto> {
         const turmaAluno = await this.uow.turmasAlunosRP.findOne({
             where: { id: id_turma_aluno },
@@ -5617,6 +5906,7 @@ export class TurmasService {
             if (
                 novoStatusAlunoTurma !== undefined &&
                 novoStatusAlunoTurma !== turmaAluno.status_aluno_turma &&
+                novoStatusAlunoTurma !== EStatusAlunosTurmas.CANCELADO &&
                 turmaAluno.id_aluno_fk?.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE
             ) {
                 throw new BadRequestException('Não é possível alterar o status na turma para aluno com status geral INADIMPLENTE.');

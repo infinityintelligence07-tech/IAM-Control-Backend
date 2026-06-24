@@ -66,6 +66,14 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     @Column({ type: 'jsonb', name: 'dados_contrato', nullable: true })
     dados_contrato: any;
 
+    // Comprovante(s) de pagamento desta venda/contrato. É um ARRAY porque cada
+    // pagamento pode ter um ou múltiplos comprovantes (imagens e/ou PDFs em
+    // data URL base64). Fica vinculado ao CONTRATO (e não ao turma_aluno
+    // compartilhado), para que vendas distintas do mesmo aluno na mesma turma
+    // de origem não sobrescrevam o comprovante uma da outra.
+    @Column({ type: 'jsonb', name: 'comprovantes_pagamento', nullable: true })
+    comprovantes_pagamento: string[] | null;
+
     // Campos para assinatura do aluno
     @Column({ type: 'text', name: 'assinatura_aluno_base64', nullable: true })
     assinatura_aluno_base64: string;

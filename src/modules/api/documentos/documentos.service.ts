@@ -293,6 +293,64 @@ export class DocumentosService {
     }
 
     /**
+     * Normaliza o comprovante recebido para um ARRAY de strings (data URLs base64).
+     * O frontend envia: (a) uma única string quando há 1 comprovante, ou
+     * (b) um JSON.stringify de array quando há vários. Também aceita um array já
+     * desserializado. Retorna [] quando vazio/ausente.
+     */
+    private normalizarComprovantesParaArray(valor?: string | string[] | null): string[] {
+        if (valor === undefined || valor === null) return [];
+        if (Array.isArray(valor)) {
+            return valor.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+        }
+        const texto = valor.trim();
+        if (!texto) return [];
+        if (texto.startsWith('[')) {
+            try {
+                const parsed: unknown = JSON.parse(texto);
+                if (Array.isArray(parsed)) {
+                    return parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+                }
+            } catch {
+                // Não é JSON válido: trata como comprovante único abaixo.
+            }
+        }
+        return [texto];
+    }
+
+    /**
+     * Serializa um array de comprovantes para a forma esperada pelo frontend atual:
+     * string única quando há 1, JSON.stringify quando há vários, null quando vazio.
+     */
+    private serializarComprovantes(comprovantes: string[]): string | null {
+        if (!comprovantes || comprovantes.length === 0) return null;
+        if (comprovantes.length === 1) return comprovantes[0];
+        return JSON.stringify(comprovantes);
+    }
+
+    /**
+     * Resolve a lista de comprovantes de uma venda priorizando a fonte vinculada
+     * ao CONTRATO (coluna nova), depois o snapshot em dados_contrato e, por fim,
+     * o turma_aluno compartilhado (legado, antes da migração por contrato).
+     */
+    private resolverComprovantesDoContrato(
+        contrato: { comprovantes_pagamento?: string[] | null } | null | undefined,
+        turmaAlunoDadosContrato: { comprovantes_pagamento?: string[] | null; comprovante_pagamento_base64?: string | null } | null | undefined,
+        turmaAluno: { comprovante_pagamento_base64?: string | null } | null | undefined,
+    ): string[] {
+        const doContrato = this.normalizarComprovantesParaArray(contrato?.comprovantes_pagamento ?? null);
+        if (doContrato.length > 0) return doContrato;
+
+        const doSnapshotArray = this.normalizarComprovantesParaArray(turmaAlunoDadosContrato?.comprovantes_pagamento ?? null);
+        if (doSnapshotArray.length > 0) return doSnapshotArray;
+
+        const doSnapshotString = this.normalizarComprovantesParaArray(turmaAlunoDadosContrato?.comprovante_pagamento_base64 ?? null);
+        if (doSnapshotString.length > 0) return doSnapshotString;
+
+        return this.normalizarComprovantesParaArray(turmaAluno?.comprovante_pagamento_base64 ?? null);
+    }
+
+    /**
      * Calcula o período individual da mentoria para o mentorado.
      * Para mentorias, a duração (em meses, configurada no cadastro do treinamento)
      * passa a contar a partir da assinatura/finalização do contrato (data de início = hoje).
@@ -396,18 +454,11 @@ export class DocumentosService {
                 await this.uow.bumparPicoMetricasTurmas([turmaAluno.id_turma, idTurmaDestino]);
             }
 
-            // Persiste o comprovante de pagamento no turma_aluno vinculado ao
-            // contrato (mesmo registro lido pelo histórico/edição da venda).
-            // Sem isso, o comprovante anexado na etapa da venda só ia para a
-            // matrícula da turma destino e não aparecia no histórico.
-            if (
-                criarContratoDto.comprovante_pagamento_base64 !== undefined &&
-                criarContratoDto.comprovante_pagamento_base64 !== null &&
-                criarContratoDto.comprovante_pagamento_base64 !== ''
-            ) {
-                turmaAluno.comprovante_pagamento_base64 = criarContratoDto.comprovante_pagamento_base64;
-                turmaAluno = await this.uow.turmasAlunosRP.save(turmaAluno);
-            }
+            // Comprovante(s) desta venda. Ficam vinculados ao CONTRATO (coluna
+            // comprovantes_pagamento + snapshot em dados_contrato.turma_aluno) e
+            // NÃO no turma_aluno compartilhado — assim duas vendas do mesmo aluno
+            // na mesma turma de origem não sobrescrevem o comprovante uma da outra.
+            const comprovantesVenda = this.normalizarComprovantesParaArray(criarContratoDto.comprovante_pagamento_base64);
 
             // Buscar ou criar registro de TurmasAlunosTreinamentos
             let turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.findOne({
@@ -642,6 +693,8 @@ export class DocumentosService {
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
                 status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                // Comprovante(s) de pagamento desta venda, vinculados ao contrato.
+                comprovantes_pagamento: comprovantesVenda.length > 0 ? comprovantesVenda : null,
                 // Campos ZapSign específicos
                 zapsign_document_id: zapSignResponse.token,
                 zapsign_signers_data: signersData,
@@ -717,6 +770,9 @@ export class DocumentosService {
                         pendencia_pagamento: criarContratoDto.pendencia_pagamento ?? false,
                         quantidade_inscricoes: criarContratoDto.quantidade_inscricoes ?? 1,
                         outros_clientes: criarContratoDto.compradores_adicionais || [],
+                        // Snapshot dos comprovantes desta venda (fallback de leitura).
+                        comprovantes_pagamento: comprovantesVenda,
+                        comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda),
                     },
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
@@ -2348,6 +2404,7 @@ export class DocumentosService {
                     status_ass_test_dois: true,
                     data_ass_test_dois: true,
                     dados_contrato: true, // Garantir que o campo JSON seja carregado
+                    comprovantes_pagamento: true, // Comprovante(s) vinculados ao contrato
                     zapsign_document_id: true, // ✅ Campo ZapSign adicionado
                     zapsign_signers_data: true, // ✅ Campo ZapSign adicionado
                     zapsign_document_status: true, // ✅ Campo ZapSign adicionado
@@ -2437,7 +2494,10 @@ export class DocumentosService {
             const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
             const contratoDuplo = quantidadeInscricoes > 1;
             const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
-            const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
+            // Comprovante(s) por VENDA: prioriza a coluna do contrato; cai para o
+            // snapshot do contrato e, por último, para o turma_aluno legado.
+            const comprovantesPagamento = this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
+            const comprovantePagamentoBase64 = this.serializarComprovantes(comprovantesPagamento);
 
             this.logger.debug(
                 `contract.repo.get.full | Contrato mapeado contratoId=${contrato.id} alunoId=${String(aluno?.id || '')} treinamentoId=${String(
@@ -2465,12 +2525,14 @@ export class DocumentosService {
                 foto_documento_aluno_base64: contrato.foto_documento_aluno_base64 ?? null,
                 aluno_nome: aluno?.nome,
                 treinamento_nome: treinamento?.treinamento,
+                comprovantes_pagamento: comprovantesPagamento,
                 turma_aluno: {
                     pendencia_pagamento: pendenciaPagamento,
                     quantidade_inscricoes: quantidadeInscricoes,
                     outros_clientes: outrosClientes,
                     contrato_duplo: contratoDuplo,
                     comprovante_pagamento_base64: comprovantePagamentoBase64,
+                    comprovantes_pagamento: comprovantesPagamento,
                 },
                 dados_contrato: {
                     aluno: {
@@ -2529,12 +2591,14 @@ export class DocumentosService {
                     data_inicio_treinamento: dadosContrato.data_inicio_treinamento,
                     data_final_treinamento: dadosContrato.data_final_treinamento,
                     cidade_treinamento: dadosContrato.cidade_treinamento,
+                    comprovantes_pagamento: comprovantesPagamento,
                     turma_aluno: {
                         pendencia_pagamento: pendenciaPagamento,
                         quantidade_inscricoes: quantidadeInscricoes,
                         outros_clientes: outrosClientes,
                         contrato_duplo: contratoDuplo,
                         comprovante_pagamento_base64: comprovantePagamentoBase64,
+                        comprovantes_pagamento: comprovantesPagamento,
                     },
                 },
             };
@@ -2873,6 +2937,34 @@ export class DocumentosService {
         this.contratosBancoCache.clear();
 
         return { atualizado: true };
+    }
+
+    // Atualiza os comprovantes de pagamento VINCULADOS À VENDA (contrato), sem
+    // tocar no turma_aluno compartilhado — evitando sobrescrever o comprovante de
+    // outras vendas do mesmo aluno na mesma turma de origem.
+    async atualizarComprovantesContratoHistorico(contratoId: string, comprovantes: string[] | string | null): Promise<{ atualizado: boolean; total: number }> {
+        const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+            where: { id: contratoId, deletado_em: IsNull() },
+        });
+        if (!contrato) {
+            throw new NotFoundException('Contrato não encontrado');
+        }
+
+        const comprovantesArray = this.normalizarComprovantesParaArray(comprovantes);
+
+        const dadosContrato = { ...(contrato.dados_contrato || {}) };
+        const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
+        turmaAlunoSnapshot.comprovantes_pagamento = comprovantesArray;
+        turmaAlunoSnapshot.comprovante_pagamento_base64 = this.serializarComprovantes(comprovantesArray);
+        dadosContrato.turma_aluno = turmaAlunoSnapshot;
+
+        await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
+            comprovantes_pagamento: comprovantesArray.length > 0 ? comprovantesArray : null,
+            dados_contrato: dadosContrato,
+        });
+        this.contratosBancoCache.clear();
+
+        return { atualizado: true, total: comprovantesArray.length };
     }
 
     private async obterMarcadorAtualizacaoHistorico(): Promise<string> {
@@ -4031,6 +4123,7 @@ export class DocumentosService {
                     atualizado_em: true,
                     criado_por: true,
                     dados_contrato: true,
+                    comprovantes_pagamento: true,
                     zapsign_document_id: true,
                     zapsign_signers_data: true,
                     zapsign_document_status: true,
@@ -4607,7 +4700,10 @@ export class DocumentosService {
                     const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
                     const contratoDuplo = quantidadeInscricoes > 1;
                     const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
-                    const comprovantePagamentoBase64 = turmaAluno?.comprovante_pagamento_base64 ?? turmaAlunoDadosContrato.comprovante_pagamento_base64 ?? null;
+                    // Comprovante(s) por VENDA: prioriza a coluna do contrato; cai
+                    // para o snapshot do contrato e, por último, para o turma_aluno legado.
+                    const comprovantesPagamento = this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
+                    const comprovantePagamentoBase64 = this.serializarComprovantes(comprovantesPagamento);
                     const criadoPorContrato = contrato?.criado_por ?? null;
                     const criadoPorTurmaAlunoTreinamento = turmaAlunoTreinamento?.criado_por ?? null;
                     const criadoPorTurmaAluno = turmaAluno?.criado_por ?? null;
@@ -4669,12 +4765,14 @@ export class DocumentosService {
                         // estiver vazia — por exemplo, matrícula soft-deleted por transferência.
                         aluno_nome: aluno?.nome || dadosContrato?.aluno?.nome || null,
                         treinamento_nome: treinamento?.treinamento || dadosContrato?.treinamento?.treinamento || null,
+                        comprovantes_pagamento: comprovantesPagamento,
                         turma_aluno: {
                             pendencia_pagamento: pendenciaPagamento,
                             quantidade_inscricoes: quantidadeInscricoes,
                             outros_clientes: outrosClientes,
                             contrato_duplo: contratoDuplo,
                             comprovante_pagamento_base64: comprovantePagamentoBase64,
+                            comprovantes_pagamento: comprovantesPagamento,
                         },
                         dados_contrato: {
                             // Mescla relação (fonte de verdade atualizada) com o snapshot
@@ -4734,12 +4832,14 @@ export class DocumentosService {
                             data_inicio_treinamento: dadosContrato.data_inicio_treinamento,
                             data_final_treinamento: dadosContrato.data_final_treinamento,
                             cidade_treinamento: dadosContrato.cidade_treinamento,
+                            comprovantes_pagamento: comprovantesPagamento,
                             turma_aluno: {
                                 pendencia_pagamento: pendenciaPagamento,
                                 quantidade_inscricoes: quantidadeInscricoes,
                                 outros_clientes: outrosClientes,
                                 contrato_duplo: contratoDuplo,
                                 comprovante_pagamento_base64: comprovantePagamentoBase64,
+                                comprovantes_pagamento: comprovantesPagamento,
                             },
                         },
                     });

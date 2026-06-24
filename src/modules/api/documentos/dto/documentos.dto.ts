@@ -156,8 +156,10 @@ export class CriarContratoZapSignDto {
     /**
      * Comprovante(s) de pagamento anexado(s) na etapa da venda. Quando vários,
      * o frontend envia um JSON.stringify de um array de data URLs base64.
-     * É salvo no turma_aluno vinculado ao contrato para que o histórico de
-     * vendas (e a modal de edição) exibam o comprovante da venda.
+     * É salvo VINCULADO AO CONTRATO (coluna comprovantes_pagamento + snapshot em
+     * dados_contrato.turma_aluno), e não no turma_aluno compartilhado, para que
+     * vendas distintas do mesmo aluno na mesma turma de origem não sobrescrevam o
+     * comprovante uma da outra no histórico de vendas.
      */
     @IsOptional()
     @IsString()

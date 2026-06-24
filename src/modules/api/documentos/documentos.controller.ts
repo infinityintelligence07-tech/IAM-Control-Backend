@@ -287,6 +287,21 @@ export class DocumentosController {
         return this.documentosService.atualizarObservacoesSistemaContratoHistorico(id, body?.observacoes ?? '');
     }
 
+    // Atualiza os comprovantes de pagamento da VENDA (contrato). Recebe um array
+    // de data URLs base64 (imagens/PDF) ou a forma serializada usada pelo frontend.
+    @Post('public/contratos-banco/:id/comprovantes')
+    atualizarComprovantesContrato(
+        @Param('id') id: string,
+        @Body()
+        body: {
+            comprovantes?: string[] | string | null;
+            comprovante_pagamento_base64?: string | null;
+        },
+    ) {
+        const comprovantes = body?.comprovantes ?? body?.comprovante_pagamento_base64 ?? [];
+        return this.documentosService.atualizarComprovantesContratoHistorico(id, comprovantes);
+    }
+
     @Post('admin/cache/historico/clear')
     @UseGuards(JwtAuthGuard)
     limparCachesHistorico() {

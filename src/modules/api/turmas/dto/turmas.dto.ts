@@ -444,7 +444,7 @@ export class AddAlunoTurmaDto {
 
     @IsOptional()
     @IsString()
-    origem_aluno?: 'COMPROU_INGRESSO' | 'ALUNO_BONUS' | 'ALUNO_CONVIDADO' | 'CORTESIA' | 'SORTEIO' | 'TRANSFERENCIA';
+    origem_aluno?: 'COMPROU_INGRESSO' | 'ALUNO_BONUS' | 'ALUNO_CONVIDADO' | 'CORTESIA' | 'SORTEIO' | 'PRESENTE' | 'TRANSFERENCIA';
 
     @IsOptional()
     @IsEnum(EStatusAlunosTurmas)

@@ -113,6 +113,8 @@ export class TurmasService {
     private readonly logger = new Logger(TurmasService.name);
     private congelamentoMetricasCronEmExecucao = false;
     private periodosMentoriaCronEmExecucao = false;
+    /** Turmas com congelamento de snapshot em geração em background (evita disparos duplicados). */
+    private readonly snapshotEmGeracaoBackground = new Set<number>();
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -996,6 +998,33 @@ export class TurmasService {
         if (this.isTurmaCongelada(turma)) {
             await this.salvarSnapshotMetricasTurma(id_turma);
         }
+    }
+
+    /**
+     * Dispara o congelamento (geração de snapshot) em background, sem bloquear a resposta HTTP.
+     * O congelamento de turmas grandes é pesado (recalcula resumo, listas por tipo e dispara a
+     * auto-transferência por no-show aluno a aluno) e, rodando inline em um simples GET de leitura
+     * (status-resumo / status-resumo/alunos), estourava o timeout de 30s do axios no frontend — e,
+     * por a request ser cancelada antes do save, o snapshot nunca persistia, tornando todo GET lento.
+     * A leitura passa a retornar os dados ao vivo (agregados) imediatamente; o snapshot é gerado em
+     * segundo plano (e o cron noturno também cobre o congelamento). Um guard em memória evita disparos
+     * duplicados concorrentes para a mesma turma.
+     */
+    private agendarCongelamentoEmBackground(id_turma: number): void {
+        if (this.snapshotEmGeracaoBackground.has(id_turma)) {
+            return;
+        }
+        this.snapshotEmGeracaoBackground.add(id_turma);
+        void this.tentarCongelarTurmaSePassouDataFinal(id_turma)
+            .catch((error) => {
+                this.logger.error(
+                    `snapshot.turma.bg | Falha ao congelar turma=${id_turma} em background`,
+                    error instanceof Error ? error.stack : undefined,
+                );
+            })
+            .finally(() => {
+                this.snapshotEmGeracaoBackground.delete(id_turma);
+            });
     }
 
     /**
@@ -4317,6 +4346,7 @@ export class TurmasService {
                 return {
                     data_inicio: dataInicioStr,
                     data_final: dataFinalStr,
+                    dias: [],
                     data: [],
                     totais: { saldo: 0, entrada: 0, saida: 0, resultado: 0, performance: 0 },
                 };
@@ -4536,7 +4566,14 @@ export class TurmasService {
             );
             totais.performance = calcPerformance(totais.saldo, totais.entrada, totais.saida);
 
-            return { data_inicio: dataInicioStr, data_final: dataFinalStr, data, totais };
+            // Dias (colunas) com movimentação em qualquer turma, ordenados crescentemente.
+            const diasComMovimento = new Set<string>();
+            for (const turma of data) {
+                for (const dia of turma.por_dia) diasComMovimento.add(dia.data);
+            }
+            const dias = Array.from(diasComMovimento).sort();
+
+            return { data_inicio: dataInicioStr, data_final: dataFinalStr, dias, data, totais };
         } catch (error) {
             if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
             this.logger.error(`Erro ao gerar extrato de movimentação de turmas: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
@@ -5113,7 +5150,6 @@ export class TurmasService {
 
     async getTurmaStatusResumo(id_turma: number, opts?: { ignorarSnapshot?: boolean }): Promise<TurmaStatusResumoResponseDto> {
         if (!opts?.ignorarSnapshot) {
-            await this.tentarCongelarTurmaSePassouDataFinal(id_turma);
             const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
             if (snapshot?.resumo) {
                 return {
@@ -5122,6 +5158,9 @@ export class TurmasService {
                     snapshot_em: snapshot.snapshot_em,
                 };
             }
+            // Sem snapshot: congela em background para não bloquear a leitura (turmas grandes
+            // estouravam o timeout de 30s do axios). A resposta segue com os dados ao vivo.
+            this.agendarCongelamentoEmBackground(id_turma);
         }
 
         const turma = await this.uow.turmasRP.findOne({
@@ -5354,12 +5393,14 @@ export class TurmasService {
     async getTurmaStatusAlunos(id_turma: number, tipo: string, opts?: { ignorarSnapshot?: boolean }): Promise<TurmaStatusAlunosResponseDto> {
         const tipoNormalizado = this.normalizarTipoStatusSnapshot(tipo);
         if (!opts?.ignorarSnapshot) {
-            await this.tentarCongelarTurmaSePassouDataFinal(id_turma);
             const snapshot = await this.obterSnapshotMetricasTurma(id_turma);
             const alunosPorTipo = (snapshot?.alunos_por_tipo || {}) as Record<string, TurmaStatusAlunosResponseDto>;
             if (alunosPorTipo?.[tipoNormalizado]) {
                 return alunosPorTipo[tipoNormalizado];
             }
+            // Sem snapshot: congela em background para não bloquear a leitura (turmas grandes
+            // estouravam o timeout de 30s do axios). A resposta segue com os dados ao vivo.
+            this.agendarCongelamentoEmBackground(id_turma);
         }
 
         tipo = tipoNormalizado;

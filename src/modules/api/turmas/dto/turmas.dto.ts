@@ -1122,6 +1122,8 @@ export class ExtratoMovimentacaoTurmaDto {
 export class ExtratoMovimentacaoResponseDto {
     data_inicio: string;
     data_final: string;
+    /** Dias (YYYY-MM-DD) com movimentação no período — colunas da tabela extratificada. */
+    dias: string[];
     data: ExtratoMovimentacaoTurmaDto[];
     /** Totais consolidados de todas as turmas filtradas. */
     totais: {

@@ -35,6 +35,9 @@ import {
     ExtratoMovimentacaoTurmaDto,
     ExtratoMovimentacaoDiaDto,
     ExtratoMovimentacaoDetalheDto,
+    GetMovimentacaoAlunosDto,
+    MovimentacaoAlunosResponseDto,
+    MovimentacaoAlunoItemDto,
 } from './dto/turmas.dto';
 import { FindManyOptions, FindOptionsSelect, ILike, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -4317,9 +4320,13 @@ export class TurmasService {
             // Reconstrução do saldo inicial usa todos os movimentos do início do período até agora.
             const reconUpper = agora > endInclusive ? agora : endInclusive;
 
+            // Janela de listagem: somente turmas dos últimos 15 dias para frente (exclui turmas antigas).
+            const cutoff = new Date(agora);
+            cutoff.setDate(cutoff.getDate() - 15);
+            const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+
             const treinamentoIds = (filtros.treinamento_ids || []).filter((n) => Number.isFinite(n));
             const turmaIds = (filtros.turma_ids || []).filter((n) => Number.isFinite(n));
-            const hasScope = treinamentoIds.length > 0 || turmaIds.length > 0;
 
             const EDICOES_ESPECIAIS = ['SEM_TURMA', 'SEM_TURMAS', 'INADIMPLENTE', 'JURIDICA', 'JURIDICO', 'CANCELADA'];
 
@@ -4339,6 +4346,16 @@ export class TurmasService {
                 .andWhere(`(t.edicao_turma IS NULL OR UPPER(TRIM(t.edicao_turma)) NOT IN (:...edicoes))`, { edicoes: EDICOES_ESPECIAIS });
             if (turmaIds.length > 0) turmaQb.andWhere('t.id IN (:...turmaIds)', { turmaIds });
             if (treinamentoIds.length > 0) turmaQb.andWhere('t.id_treinamento IN (:...treinamentoIds)', { treinamentoIds });
+            // Não listar turmas de Masterclass/palestras (treinamento palestra ou edição com prefixo "MC_").
+            turmaQb.andWhere(`(tr.tipo_palestra IS NOT TRUE AND tr.tipo_treinamento IS NOT FALSE)`);
+            turmaQb.andWhere(`(t.edicao_turma IS NULL OR LEFT(UPPER(TRIM(t.edicao_turma)), 3) <> 'MC_')`);
+            // Somente turmas dos últimos 15 dias para frente (exceto quando o usuário seleciona turmas específicas).
+            if (turmaIds.length === 0) {
+                turmaQb.andWhere(`(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff)`, { cutoff: cutoffStr });
+            }
+            // Mesmas regras de listagem da tela /turmas (sem deletadas e sem edições especiais),
+            // ordenadas de forma crescente por data do evento (início, depois final).
+            turmaQb.orderBy('t.data_inicio', 'ASC', 'NULLS LAST').addOrderBy('t.data_final', 'ASC', 'NULLS LAST').addOrderBy('t.id', 'ASC');
             const turmas = await turmaQb.getMany();
             const ids = turmas.map((t) => t.id);
 
@@ -4493,8 +4510,8 @@ export class TurmasService {
                 const entradaPeriodo = movsPeriodo.filter((m) => m.tipo === 'ENTRADA').length;
                 const saidaPeriodo = movsPeriodo.filter((m) => m.tipo === 'SAIDA').length;
 
-                // Período sem movimentação e sem filtro explícito: omite para não poluir.
-                if (!hasScope && movsPeriodo.length === 0) continue;
+                // Lista todas as turmas (independente do status/movimentação), seguindo as mesmas
+                // regras de listagem da tela /turmas; turmas sem movimentação aparecem com saldo fixo.
 
                 const resultado = saldoInicio + entradaPeriodo - saidaPeriodo;
                 const performance = calcPerformance(saldoInicio, entradaPeriodo, saidaPeriodo);
@@ -4551,8 +4568,8 @@ export class TurmasService {
                 });
             }
 
-            // Ordena por maior movimentação (entrada + saída) desc, depois por nome.
-            data.sort((a, b) => b.entrada + b.saida - (a.entrada + a.saida) || a.turma_label.localeCompare(b.turma_label));
+            // Mantém a ordem crescente por data do evento definida na consulta das turmas
+            // (data_inicio ASC, data_final ASC, id ASC).
 
             const totais = data.reduce(
                 (acc, t) => {
@@ -4577,6 +4594,150 @@ export class TurmasService {
         } catch (error) {
             if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
             this.logger.error(`Erro ao gerar extrato de movimentação de turmas: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+            throw new BadRequestException(error instanceof Error ? error.message : 'Erro desconhecido');
+        }
+    }
+
+    /**
+     * Lista os alunos que participaram das movimentações (entradas/saídas) de UMA turma dentro do período.
+     * Reaproveita a mesma fonte do extrato (logs CRIACAO/CANCELAMENTO/REMOCAO + transferências) e a
+     * classificação unificada de canal do dashboard, retornando apenas os alunos das movimentações.
+     */
+    async getMovimentacaoAlunosTurma(id_turma: number, filtros: GetMovimentacaoAlunosDto): Promise<MovimentacaoAlunosResponseDto> {
+        try {
+            const dataInicioStr = (filtros?.data_inicio || '').trim();
+            const dataFinalStr = (filtros?.data_final || '').trim();
+            if (!dataInicioStr || !dataFinalStr) {
+                throw new BadRequestException('Informe o período (data_inicio e data_final).');
+            }
+            const start = new Date(`${dataInicioStr}T00:00:00`);
+            const endInclusive = new Date(`${dataFinalStr}T23:59:59.999`);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(endInclusive.getTime()) || start > endInclusive) {
+                throw new BadRequestException('Período inválido.');
+            }
+
+            const turma = await this.uow.turmasRP.findOne({
+                where: { id: id_turma, deletado_em: IsNull() as any },
+                relations: ['id_treinamento_fk'],
+            });
+            if (!turma) {
+                throw new NotFoundException('Turma não encontrada.');
+            }
+            const treinamentoNome = turma.id_treinamento_fk?.treinamento ?? null;
+            const sigla = turma.id_treinamento_fk?.sigla_treinamento ?? null;
+            const edicao = turma.edicao_turma ?? null;
+            const labelBase = treinamentoNome || sigla || `Turma ${turma.id}`;
+            const turma_label = edicao ? `${labelBase} - ${edicao}` : labelBase;
+
+            const EDICOES_ESPECIAIS = ['SEM_TURMA', 'SEM_TURMAS', 'INADIMPLENTE', 'JURIDICA', 'JURIDICO', 'CANCELADA'];
+            const specialRows = await this.uow.turmasRP
+                .createQueryBuilder('t')
+                .select('t.id', 'id')
+                .where(`UPPER(TRIM(COALESCE(t.edicao_turma, ''))) IN (:...edicoes)`, { edicoes: EDICOES_ESPECIAIS })
+                .getRawMany<{ id: number }>();
+            const specialSet = new Set(specialRows.map((r) => Number(r.id)));
+
+            type ItemMov = { id_aluno: number; id_turma_aluno: string | null; dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string };
+            const itens: ItemMov[] = [];
+
+            // Logs (CRIACAO/CANCELAMENTO/REMOCAO) com o aluno, dentro do período.
+            const logRows = await this.uow.historicoAlunosTurmasLogsRP
+                .createQueryBuilder('l')
+                .select('l.id_aluno', 'id_aluno')
+                .addSelect('l.id_turma_aluno', 'id_turma_aluno')
+                .addSelect('l.tipo_acao', 'tipo_acao')
+                .addSelect(`to_char(l.data_acao, 'YYYY-MM-DD')`, 'dia')
+                .where('l.id_turma = :id_turma', { id_turma })
+                .andWhere(`l.tipo_acao IN ('CRIACAO', 'CANCELAMENTO', 'REMOCAO')`)
+                .andWhere('l.data_acao >= :start', { start })
+                .andWhere('l.data_acao <= :end', { end: endInclusive })
+                .andWhere('l.deletado_em IS NULL')
+                .getRawMany<{ id_aluno: string; id_turma_aluno: string; tipo_acao: string; dia: string }>();
+
+            const criacaoIds = new Set<string>();
+            for (const row of logRows) {
+                const idTurmaAluno = row.id_turma_aluno != null ? String(row.id_turma_aluno) : null;
+                if (row.tipo_acao === 'CRIACAO') {
+                    if (idTurmaAluno) criacaoIds.add(idTurmaAluno);
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'ENTRADA', categoria: 'Demais Vendas' });
+                } else if (row.tipo_acao === 'CANCELAMENTO') {
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'SAIDA', categoria: 'Cancelamento' });
+                } else if (row.tipo_acao === 'REMOCAO') {
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'SAIDA', categoria: 'Exclusão/Remoção' });
+                }
+            }
+
+            // Classificação de canal (mesma regra do dashboard) para as entradas por nova inscrição.
+            if (criacaoIds.size > 0) {
+                const classif = await this.getClassificacaoOrigemPorTurmaAluno(id_turma, Array.from(criacaoIds));
+                for (const item of itens) {
+                    if (item.tipo === 'ENTRADA' && item.id_turma_aluno) {
+                        item.categoria = classif.get(item.id_turma_aluno)?.canal || 'Demais Vendas';
+                    }
+                }
+            }
+
+            // Transferências (entrada recebida / saída enviada) dentro do período.
+            const transferRows = await this.uow.historicoTransferenciasRP
+                .createQueryBuilder('h')
+                .select('h.id_aluno', 'id_aluno')
+                .addSelect('h.id_turma_de', 'id_turma_de')
+                .addSelect('h.id_turma_para', 'id_turma_para')
+                .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
+                .addSelect('h.id_turma_aluno_para', 'id_turma_aluno_para')
+                .addSelect(`to_char(h.criado_em, 'YYYY-MM-DD')`, 'dia')
+                .where('(h.id_turma_de = :id_turma OR h.id_turma_para = :id_turma)', { id_turma })
+                .andWhere('h.id_turma_de <> h.id_turma_para')
+                .andWhere('h.deletado_em IS NULL')
+                .andWhere('h.criado_em >= :start', { start })
+                .andWhere('h.criado_em <= :end', { end: endInclusive })
+                .getRawMany<{ id_aluno: string; id_turma_de: number; id_turma_para: number; id_turma_aluno_de: string | null; id_turma_aluno_para: string | null; dia: string }>();
+
+            for (const row of transferRows) {
+                const de = Number(row.id_turma_de);
+                const para = Number(row.id_turma_para);
+                if (para === id_turma) {
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : null, dia: row.dia, tipo: 'ENTRADA', categoria: 'Transferência' });
+                }
+                // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
+                if (de === id_turma && !specialSet.has(para)) {
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null, dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência' });
+                }
+            }
+
+            // Dados dos alunos (nome/email) para exibição.
+            const idsAlunos = Array.from(new Set(itens.map((i) => i.id_aluno).filter((n) => Number.isFinite(n))));
+            const alunoInfoMap = new Map<number, { nome: string; email: string | null }>();
+            if (idsAlunos.length > 0) {
+                const alunos = await this.uow.alunosRP
+                    .createQueryBuilder('a')
+                    .select('a.id', 'id')
+                    .addSelect('a.nome', 'nome')
+                    .addSelect('a.email', 'email')
+                    .where('a.id IN (:...idsAlunos)', { idsAlunos })
+                    .getRawMany<{ id: number; nome: string; email: string | null }>();
+                for (const a of alunos) {
+                    alunoInfoMap.set(Number(a.id), { nome: a.nome || 'Aluno', email: a.email ?? null });
+                }
+            }
+
+            const alunos: MovimentacaoAlunoItemDto[] = itens.map((i) => ({
+                id_aluno: i.id_aluno,
+                id_turma_aluno: i.id_turma_aluno,
+                nome: alunoInfoMap.get(i.id_aluno)?.nome || 'Aluno',
+                email: alunoInfoMap.get(i.id_aluno)?.email ?? null,
+                dia: i.dia,
+                tipo: i.tipo,
+                categoria: i.categoria,
+            }));
+
+            // Ordena por dia crescente, entradas antes de saídas, depois por nome.
+            alunos.sort((a, b) => a.dia.localeCompare(b.dia) || (a.tipo === b.tipo ? 0 : a.tipo === 'ENTRADA' ? -1 : 1) || a.nome.localeCompare(b.nome));
+
+            return { id_turma, turma_label, data_inicio: dataInicioStr, data_final: dataFinalStr, alunos };
+        } catch (error) {
+            if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+            this.logger.error(`Erro ao listar alunos das movimentações da turma: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
             throw new BadRequestException(error instanceof Error ? error.message : 'Erro desconhecido');
         }
     }

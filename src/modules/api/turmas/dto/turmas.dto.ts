@@ -1134,3 +1134,36 @@ export class ExtratoMovimentacaoResponseDto {
         performance: number;
     };
 }
+
+/** Filtros (período) para listar os alunos das movimentações de uma turma. */
+export class GetMovimentacaoAlunosDto {
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    data_inicio: string; // YYYY-MM-DD
+
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    data_final: string; // YYYY-MM-DD
+}
+
+/** Um aluno presente em uma movimentação (entrada/saída) da turma dentro do período. */
+export class MovimentacaoAlunoItemDto {
+    id_aluno: number;
+    id_turma_aluno: string | null;
+    nome: string;
+    email: string | null;
+    /** Dia da movimentação (YYYY-MM-DD). */
+    dia: string;
+    tipo: 'ENTRADA' | 'SAIDA';
+    /** Canal (entrada) ou motivo (saída): Masterclass, Bônus, Cancelamento, Transferência etc. */
+    categoria: string;
+}
+
+export class MovimentacaoAlunosResponseDto {
+    id_turma: number;
+    turma_label: string;
+    data_inicio: string;
+    data_final: string;
+    /** Cada item é uma movimentação (um aluno pode aparecer em mais de uma). */
+    alunos: MovimentacaoAlunoItemDto[];
+}

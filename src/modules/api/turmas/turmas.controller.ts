@@ -26,6 +26,8 @@ import {
     AlunoHistoricoObservacoesResponseDto,
     GetExtratoMovimentacaoDto,
     ExtratoMovimentacaoResponseDto,
+    GetMovimentacaoAlunosDto,
+    MovimentacaoAlunosResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
@@ -117,6 +119,15 @@ export class TurmasController {
     @UseGuards(JwtAuthGuard)
     async getExtratoMovimentacao(@Query() filtros: GetExtratoMovimentacaoDto): Promise<ExtratoMovimentacaoResponseDto> {
         return this.turmasService.getExtratoMovimentacaoTurmas(filtros);
+    }
+
+    @Get('extrato-movimentacao/:id_turma/alunos')
+    @UseGuards(JwtAuthGuard)
+    async getMovimentacaoAlunos(
+        @Param('id_turma', ParseIntPipe) id_turma: number,
+        @Query() filtros: GetMovimentacaoAlunosDto,
+    ): Promise<MovimentacaoAlunosResponseDto> {
+        return this.turmasService.getMovimentacaoAlunosTurma(id_turma, filtros);
     }
 
     @Get('bonus-comprador/:id_aluno_comprador')

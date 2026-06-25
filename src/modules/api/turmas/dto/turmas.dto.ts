@@ -1157,6 +1157,12 @@ export class MovimentacaoAlunoItemDto {
     tipo: 'ENTRADA' | 'SAIDA';
     /** Canal (entrada) ou motivo (saída): Masterclass, Bônus, Cancelamento, Transferência etc. */
     categoria: string;
+    /** Turma de origem (apenas para transferências): de onde o aluno veio. */
+    turma_origem_label?: string | null;
+    /** Turma de destino (apenas para transferências): para onde o aluno foi. */
+    turma_destino_label?: string | null;
+    /** Observações registradas para o aluno (agregadas ao aluno, todas as turmas). */
+    observacoes?: { dia: string; texto: string }[];
 }
 
 export class MovimentacaoAlunosResponseDto {

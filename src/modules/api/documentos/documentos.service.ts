@@ -354,9 +354,17 @@ export class DocumentosService {
      * Calcula o período individual da mentoria para o mentorado.
      * Para mentorias, a duração (em meses, configurada no cadastro do treinamento)
      * passa a contar a partir da assinatura/finalização do contrato (data de início = hoje).
+     *
+     * Adiantamento/renovação: quando o aluno JÁ está na mentoria, `fimVigente`
+     * traz o término vigente da mentoria dele e o novo período passa a ser
+     * contado a partir desse término (data final atual + duração).
+     *
      * Para treinamentos/palestras retorna nulos (a data vem da turma).
      */
-    private calcularPeriodoMentoria(treinamento: { treinamento?: string | null; tipo_mentoria?: boolean; duracao_meses?: number | null } | null): {
+    private calcularPeriodoMentoria(
+        treinamento: { treinamento?: string | null; tipo_mentoria?: boolean; duracao_meses?: number | null } | null,
+        fimVigente?: string | null,
+    ): {
         data_inicio_mentoria: string | null;
         data_fim_mentoria: string | null;
     } {
@@ -369,15 +377,47 @@ export class DocumentosService {
             treinamento: treinamento.treinamento,
             duracao_meses: treinamento.duracao_meses,
         });
-        const inicio = new Date();
+        // Adiantamento: conta a partir do término vigente; senão, a partir de hoje.
+        const baseAdiantamento =
+            fimVigente && /^\d{4}-\d{2}-\d{2}/.test(fimVigente)
+                ? new Date(`${fimVigente.slice(0, 10)}T00:00:00`)
+                : null;
+        const inicio = baseAdiantamento ?? new Date();
         inicio.setHours(0, 0, 0, 0);
         const fim = new Date(inicio);
         fim.setMonth(fim.getMonth() + duracaoMeses);
-        const toIsoDate = (data: Date) => data.toISOString().slice(0, 10);
+        const toIsoDate = (data: Date) =>
+            `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
         return {
             data_inicio_mentoria: toIsoDate(inicio),
             data_fim_mentoria: toIsoDate(fim),
         };
+    }
+
+    /**
+     * Conferência de adiantamento de mentoria: retorna a MAIOR data de término
+     * (data_fim_mentoria) das matrículas de mentoria ativas do aluno para o
+     * treinamento informado. Quando o aluno ainda não está na mentoria, retorna
+     * `null` (o período é contado a partir da assinatura/hoje).
+     */
+    private async buscarFimMentoriaVigente(idAluno: number, idTreinamento: number): Promise<string | null> {
+        const row = await this.uow.turmasAlunosTreinamentosRP
+            .createQueryBuilder('tat')
+            .innerJoin('tat.id_turma_aluno_fk', 'ta')
+            .where('ta.id_aluno = :idAluno', { idAluno: String(idAluno) })
+            .andWhere('tat.id_treinamento = :idTreinamento', { idTreinamento })
+            .andWhere('tat.deletado_em IS NULL')
+            .andWhere('ta.deletado_em IS NULL')
+            .andWhere('tat.data_fim_mentoria IS NOT NULL')
+            .select('MAX(tat.data_fim_mentoria)', 'fim')
+            .getRawOne<{ fim: string | Date | null }>();
+
+        const fim = row?.fim ?? null;
+        if (!fim) return null;
+        if (fim instanceof Date) {
+            return `${fim.getFullYear()}-${String(fim.getMonth() + 1).padStart(2, '0')}-${String(fim.getDate()).padStart(2, '0')}`;
+        }
+        return String(fim).slice(0, 10);
     }
 
     async criarContratoZapSign(criarContratoDto: CriarContratoZapSignDto, userId?: number): Promise<RespostaContratoZapSignDto> {
@@ -424,8 +464,16 @@ export class DocumentosService {
 
             const idTurmaDestino = criarContratoDto.id_turma_destino ? criarContratoDto.id_turma_destino : null;
 
-            // Período da mentoria (início na assinatura/finalização + duração configurada).
-            const periodoMentoria = this.calcularPeriodoMentoria(treinamento);
+            // Conferência de adiantamento: se o aluno já está nesta mentoria, o
+            // novo período conta a partir do término vigente dele (renovação
+            // antecipada); senão, conta a partir da assinatura (hoje).
+            const fimMentoriaVigente = treinamento.tipo_mentoria
+                ? await this.buscarFimMentoriaVigente(aluno.id, treinamento.id)
+                : null;
+
+            // Período da mentoria (início na assinatura/finalização + duração,
+            // ou término vigente + duração quando for adiantamento).
+            const periodoMentoria = this.calcularPeriodoMentoria(treinamento, fimMentoriaVigente);
 
             // Buscar ou criar registro de TurmasAlunos primeiro
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({
@@ -563,6 +611,19 @@ export class DocumentosService {
                         }
                     }
                 }
+            } else if (treinamento.tipo_mentoria && periodoMentoria.data_fim_mentoria) {
+                // Adiantamento/renovação: o aluno já possui matrícula ATIVA nesta
+                // mentoria. Estende o término vigente em +1 período (mantém o
+                // início original) para que a contagem siga a data final atual.
+                turmaAlunoTreinamento.data_fim_mentoria = periodoMentoria.data_fim_mentoria;
+                if (!turmaAlunoTreinamento.data_inicio_mentoria) {
+                    turmaAlunoTreinamento.data_inicio_mentoria = periodoMentoria.data_inicio_mentoria;
+                }
+                turmaAlunoTreinamento.atualizado_em = new Date();
+                if (userId) {
+                    turmaAlunoTreinamento.atualizado_por = userId;
+                }
+                turmaAlunoTreinamento = await this.uow.turmasAlunosTreinamentosRP.save(turmaAlunoTreinamento);
             }
 
             // Persistir o BÔNUS em coluna (não só no JSON do contrato) para que o

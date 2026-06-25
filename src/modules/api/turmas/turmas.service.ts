@@ -4320,7 +4320,7 @@ export class TurmasService {
             // Reconstrução do saldo inicial usa todos os movimentos do início do período até agora.
             const reconUpper = agora > endInclusive ? agora : endInclusive;
 
-            // Janela de listagem: somente turmas dos últimos 15 dias para frente (exclui turmas antigas).
+            // Janela padrão de listagem: turmas dos últimos 15 dias para frente (exclui turmas antigas).
             const cutoff = new Date(agora);
             cutoff.setDate(cutoff.getDate() - 15);
             const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
@@ -4338,6 +4338,34 @@ export class TurmasService {
                 .getRawMany<{ id: number }>();
             const specialSet = new Set(specialRows.map((r) => Number(r.id)));
 
+            // Turmas que tiveram movimentação dentro do período selecionado (logs ou transferências):
+            // devem aparecer mesmo que o evento seja anterior à janela de 15 dias (ex.: importação recente
+            // em turma de edição passada).
+            const movimentadasIds = new Set<number>();
+            const movLogRows = await this.uow.historicoAlunosTurmasLogsRP
+                .createQueryBuilder('l')
+                .select('DISTINCT l.id_turma', 'id_turma')
+                .where(`l.tipo_acao IN ('CRIACAO', 'CANCELAMENTO', 'REMOCAO')`)
+                .andWhere('l.data_acao >= :start', { start })
+                .andWhere('l.data_acao <= :end', { end: endInclusive })
+                .andWhere('l.deletado_em IS NULL')
+                .getRawMany<{ id_turma: number }>();
+            for (const r of movLogRows) {
+                if (r.id_turma != null) movimentadasIds.add(Number(r.id_turma));
+            }
+            const movTransfRows = await this.uow.historicoTransferenciasRP
+                .createQueryBuilder('h')
+                .select('h.id_turma_de', 'id_turma_de')
+                .addSelect('h.id_turma_para', 'id_turma_para')
+                .where('h.deletado_em IS NULL')
+                .andWhere('h.criado_em >= :start', { start })
+                .andWhere('h.criado_em <= :end', { end: endInclusive })
+                .getRawMany<{ id_turma_de: number | null; id_turma_para: number | null }>();
+            for (const r of movTransfRows) {
+                if (r.id_turma_de != null) movimentadasIds.add(Number(r.id_turma_de));
+                if (r.id_turma_para != null) movimentadasIds.add(Number(r.id_turma_para));
+            }
+
             // Turmas candidatas (exclui especiais).
             const turmaQb = this.uow.turmasRP
                 .createQueryBuilder('t')
@@ -4349,9 +4377,17 @@ export class TurmasService {
             // Não listar turmas de Masterclass/palestras (treinamento palestra ou edição com prefixo "MC_").
             turmaQb.andWhere(`(tr.tipo_palestra IS NOT TRUE AND tr.tipo_treinamento IS NOT FALSE)`);
             turmaQb.andWhere(`(t.edicao_turma IS NULL OR LEFT(UPPER(TRIM(t.edicao_turma)), 3) <> 'MC_')`);
-            // Somente turmas dos últimos 15 dias para frente (exceto quando o usuário seleciona turmas específicas).
+            // Por default lista as turmas dos últimos 15 dias para frente (exceto quando o usuário
+            // seleciona turmas específicas) OU turmas que tiveram movimentação dentro do período selecionado.
             if (turmaIds.length === 0) {
-                turmaQb.andWhere(`(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff)`, { cutoff: cutoffStr });
+                if (movimentadasIds.size > 0) {
+                    turmaQb.andWhere(
+                        `(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff OR t.id IN (:...movIds))`,
+                        { cutoff: cutoffStr, movIds: Array.from(movimentadasIds) },
+                    );
+                } else {
+                    turmaQb.andWhere(`(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff)`, { cutoff: cutoffStr });
+                }
             }
             // Mesmas regras de listagem da tela /turmas (sem deletadas e sem edições especiais),
             // ordenadas de forma crescente por data do evento (início, depois final).
@@ -4637,7 +4673,15 @@ export class TurmasService {
                 .getRawMany<{ id: number }>();
             const specialSet = new Set(specialRows.map((r) => Number(r.id)));
 
-            type ItemMov = { id_aluno: number; id_turma_aluno: string | null; dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string };
+            type ItemMov = {
+                id_aluno: number;
+                id_turma_aluno: string | null;
+                dia: string;
+                tipo: 'ENTRADA' | 'SAIDA';
+                categoria: string;
+                id_turma_de?: number | null;
+                id_turma_para?: number | null;
+            };
             const itens: ItemMov[] = [];
 
             // Logs (CRIACAO/CANCELAMENTO/REMOCAO) com o aluno, dentro do período.
@@ -4697,11 +4741,11 @@ export class TurmasService {
                 const de = Number(row.id_turma_de);
                 const para = Number(row.id_turma_para);
                 if (para === id_turma) {
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : null, dia: row.dia, tipo: 'ENTRADA', categoria: 'Transferência' });
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : null, dia: row.dia, tipo: 'ENTRADA', categoria: 'Transferência', id_turma_de: de, id_turma_para: para });
                 }
                 // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
                 if (de === id_turma && !specialSet.has(para)) {
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null, dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência' });
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null, dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência', id_turma_de: de, id_turma_para: para });
                 }
             }
 
@@ -4721,6 +4765,60 @@ export class TurmasService {
                 }
             }
 
+            // Observações registradas para cada aluno (agregadas ao aluno, todas as turmas).
+            const obsMap = new Map<number, { dia: string; texto: string }[]>();
+            if (idsAlunos.length > 0) {
+                const obsRows = await this.uow.historicoAlunosTurmasLogsRP
+                    .createQueryBuilder('h')
+                    .select('h.id_aluno', 'id_aluno')
+                    .addSelect('h.titulo', 'titulo')
+                    .addSelect('h.descricao', 'descricao')
+                    .addSelect(`to_char(h.data_acao, 'YYYY-MM-DD')`, 'dia')
+                    .where('h.id_aluno IN (:...idsAlunos)', { idsAlunos: idsAlunos.map((n) => String(n)) })
+                    .andWhere(`h.tipo_acao = 'OBSERVACAO'`)
+                    .andWhere('h.deletado_em IS NULL')
+                    .orderBy('h.data_acao', 'DESC')
+                    .addOrderBy('h.id', 'DESC')
+                    .getRawMany<{ id_aluno: string; titulo: string | null; descricao: string | null; dia: string }>();
+                for (const row of obsRows) {
+                    const idAluno = Number(row.id_aluno);
+                    if (!Number.isFinite(idAluno)) continue;
+                    const texto = (row.descricao || row.titulo || '').toString().trim();
+                    if (!texto) continue;
+                    const lista = obsMap.get(idAluno) ?? [];
+                    lista.push({ dia: row.dia, texto });
+                    obsMap.set(idAluno, lista);
+                }
+            }
+
+            // Rótulos das turmas de origem/destino das transferências.
+            const turmaLabelMap = new Map<number, string>();
+            turmaLabelMap.set(turma.id, turma_label);
+            const idsTurmasRef = Array.from(
+                new Set(
+                    itens
+                        .flatMap((i) => [i.id_turma_de, i.id_turma_para])
+                        .filter((n): n is number => Number.isFinite(n as number) && !turmaLabelMap.has(n as number)),
+                ),
+            );
+            if (idsTurmasRef.length > 0) {
+                const turmasRef = await this.uow.turmasRP
+                    .createQueryBuilder('t')
+                    .leftJoin('t.id_treinamento_fk', 'tr')
+                    .select('t.id', 'id')
+                    .addSelect('t.edicao_turma', 'edicao_turma')
+                    .addSelect('tr.treinamento', 'treinamento')
+                    .addSelect('tr.sigla_treinamento', 'sigla_treinamento')
+                    .where('t.id IN (:...idsTurmasRef)', { idsTurmasRef })
+                    .getRawMany<{ id: number; edicao_turma: string | null; treinamento: string | null; sigla_treinamento: string | null }>();
+                for (const t of turmasRef) {
+                    const base = t.treinamento || t.sigla_treinamento || `Turma ${t.id}`;
+                    turmaLabelMap.set(Number(t.id), t.edicao_turma ? `${base} - ${t.edicao_turma}` : base);
+                }
+            }
+            const labelTurma = (id?: number | null): string | null =>
+                id != null ? (turmaLabelMap.get(Number(id)) ?? `Turma ${id}`) : null;
+
             const alunos: MovimentacaoAlunoItemDto[] = itens.map((i) => ({
                 id_aluno: i.id_aluno,
                 id_turma_aluno: i.id_turma_aluno,
@@ -4729,6 +4827,9 @@ export class TurmasService {
                 dia: i.dia,
                 tipo: i.tipo,
                 categoria: i.categoria,
+                turma_origem_label: i.categoria === 'Transferência' ? labelTurma(i.id_turma_de) : null,
+                turma_destino_label: i.categoria === 'Transferência' ? labelTurma(i.id_turma_para) : null,
+                observacoes: obsMap.get(i.id_aluno) ?? [],
             }));
 
             // Ordena por dia crescente, entradas antes de saídas, depois por nome.

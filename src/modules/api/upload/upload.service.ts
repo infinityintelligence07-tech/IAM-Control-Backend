@@ -706,6 +706,8 @@ export class UploadService {
                 const entities = createsToSave.map((data) => this.uow.turmasAlunosRP.create(data));
                 await this.uow.turmasAlunosRP.save(entities, { chunk: vinculosChunkSize });
                 lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
+                // Registra entrada (CRIACAO) no histórico para aparecer no extrato de movimentação.
+                await this.registrarLogsCriacaoImportacao(entities);
             }
 
             // Congela a meta no novo pico de inscritos/extras das turmas de destino da importação.
@@ -753,6 +755,36 @@ export class UploadService {
                 vinculos_criados: lotesVinculosCriados,
             },
         };
+    }
+
+    /**
+     * Registra logs CRIACAO (em `historico_alunos_turmas_logs`) para as matrículas criadas via
+     * importação de planilha, para que apareçam como ENTRADA no extrato de movimentação de turmas.
+     * `skipTurmaAlunoIds`: ids de turma_aluno que já contam como "Transferência" (historico de<>para)
+     * e por isso não devem gerar CRIACAO (evita dupla contagem de entrada).
+     */
+    private async registrarLogsCriacaoImportacao(
+        entidadesCriadas: Array<{ id: string; id_turma: number; id_aluno: string }>,
+        skipTurmaAlunoIds?: Set<string>,
+    ): Promise<void> {
+        if (!entidadesCriadas || entidadesCriadas.length === 0) return;
+        const agora = new Date();
+        const logs = entidadesCriadas
+            .filter((e) => e?.id != null && (!skipTurmaAlunoIds || !skipTurmaAlunoIds.has(String(e.id))))
+            .map((e) =>
+                this.uow.historicoAlunosTurmasLogsRP.create({
+                    id_turma_aluno: String(e.id),
+                    id_turma: e.id_turma,
+                    id_aluno: String(e.id_aluno),
+                    tipo_acao: 'CRIACAO',
+                    titulo: 'Aluno inscrito na turma',
+                    descricao: 'Matrícula criada via importação de planilha.',
+                    detalhes: {},
+                    data_acao: agora,
+                }),
+            );
+        if (logs.length === 0) return;
+        await this.uow.historicoAlunosTurmasLogsRP.save(logs, { chunk: 500 });
     }
 
     async importarAlunosMasterclassPlanilha(
@@ -1386,10 +1418,12 @@ export class UploadService {
                 lotesVinculosAtualizados += Math.ceil(updatesToSave.length / vinculosChunkSize);
             }
 
+            let entidadesCriadasMc: Array<{ id: string; id_turma: number; id_aluno: string }> = [];
             if (createsToSave.length > 0) {
                 const entities = createsToSave.map((data) => this.uow.turmasAlunosRP.create(data));
                 await this.uow.turmasAlunosRP.save(entities, { chunk: vinculosChunkSize });
                 lotesVinculosCriados += Math.ceil(entities.length / vinculosChunkSize);
+                entidadesCriadasMc = entities as Array<{ id: string; id_turma: number; id_aluno: string }>;
             }
 
             // Congela a meta no novo pico de inscritos/extras das turmas de destino da importação.
@@ -1472,6 +1506,16 @@ export class UploadService {
                     chunk: vinculosChunkSize,
                 });
             }
+
+            // Registra entrada (CRIACAO) no histórico para aparecer no extrato de movimentação.
+            // Pula as matrículas que são transferência entre turmas (historico de <> para), pois
+            // essas já contam como "Transferência"; Time de Vendas (de = para) e compras recebem CRIACAO.
+            const skipTurmaAlunoIds = new Set(
+                historicosParaCriar
+                    .filter((h) => Number(h.id_turma_de) !== Number(h.id_turma_para))
+                    .map((h) => String(h.id_turma_aluno_para)),
+            );
+            await this.registrarLogsCriacaoImportacao(entidadesCriadasMc, skipTurmaAlunoIds);
         }
 
         const totalProcessadas = totalCriadas + totalAtualizadas;

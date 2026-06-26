@@ -2705,15 +2705,32 @@ export class UploadService {
             const siglaPolo = (turma.id_polo_fk?.sigla_polo || '').toUpperCase().trim();
             const edicao = (turma.edicao_turma || '').toUpperCase().trim();
 
-            if (!siglaTreinamento || !siglaPolo || !edicao) continue;
-            const codigo = `${siglaTreinamento}_${siglaPolo}_${edicao}`;
-            map.set(codigo, turma.id);
-            // Variante normalizada (espaços => "_", sem acentos), ex.: sigla
-            // "LEGACY XP" gera também a chave "LEGACY_XP_AM_17" para casar com a
-            // resolução por código normalizado.
-            const codigoNormalizado = this.normalizeCodeKey(codigo);
-            if (codigoNormalizado && !map.has(codigoNormalizado)) {
-                map.set(codigoNormalizado, turma.id);
+            if (!siglaPolo || !edicao) continue;
+
+            // Identificadores do treinamento que podem aparecer na planilha como o
+            // "curso" do código (SIGLA_CURSO_SIGLA_POLO_EDICAO): a sigla cadastrada
+            // (preferencial) e, como fallback, o nome do treinamento normalizado.
+            // O fallback pelo nome cobre treinamentos sem sigla cadastrada (ex.:
+            // "Trainer", cuja sigla está vazia no banco), que de outra forma nunca
+            // entrariam no mapa e fariam a turma de destino "não ser encontrada".
+            const identificadores = new Set<string>();
+            if (siglaTreinamento) identificadores.add(siglaTreinamento);
+            const nomeTreinamentoKey = this.normalizeCodeKey(turma.id_treinamento_fk?.treinamento || '');
+            if (nomeTreinamentoKey) identificadores.add(nomeTreinamentoKey);
+            if (identificadores.size === 0) continue;
+
+            for (const identificador of identificadores) {
+                const codigo = `${identificador}_${siglaPolo}_${edicao}`;
+                if (!map.has(codigo)) {
+                    map.set(codigo, turma.id);
+                }
+                // Variante normalizada (espaços => "_", sem acentos), ex.: sigla
+                // "LEGACY XP" gera também a chave "LEGACY_XP_AM_17" para casar com a
+                // resolução por código normalizado.
+                const codigoNormalizado = this.normalizeCodeKey(codigo);
+                if (codigoNormalizado && !map.has(codigoNormalizado)) {
+                    map.set(codigoNormalizado, turma.id);
+                }
             }
         }
 

@@ -67,6 +67,38 @@ export class WhatsAppService {
         this.CONTRATO_TEMPLATE_NAME = process.env.GUPSHUP_CONTRATO_TEMPLATE_NAME || process.env.GUPSHUP_CONTRATO_TEMPLATE_ID || '';
     }
 
+    /**
+     * Resolve a URL pública base da API (com prefixo /api). Usada para hospedar a
+     * imagem do QR Code no próprio backend, evitando dependência de serviços
+     * externos de hospedagem (ex.: ImgBB) que exigem chave e podem retornar 400.
+     */
+    private resolvePublicApiBaseUrl(): string {
+        const explicit = (process.env.WHATSAPP_PUBLIC_API_URL || process.env.PUBLIC_API_URL || '').trim();
+        let base = explicit || (process.env.FRONTEND_URL || 'https://iamcontrol.com.br').trim();
+        base = base.replace(/\/+$/, '');
+
+        // WhatsApp exige mídia em HTTPS; força https em hosts públicos (mantém http em local).
+        const ehLocal = /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(base);
+        if (!ehLocal && base.startsWith('http://')) {
+            base = base.replace(/^http:\/\//i, 'https://');
+        }
+
+        if (explicit) {
+            return base;
+        }
+        // O backend roda sob o prefixo global "api" no mesmo domínio público.
+        return base.endsWith('/api') ? base : `${base}/api`;
+    }
+
+    /**
+     * Gera a imagem (PNG) do QR Code de credenciamento de um aluno na turma.
+     * O scanner do credenciamento só precisa do campo `id_turma_aluno`.
+     */
+    async generateQRCodeImageBuffer(idTurmaAluno: string): Promise<Buffer> {
+        const payload = { id_turma_aluno: idTurmaAluno };
+        return this.chatGuruService.generateQRCodeBuffer(payload);
+    }
+
     private resolveJwtSecret(): string {
         const secret = process.env.JWT_SECRET?.trim();
         if (!secret) {
@@ -1457,13 +1489,25 @@ Vamos Prosperar! 🙌`;
             console.log(`📋 Template ID: ${this.QRCODE_TEMPLATE_NAME}`);
             console.log(`${'═'.repeat(80)}\n`);
 
-            // Gerar imagem do QR Code
-            const qrCodeImage = await this.chatGuruService.generateQRCode(qrData);
+            // Resolve a URL pública da imagem do QR Code.
+            // Preferimos hospedar a imagem no próprio backend (endpoint público
+            // /whatsapp/qrcode-image/:idTurmaAluno), evitando depender de serviços
+            // externos (ex.: ImgBB), que exigem chave e podem retornar HTTP 400.
+            const publicApiBase = this.resolvePublicApiBaseUrl();
+            const baseEhLocal = /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(publicApiBase);
+            let qrCodeUrl: string;
 
-            // Faz upload da imagem para obter URL pública
-            console.log(`🔲 Fazendo upload da imagem do QR Code...`);
-            const qrCodeUrl = await this.chatGuruService.uploadImageForTemplate(qrCodeImage);
-            console.log(`✅ Imagem hospedada em: ${qrCodeUrl}`);
+            if (!baseEhLocal) {
+                qrCodeUrl = `${publicApiBase}/whatsapp/qrcode-image/${encodeURIComponent(data.alunoTurmaId)}`;
+                console.log(`✅ Imagem do QR Code hospedada no backend: ${qrCodeUrl}`);
+            } else {
+                // Em ambiente local o backend não é acessível pela Gupshup; tenta o
+                // serviço externo (ImgBB) como fallback apenas para desenvolvimento.
+                console.log(`🔲 Base pública local detectada; tentando upload via ImgBB (fallback)...`);
+                const qrCodeImage = await this.chatGuruService.generateQRCode(qrData);
+                qrCodeUrl = await this.chatGuruService.uploadImageForTemplate(qrCodeImage);
+                console.log(`✅ Imagem hospedada em: ${qrCodeUrl}`);
+            }
 
             // Parâmetros do template conforme aprovado na Gupshup:
             // {{1}} = nome do aluno

@@ -584,6 +584,25 @@ export class UpdateAlunoTurmaDto {
         return Number.isFinite(n) && n > 0 ? n : null;
     })
     id_acessor?: number | null;
+
+    // Datas de assinatura da mentoria (somente turmas de mentoria). Edição manual do
+    // período do mentorado; registra no histórico do aluno quem fez a alteração.
+    // Formato aceito AAAA-MM-DD; null limpa a data.
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        return typeof value === 'string' ? value.slice(0, 10) : value;
+    })
+    data_inicio_mentoria?: string | null;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        return typeof value === 'string' ? value.slice(0, 10) : value;
+    })
+    data_fim_mentoria?: string | null;
 }
 
 export class TurmaResponseDto {

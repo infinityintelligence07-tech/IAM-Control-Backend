@@ -1,4 +1,5 @@
-import { Controller, Post, Body, Get, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, Put } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, Put, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { ChatGuruService } from './chatguru/chatguru.service';
@@ -105,6 +106,20 @@ export class WhatsAppController {
     async sendQRCode(@Body() data: SendQRCodeDto) {
         console.log('Enviando QR code de credenciamento para:', data.alunoNome);
         return this.whatsappService.sendQRCodeCredenciamento(data);
+    }
+
+    /**
+     * Serve a imagem PNG do QR Code de credenciamento de um aluno na turma.
+     * Endpoint PÚBLICO (sem JWT): é consumido pela Gupshup/WhatsApp como URL de mídia
+     * do template, e por isso precisa ser acessível sem autenticação.
+     */
+    @Get('qrcode-image/:idTurmaAluno')
+    async getQrCodeImage(@Param('idTurmaAluno') idTurmaAluno: string, @Res() res: Response) {
+        const buffer = await this.whatsappService.generateQRCodeImageBuffer(idTurmaAluno);
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Length', buffer.length);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.end(buffer);
     }
 
     @Get('test-connection')

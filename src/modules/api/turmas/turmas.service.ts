@@ -6168,6 +6168,8 @@ export class TurmasService {
             // Armazenar status anterior para verificar mudança
             const statusAnterior = turmaAluno.status_aluno_turma;
             const presencaAnterior = turmaAluno.presenca_turma;
+            // Datas de assinatura da mentoria atualizadas (refletidas na resposta quando editadas).
+            let datasMentoriaResposta: { inicio: string | null; fim: string | null } | null = null;
             const beforeSnapshot = {
                 nome_cracha: turmaAluno.id_aluno_fk?.nome_cracha,
                 url_comprovante_pgto: turmaAluno.url_comprovante_pgto,
@@ -6264,6 +6266,84 @@ export class TurmasService {
             turmaAluno.checkin_realizado = flagsDerivadas.checkin_realizado;
             if (updateAlunoDto.atualizado_por !== undefined) {
                 turmaAluno.atualizado_por = updateAlunoDto.atualizado_por;
+            }
+
+            // Edição manual das datas de assinatura da mentoria (início/encerramento).
+            // As datas vivem em turmas_alunos_treinamentos; registramos no histórico do aluno
+            // quem fez a alteração (userId).
+            const querEditarDatasMentoria =
+                updateAlunoDto.data_inicio_mentoria !== undefined || updateAlunoDto.data_fim_mentoria !== undefined;
+            if (querEditarDatasMentoria) {
+                const ehMentoria = turmaAluno.id_turma_fk?.id_treinamento_fk?.tipo_mentoria === true;
+                if (!ehMentoria) {
+                    throw new BadRequestException('As datas de assinatura só podem ser editadas em turmas de mentoria.');
+                }
+
+                const linhasTreinamento = await this.uow.turmasAlunosTreinamentosRP.find({
+                    where: { id_turma_aluno: turmaAluno.id, deletado_em: null },
+                });
+                const idTreinamentoTurma = turmaAluno.id_turma_fk?.id_treinamento;
+                const linhaMentoria =
+                    linhasTreinamento.find((l) => String(l.id_turma_destino) === String(turmaAluno.id_turma) && l.data_inicio_mentoria != null) ||
+                    linhasTreinamento.find((l) => l.id_treinamento === idTreinamentoTurma && l.data_inicio_mentoria != null) ||
+                    linhasTreinamento.find((l) => l.data_inicio_mentoria != null) ||
+                    linhasTreinamento.find((l) => String(l.id_turma_destino) === String(turmaAluno.id_turma)) ||
+                    linhasTreinamento.find((l) => l.id_treinamento === idTreinamentoTurma) ||
+                    linhasTreinamento[0];
+
+                if (!linhaMentoria) {
+                    throw new BadRequestException('Não foi encontrado o registro de mentoria deste aluno para atualizar as datas.');
+                }
+
+                const normalizarData = (valor?: string | null): string | null => {
+                    if (!valor) return null;
+                    return String(valor).slice(0, 10);
+                };
+                const inicioAntigo = normalizarData(linhaMentoria.data_inicio_mentoria);
+                const fimAntigo = normalizarData(linhaMentoria.data_fim_mentoria);
+                const novoInicio =
+                    updateAlunoDto.data_inicio_mentoria !== undefined ? normalizarData(updateAlunoDto.data_inicio_mentoria) : inicioAntigo;
+                const novoFim =
+                    updateAlunoDto.data_fim_mentoria !== undefined ? normalizarData(updateAlunoDto.data_fim_mentoria) : fimAntigo;
+
+                if (novoInicio && novoFim && novoFim < novoInicio) {
+                    throw new BadRequestException('A data de encerramento da assinatura não pode ser anterior à data de início.');
+                }
+
+                linhaMentoria.data_inicio_mentoria = novoInicio;
+                linhaMentoria.data_fim_mentoria = novoFim;
+                await this.uow.turmasAlunosTreinamentosRP.save(linhaMentoria);
+                datasMentoriaResposta = { inicio: novoInicio, fim: novoFim };
+
+                const formatarDataLog = (valor: string | null): string => {
+                    if (!valor) return 'vazio';
+                    const partes = valor.split('-');
+                    return partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : valor;
+                };
+                const alteracoesDatas: string[] = [];
+                if (inicioAntigo !== novoInicio) {
+                    alteracoesDatas.push(`Início da assinatura: ${formatarDataLog(inicioAntigo)} -> ${formatarDataLog(novoInicio)}`);
+                }
+                if (fimAntigo !== novoFim) {
+                    alteracoesDatas.push(`Encerramento da assinatura: ${formatarDataLog(fimAntigo)} -> ${formatarDataLog(novoFim)}`);
+                }
+                if (alteracoesDatas.length > 0) {
+                    await this.registrarLogAlunoTurma(
+                        {
+                            id_turma_aluno: turmaAluno.id,
+                            id_turma: turmaAluno.id_turma,
+                            id_aluno: turmaAluno.id_aluno,
+                            tipo_acao: 'ATUALIZACAO',
+                            titulo: 'Período da assinatura da mentoria atualizado',
+                            descricao: alteracoesDatas.join(' | '),
+                            detalhes: {
+                                inicio: { de: inicioAntigo, para: novoInicio },
+                                fim: { de: fimAntigo, para: novoFim },
+                            },
+                        },
+                        userId,
+                    );
+                }
             }
 
             const solicitouCancelamento = novoStatusAlunoTurma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
@@ -6394,6 +6474,8 @@ export class TurmasService {
                 confirmacao_realizada: turmaAlunoAtualizada.confirmacao_realizada,
                 checkin_realizado: turmaAlunoAtualizada.checkin_realizado,
                 presenca_turma: turmaAlunoAtualizada.presenca_turma,
+                data_inicio_mentoria: datasMentoriaResposta?.inicio ?? undefined,
+                data_fim_mentoria: datasMentoriaResposta?.fim ?? undefined,
                 pendencia_pagamento: turmaAlunoAtualizada.pendencia_pagamento,
                 quantidade_inscricoes: turmaAlunoAtualizada.quantidade_inscricoes ?? 1,
                 outros_clientes: turmaAlunoAtualizada.outros_clientes ?? [],

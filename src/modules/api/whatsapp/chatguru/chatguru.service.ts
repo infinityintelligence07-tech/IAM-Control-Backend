@@ -815,6 +815,24 @@ export class ChatGuruService {
     }
 
     /**
+     * Gera um QR code como buffer PNG (para servir diretamente via HTTP, sem
+     * depender de hospedagem externa de imagens).
+     */
+    async generateQRCodeBuffer(data: any): Promise<Buffer> {
+        const qrCodeData = typeof data === 'string' ? data : JSON.stringify(data);
+        return QRCode.toBuffer(qrCodeData, {
+            errorCorrectionLevel: 'M',
+            margin: 1,
+            color: {
+                dark: '#000000',
+                light: '#FFFFFF',
+            },
+            width: 256,
+            type: 'png',
+        });
+    }
+
+    /**
      * Envia uma mensagem de template via ChatGuru/Gupshup
      * @param phoneNumber Número do telefone do destinatário
      * @param templateId ID do template na Gupshup (Gupshup temp ID)

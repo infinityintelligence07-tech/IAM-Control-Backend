@@ -11,6 +11,7 @@ import { EnderecoEventosModule } from './endereco-eventos/endereco-eventos.modul
 import { RelatoriosFinanceiroModule } from './relatorios/financeiro/relatorios-financeiro.module';
 import { UploadModule } from './upload/upload.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
 
 @Module({
     imports: [
@@ -26,6 +27,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
         RelatoriosFinanceiroModule,
         UploadModule,
         WebhooksModule,
+        ConfiguracoesModule,
     ],
 })
 export class ApiModule {}

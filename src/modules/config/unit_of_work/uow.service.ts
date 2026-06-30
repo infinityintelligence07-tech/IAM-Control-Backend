@@ -24,6 +24,7 @@ import { PresentesSorteio } from '../entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../entities/historicoSorteados.entity';
 import { HistoricoAlunosTurmasLog } from '../entities/historicoAlunosTurmasLog.entity';
 import { TurmasMetricasSnapshot } from '../entities/turmasMetricasSnapshot.entity';
+import { ConfiguracoesSistema } from '../entities/configuracoesSistema.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -227,6 +228,12 @@ export class UnitOfWorkService {
     get turmasMetricasSnapshotRP(): Repository<TurmasMetricasSnapshot> {
         if (!this._turmasMetricasSnapshotRP) this._turmasMetricasSnapshotRP = this.postgresEM.getRepository(TurmasMetricasSnapshot);
         return this._turmasMetricasSnapshotRP;
+    }
+
+    private _configuracoesSistemaRP?: Repository<ConfiguracoesSistema>;
+    get configuracoesSistemaRP(): Repository<ConfiguracoesSistema> {
+        if (!this._configuracoesSistemaRP) this._configuracoesSistemaRP = this.postgresEM.getRepository(ConfiguracoesSistema);
+        return this._configuracoesSistemaRP;
     }
     /*****************************************************************************/
 }

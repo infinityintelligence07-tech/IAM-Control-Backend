@@ -1778,6 +1778,7 @@ export class TurmasService {
                               tipo_mentoria: turma.id_treinamento_fk.tipo_mentoria === true,
                               sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
                               treinamento: turma.id_treinamento_fk.treinamento,
+                              duracao_meses: turma.id_treinamento_fk.duracao_meses ?? null,
                               url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
                               tipo_online: turma.id_treinamento_fk.tipo_online,
                           }
@@ -1889,6 +1890,7 @@ export class TurmasService {
                           tipo_mentoria: turma.id_treinamento_fk.tipo_mentoria === true,
                           sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
                           treinamento: turma.id_treinamento_fk.treinamento,
+                          duracao_meses: turma.id_treinamento_fk.duracao_meses ?? null,
                           url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
                           tipo_online: turma.id_treinamento_fk.tipo_online,
                       }

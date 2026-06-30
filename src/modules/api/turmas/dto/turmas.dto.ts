@@ -655,6 +655,7 @@ export class TurmaResponseDto {
         tipo_mentoria?: boolean;
         sigla_treinamento?: string;
         treinamento?: string;
+        duracao_meses?: number | null;
         url_logo_treinamento?: string;
         tipo_online?: boolean;
     };

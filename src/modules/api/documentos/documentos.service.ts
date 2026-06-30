@@ -383,6 +383,12 @@ export class DocumentosService {
                 ? new Date(`${fimVigente.slice(0, 10)}T00:00:00`)
                 : null;
         const inicio = baseAdiantamento ?? new Date();
+        // Renovação: o novo período inicia no DIA SEGUINTE ao término vigente,
+        // para não sobrepor o último dia do contrato anterior (ex.: vence 01/07
+        // => novo contrato inicia 02/07 e encerra 1 duração depois).
+        if (baseAdiantamento) {
+            inicio.setDate(inicio.getDate() + 1);
+        }
         inicio.setHours(0, 0, 0, 0);
         const fim = new Date(inicio);
         fim.setMonth(fim.getMonth() + duracaoMeses);

@@ -479,7 +479,22 @@ export class DocumentosService {
 
             // Período da mentoria (início na assinatura/finalização + duração,
             // ou término vigente + duração quando for adiantamento).
-            const periodoMentoria = this.calcularPeriodoMentoria(treinamento, fimMentoriaVigente);
+            // Adiantamento: quando o usuário informou manualmente o período do
+            // contrato na venda (datepickers), essas datas têm prioridade.
+            const isoDate = /^\d{4}-\d{2}-\d{2}/;
+            const periodoMentoriaManual =
+                treinamento.tipo_mentoria &&
+                criarContratoDto.data_inicio_mentoria &&
+                criarContratoDto.data_fim_mentoria &&
+                isoDate.test(criarContratoDto.data_inicio_mentoria) &&
+                isoDate.test(criarContratoDto.data_fim_mentoria)
+                    ? {
+                          data_inicio_mentoria: criarContratoDto.data_inicio_mentoria.slice(0, 10),
+                          data_fim_mentoria: criarContratoDto.data_fim_mentoria.slice(0, 10),
+                      }
+                    : null;
+            const periodoMentoria =
+                periodoMentoriaManual ?? this.calcularPeriodoMentoria(treinamento, fimMentoriaVigente);
 
             // Buscar ou criar registro de TurmasAlunos primeiro
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({

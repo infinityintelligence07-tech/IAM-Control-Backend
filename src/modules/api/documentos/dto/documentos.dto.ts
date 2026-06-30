@@ -173,6 +173,19 @@ export class CriarContratoZapSignDto {
     @IsString()
     data_final_treinamento?: string;
 
+    /**
+     * Adiantamento de mentoria: período do contrato (início/término) definido
+     * manualmente pelo usuário na venda. Quando informados, têm prioridade sobre
+     * o cálculo automático (`calcularPeriodoMentoria`). Formato AAAA-MM-DD.
+     */
+    @IsOptional()
+    @IsString()
+    data_inicio_mentoria?: string;
+
+    @IsOptional()
+    @IsString()
+    data_fim_mentoria?: string;
+
     @IsString()
     @IsNotEmpty()
     forma_pagamento: string; // 'A_VISTA' | 'PARCELADO' | 'AMBOS'

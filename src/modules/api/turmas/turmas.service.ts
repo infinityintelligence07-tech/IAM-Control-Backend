@@ -4113,6 +4113,22 @@ export class TurmasService {
             throw new BadRequestException('Turma de destino deve ser diferente da turma de origem');
         }
 
+        // Não é permitido transferir para uma turma que já ocorreu ou está ocorrendo
+        // agora (evento já começou). Mentorias (sem data_inicio) e as transferências
+        // automáticas do robô (manterNaOrigem/transferidoPorRobo, que já apontam para
+        // turmas futuras) são isentas.
+        if (!opts?.transferidoPorRobo && !opts?.manterNaOrigem && turmaDestino.data_inicio) {
+            const hojeTransferencia = new Date();
+            hojeTransferencia.setHours(0, 0, 0, 0);
+            const inicioDestino = new Date(turmaDestino.data_inicio);
+            inicioDestino.setHours(0, 0, 0, 0);
+            if (inicioDestino <= hojeTransferencia) {
+                throw new BadRequestException(
+                    'Não é possível transferir para uma turma que já ocorreu ou está ocorrendo. Escolha uma turma futura.',
+                );
+            }
+        }
+
         const idAluno = parseInt(turmaAlunoOrigem.id_aluno, 10);
         const jaNaTurmaDestino = await this.uow.turmasAlunosRP.findOne({
             where: { id_turma: id_turma_destino, id_aluno: turmaAlunoOrigem.id_aluno, deletado_em: null },

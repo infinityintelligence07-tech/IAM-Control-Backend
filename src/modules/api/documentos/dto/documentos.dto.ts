@@ -276,6 +276,16 @@ export class CriarContratoZapSignDto {
     @IsOptional()
     @IsString()
     observacoes?: string;
+
+    /**
+     * Contrato escrito à mão: quando `true`, o documento físico já foi anexado
+     * pelo usuário na venda, então NÃO geramos PDF nem criamos documento na
+     * ZapSign. Apenas registramos a venda; as fotos/PDF do contrato são
+     * anexadas em seguida via `salvarAssinatura` (foto_documento_aluno_base64).
+     */
+    @IsOptional()
+    @IsBoolean()
+    contrato_manual?: boolean;
 }
 
 export class FormaPagamentoDto {

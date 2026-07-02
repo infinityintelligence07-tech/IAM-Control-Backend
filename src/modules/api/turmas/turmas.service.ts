@@ -6306,13 +6306,59 @@ export class TurmasService {
                     where: { id_turma_aluno: turmaAluno.id, deletado_em: null },
                 });
                 const idTreinamentoTurma = turmaAluno.id_turma_fk?.id_treinamento;
-                const linhaMentoria =
+                let linhaMentoria =
                     linhasTreinamento.find((l) => String(l.id_turma_destino) === String(turmaAluno.id_turma) && l.data_inicio_mentoria != null) ||
                     linhasTreinamento.find((l) => l.id_treinamento === idTreinamentoTurma && l.data_inicio_mentoria != null) ||
                     linhasTreinamento.find((l) => l.data_inicio_mentoria != null) ||
                     linhasTreinamento.find((l) => String(l.id_turma_destino) === String(turmaAluno.id_turma)) ||
                     linhasTreinamento.find((l) => l.id_treinamento === idTreinamentoTurma) ||
                     linhasTreinamento[0];
+
+                // Aluno matriculado na mentoria sem venda/contrato (adicionado manualmente,
+                // importação ou transferência) não possui linha em turmas_alunos_treinamentos.
+                // Nesses casos a listagem exibe as datas pela regra padrão (criado_em + duração);
+                // criamos/reativamos a linha aqui para persistir o override manual, em vez de falhar.
+                if (!linhaMentoria && idTreinamentoTurma) {
+                    const duracaoMesesMentoria = resolverDuracaoMentoriaMeses({
+                        treinamento: turmaAluno.id_turma_fk?.id_treinamento_fk?.treinamento,
+                        duracao_meses: turmaAluno.id_turma_fk?.id_treinamento_fk?.duracao_meses,
+                    });
+                    const somarMesesIso = (iso: string | null, meses: number | null): string | null => {
+                        if (!iso || meses == null) return null;
+                        const [ano, mes, dia] = iso.split('-').map((n) => parseInt(n, 10));
+                        const base = new Date(Date.UTC(ano, mes - 1, dia));
+                        base.setUTCMonth(base.getUTCMonth() + meses);
+                        return base.toISOString().slice(0, 10);
+                    };
+                    const inicioPadrao = turmaAluno.criado_em ? new Date(turmaAluno.criado_em).toISOString().slice(0, 10) : null;
+                    const fimPadrao = somarMesesIso(inicioPadrao, duracaoMesesMentoria);
+
+                    // Pode existir uma linha soft-deletada (constraint única por matrícula +
+                    // treinamento): reativa em vez de inserir para não violar a constraint.
+                    const linhaSoftDeletada = await this.uow.turmasAlunosTreinamentosRP.findOne({
+                        where: { id_turma_aluno: turmaAluno.id, id_treinamento: idTreinamentoTurma },
+                        withDeleted: true,
+                    });
+                    if (linhaSoftDeletada) {
+                        linhaSoftDeletada.deletado_em = null;
+                        linhaSoftDeletada.id_turma_destino = String(turmaAluno.id_turma);
+                        // Base = datas padrão exibidas na listagem (o "de" do log fica coerente com a tela).
+                        linhaSoftDeletada.data_inicio_mentoria = inicioPadrao;
+                        linhaSoftDeletada.data_fim_mentoria = fimPadrao;
+                        linhaMentoria = linhaSoftDeletada;
+                    } else {
+                        linhaMentoria = this.uow.turmasAlunosTreinamentosRP.create({
+                            id_turma_aluno: turmaAluno.id,
+                            id_treinamento: idTreinamentoTurma,
+                            id_turma_destino: String(turmaAluno.id_turma),
+                            preco_treinamento: 0,
+                            forma_pgto: [],
+                            preco_total_pago: 0,
+                            data_inicio_mentoria: inicioPadrao,
+                            data_fim_mentoria: fimPadrao,
+                        });
+                    }
+                }
 
                 if (!linhaMentoria) {
                     throw new BadRequestException('Não foi encontrado o registro de mentoria deste aluno para atualizar as datas.');

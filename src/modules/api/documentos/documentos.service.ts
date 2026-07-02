@@ -22,7 +22,7 @@ import {
     RespostaTermoZapSignDto,
 } from './dto/documentos.dto';
 import { ETipoDocumento, EFormasPagamento } from '@/modules/config/entities/enum';
-import { ZapSignService } from './zapsign.service';
+import { ZapSignService, ZapSignResponse } from './zapsign.service';
 import { ContractTemplateService } from './contract-template.service';
 import { TermTemplateService } from './term-template.service';
 import PDFDocument from 'pdfkit';
@@ -45,6 +45,10 @@ export class DocumentosService {
     private readonly opcoesOrigemCacheMaxEntradas = 200;
     private readonly contratosBancoCacheTtlMs = 15000;
     private readonly contratosBancoCacheMaxEntradas = 40;
+    // Valor sentinela usado pelo filtro "Staff Líder" para agrupar as vendas
+    // que não se vinculam a nenhum líder de time de Imersão Prosperar
+    // (ex.: vendas de Masterclass sem time/líder definido).
+    private readonly staffLiderSemVinculoSentinela = '__SEM_STAFF_LIDER__';
     private readonly janelaCronSincronizacaoDias = 7;
     private sincronizacaoStatusCronEmExecucao = false;
     private readonly zapsignCronMaxTentativas = parsePositiveIntEnv(process.env.ZAPSIGN_CRON_MAX_TENTATIVAS, 2);
@@ -693,10 +697,11 @@ export class DocumentosService {
                 }
             }
 
-            // Preparar dados para o template usando os dados do DTO
-            const templateData = await this.prepareTemplateDataFromDto(aluno, treinamento, turma, criarContratoDto);
-
-            const pdfBuffer = await this.contractTemplateService.generateContractPDF(templateData);
+            // Contrato escrito à mão: o documento físico já foi anexado pelo
+            // usuário na venda, então NÃO geramos PDF nem criamos documento na
+            // ZapSign. Apenas registramos a venda; as fotos/PDF do contrato são
+            // anexadas em seguida via salvarAssinatura (foto_documento_aluno_base64).
+            const isContratoManual = criarContratoDto.contrato_manual === true;
 
             // Preparar signers (aluno + testemunhas)
             const signers = [
@@ -727,16 +732,26 @@ export class DocumentosService {
                 });
             }
 
-            // Criar documento no ZapSign usando o PDF gerado
-            const documentData = {
-                name: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
-                signers: signers,
-                message: 'Por favor, assine este contrato de treinamento.',
-                sandbox: false,
-                file: pdfBuffer,
-            };
+            let zapSignResponse: ZapSignResponse | null = null;
+            if (isContratoManual) {
+                this.logger.debug('zapsign.create.contract | Contrato escrito à mão — pulando geração de PDF e criação na ZapSign');
+            } else {
+                // Preparar dados para o template usando os dados do DTO
+                const templateData = await this.prepareTemplateDataFromDto(aluno, treinamento, turma, criarContratoDto);
 
-            const zapSignResponse = await this.zapSignService.createDocumentFromFile(documentData);
+                const pdfBuffer = await this.contractTemplateService.generateContractPDF(templateData);
+
+                // Criar documento no ZapSign usando o PDF gerado
+                const documentData = {
+                    name: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
+                    signers: signers,
+                    message: 'Por favor, assine este contrato de treinamento.',
+                    sandbox: false,
+                    file: pdfBuffer,
+                };
+
+                zapSignResponse = await this.zapSignService.createDocumentFromFile(documentData);
+            }
 
             // Processar dados de bônus completos
             const bonusData = this.processBonusData(criarContratoDto, turma);
@@ -748,7 +763,7 @@ export class DocumentosService {
             // Preparar dados dos signers para o campo zapsign_signers_data
             const signersData = signers.map((signer, index) => {
                 // Tentar encontrar o signer correspondente no ZapSign por índice ou nome
-                const zapSignSigner = zapSignResponse.signers[index] || zapSignResponse.signers.find((s) => s.name === signer.name);
+                const zapSignSigner = zapSignResponse?.signers[index] || zapSignResponse?.signers.find((s) => s.name === signer.name);
 
                 return {
                     name: signer.name,
@@ -763,12 +778,14 @@ export class DocumentosService {
             this.logger.debug(`zapsign.create.contract | Signers preparados total=${signersData.length}`);
 
             // Preparar status do documento para o campo zapsign_document_status
-            const documentStatus = {
-                status: zapSignResponse.status,
-                created_at: zapSignResponse.created_at,
-                document_id: zapSignResponse.token,
-                signing_url: zapSignResponse.signers[0]?.sign_url || '',
-            };
+            const documentStatus = zapSignResponse
+                ? {
+                      status: zapSignResponse.status,
+                      created_at: zapSignResponse.created_at,
+                      document_id: zapSignResponse.token,
+                      signing_url: zapSignResponse.signers[0]?.sign_url || '',
+                  }
+                : null;
 
             // Salvar informações do contrato no banco de dados
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
@@ -777,16 +794,16 @@ export class DocumentosService {
                 status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
                 // Comprovante(s) de pagamento desta venda, vinculados ao contrato.
                 comprovantes_pagamento: comprovantesVenda.length > 0 ? comprovantesVenda : null,
-                // Campos ZapSign específicos
-                zapsign_document_id: zapSignResponse.token,
+                // Campos ZapSign específicos (ausentes quando contrato escrito à mão)
+                zapsign_document_id: zapSignResponse?.token ?? undefined,
                 zapsign_signers_data: signersData,
-                zapsign_document_status: documentStatus,
+                zapsign_document_status: documentStatus ?? undefined,
                 dados_contrato: {
-                    zapsign_document_id: zapSignResponse.token,
-                    zapsign_document_url: zapSignResponse.signers[0]?.sign_url || '',
+                    zapsign_document_id: zapSignResponse?.token ?? null,
+                    zapsign_document_url: zapSignResponse?.signers[0]?.sign_url || '',
                     contrato: {
-                        file_url: zapSignResponse.original_file,
-                        id_documento_zapsign: zapSignResponse.token,
+                        file_url: zapSignResponse?.original_file ?? null,
+                        id_documento_zapsign: zapSignResponse?.token ?? null,
                     },
                     treinamento: {
                         id: treinamento.id,
@@ -891,7 +908,7 @@ export class DocumentosService {
 
             // Mapear signers com informações completas incluindo testemunhas
             const signersResponse = signers.map((signer, index) => {
-                const zapSignSigner = zapSignResponse.signers[index] || zapSignResponse.signers.find((s) => s.name === signer.name);
+                const zapSignSigner = zapSignResponse?.signers[index] || zapSignResponse?.signers.find((s) => s.name === signer.name);
                 return {
                     nome: signer.name,
                     email: signer.email || '',
@@ -904,13 +921,16 @@ export class DocumentosService {
             });
 
             return {
-                id: zapSignResponse.token,
+                // Contrato escrito à mão não tem token da ZapSign: retornamos o id
+                // numérico do registro para que a anexação subsequente das fotos/PDF
+                // (salvarAssinatura) consiga localizar o contrato.
+                id: zapSignResponse?.token ?? String(savedContrato.id),
                 nome_documento: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
-                status: zapSignResponse.status,
-                url_assinatura: zapSignResponse.signers[0]?.sign_url || '',
+                status: zapSignResponse?.status ?? 'manual',
+                url_assinatura: zapSignResponse?.signers[0]?.sign_url || '',
                 signers: signersResponse,
-                created_at: zapSignResponse.created_at,
-                file_url: zapSignResponse.original_file,
+                created_at: zapSignResponse?.created_at ?? new Date().toISOString(),
+                file_url: zapSignResponse?.original_file,
             };
         } catch (error: any) {
             this.logger.error('zapsign.create.contract | Erro ao criar contrato no ZapSign', error instanceof Error ? error.stack : undefined);
@@ -2755,12 +2775,13 @@ export class DocumentosService {
         const treinamentoViaRelacao = String(turmaDestinoRel?.id_treinamento_fk?.treinamento || '').trim();
         const edicaoViaRelacao = String(turmaDestinoRel?.edicao_turma || '').trim();
         const turmaViaRelacao = treinamentoViaRelacao && edicaoViaRelacao ? `${treinamentoViaRelacao} - ${edicaoViaRelacao}` : treinamentoViaRelacao;
+
         return (
+            turmaViaRelacao ||
             (contrato?.fluxo_evento_destino_turma || '').trim() ||
             String(dadosContrato?.fluxo_evento_destino_turma || '').trim() ||
             camposVariaveis['Turma de Destino'] ||
             camposVariaveis['Turma Destino'] ||
-            turmaViaRelacao ||
             ''
         );
     }
@@ -3184,12 +3205,18 @@ export class DocumentosService {
             }
         >();
         if (idsTurmaOrigemViaDadosContrato.length > 0) {
+            // `withDeleted` para resolver também turmas com soft delete: a query
+            // de listagem resolve o nome via join (que traz a turma removida),
+            // então as opções do filtro precisam bater com esse mesmo rótulo
+            // "Treinamento - Edição" — caso contrário a opção cairia no texto
+            // cru dos campos_variaveis (ex.: só o número da edição) e nunca
+            // casaria no filtro.
             const turmasOrigemViaDadosContrato = await this.uow.turmasRP.find({
                 where: {
                     id: In(idsTurmaOrigemViaDadosContrato),
-                    deletado_em: IsNull(),
                 },
                 relations: ['id_treinamento_fk'],
+                withDeleted: true,
             });
             turmasOrigemViaDadosContrato.forEach((turma) => {
                 const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
@@ -3225,12 +3252,15 @@ export class DocumentosService {
             }
         >();
         if (idsTurmaDestinoViaDadosContrato.length > 0) {
+            // `withDeleted` pelos mesmos motivos da resolução de origem: manter
+            // o rótulo "Treinamento - Edição" consistente com a query de
+            // listagem, evitando opções ("110") que não casam no filtro.
             const turmasDestinoViaDadosContrato = await this.uow.turmasRP.find({
                 where: {
                     id: In(idsTurmaDestinoViaDadosContrato),
-                    deletado_em: IsNull(),
                 },
                 relations: ['id_treinamento_fk'],
+                withDeleted: true,
             });
             turmasDestinoViaDadosContrato.forEach((turma) => {
                 const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
@@ -3334,13 +3364,10 @@ export class DocumentosService {
             }
         });
 
-        turmasOrigemElegiveisPorNome.forEach((turmaFormatada) => {
-            turmasOrigem.add(turmaFormatada);
-            const [treinamento] = turmaFormatada.split(' - ');
-            if (treinamento) {
-                treinamentos.add(treinamento.trim());
-            }
-        });
+        // A lista de turmas de origem deve conter SOMENTE as turmas que
+        // efetivamente tiveram venda (populadas no laço acima), não todas as
+        // turmas cadastradas/elegíveis. O mapa `turmasOrigemElegiveisPorNome`
+        // continua sendo usado apenas como filtro de elegibilidade das vendas.
 
         const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
         const turmasOrigemOrdenadas = this.ordenarListaTurmasHistorico(turmasOrigem);
@@ -3585,6 +3612,19 @@ export class DocumentosService {
         return Array.from(resumoRowsMap.values());
     }
 
+    /**
+     * O conceito de "Staff Líder" no Histórico de Vendas é exclusivo das turmas
+     * de Imersão Prosperar (IPR): os líderes de time (e seus membros) só valem
+     * quando definidos em uma turma de IPR. Turmas de outros treinamentos (ex.:
+     * Confronto) também possuem `times_equipes`, mas não devem influenciar o
+     * ranking/filtro de staff líder.
+     */
+    private turmaEhImersaoProsperarHistorico(sigla?: string | null, nome?: string | null): boolean {
+        const siglaNorm = this.normalizarTexto(sigla).replace(/[^a-z]/g, '');
+        const nomeNorm = this.normalizarTexto(nome);
+        return siglaNorm === 'ipr' || nomeNorm.includes('imersao prosperar') || nomeNorm.includes('imersão prosperar');
+    }
+
     private async montarMapasTimesHistorico(
         linhas: Array<{
             dados_contrato: unknown;
@@ -3600,9 +3640,17 @@ export class DocumentosService {
         if (idsTurmas.length > 0) {
             const turmas = await this.uow.turmasRP.find({
                 where: { id: In(idsTurmas), deletado_em: IsNull() },
-                select: { id: true, times_equipes: true },
+                relations: ['id_treinamento_fk'],
             });
             turmas.forEach((turma) => {
+                // Só consideram-se times de turmas de Imersão Prosperar: em
+                // outros treinamentos os `times_equipes` são ignorados para não
+                // poluir o staff líder das IPR.
+                const ehIpr = this.turmaEhImersaoProsperarHistorico(turma?.id_treinamento_fk?.sigla_treinamento, turma?.id_treinamento_fk?.treinamento);
+                if (!ehIpr) {
+                    timesPorTurma.set(turma.id, []);
+                    return;
+                }
                 const times = Array.isArray(turma.times_equipes) ? turma.times_equipes : [];
                 timesPorTurma.set(
                     turma.id,
@@ -3685,8 +3733,14 @@ export class DocumentosService {
         const resumoRows = await this.carregarLinhasHistoricoVendas(baseQb);
         const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
         const staffLiderId = String(options?.staff_lider_id || '').trim();
+        // O sentinela "Sem Staff Líder Informado" filtra as vendas cujo vendedor
+        // não pertence a nenhum time de líder de IPR (líder resolvido vazio).
+        const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
         const linhasAtivas = staffLiderId
-            ? resumoRows.filter((row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId)
+            ? resumoRows.filter((row) => {
+                  const liderResolvido = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
+                  return filtrandoSemLider ? !liderResolvido : liderResolvido === staffLiderId;
+              })
             : resumoRows;
 
         const resumoBase = linhasAtivas.reduce(
@@ -4149,8 +4203,12 @@ export class DocumentosService {
             if (staffLiderId) {
                 const linhasHistorico = await this.carregarLinhasHistoricoVendas(baseQb);
                 const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(linhasHistorico);
+                const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
                 const idsOrdenados = linhasHistorico
-                    .filter((row) => this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal) === staffLiderId)
+                    .filter((row) => {
+                        const liderResolvido = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
+                        return filtrandoSemLider ? !liderResolvido : liderResolvido === staffLiderId;
+                    })
                     .sort((a, b) => new Date(String(b.criado_em || 0)).getTime() - new Date(String(a.criado_em || 0)).getTime())
                     .map((row) => String(row.id));
                 total = idsOrdenados.length;

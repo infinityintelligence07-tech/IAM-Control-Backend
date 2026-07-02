@@ -108,8 +108,30 @@ export class WhatsAppService {
         return secret;
     }
 
+    /**
+     * Resolve a base pública do frontend (sem barra final e com HTTPS forçado em
+     * hosts públicos). O WhatsApp/Gupshup pode reescrever/encodar o link ao
+     * entregá-lo por template; usar HTTPS evita saltos http→https extras.
+     */
+    private resolveFrontendPublicBaseUrl(): string {
+        let base = (this.frontendUrl || 'https://iamcontrol.com.br').trim().replace(/\/+$/, '');
+        const ehLocal = /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(base);
+        if (!ehLocal && base.startsWith('http://')) {
+            base = base.replace(/^http:\/\//i, 'https://');
+        }
+        return base;
+    }
+
+    /**
+     * Monta o link de check-in usando o token no CAMINHO (`/p/<token>`), sem
+     * query string. Isso evita o 404 intermitente que ocorria quando o `?` do
+     * formato antigo (`/p?t=...`) era percent-encodado pelo template do WhatsApp
+     * (`/p%3Ft=...`), caindo numa rota inexistente. A rota `/p?t=` continua
+     * existindo no frontend para compatibilidade com links já enviados.
+     */
     private buildCheckInLink(token: string): string {
-        return `${this.frontendUrl}/p?t=${encodeURIComponent(token)}`;
+        const base = this.resolveFrontendPublicBaseUrl();
+        return `${base}/p/${encodeURIComponent(token)}`;
     }
 
     private normalizeIncomingToken(rawToken: string): string {

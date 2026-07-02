@@ -4120,7 +4120,12 @@ export class TurmasService {
         if (!opts?.transferidoPorRobo && !opts?.manterNaOrigem && turmaDestino.data_inicio) {
             const hojeTransferencia = new Date();
             hojeTransferencia.setHours(0, 0, 0, 0);
-            const inicioDestino = new Date(turmaDestino.data_inicio);
+            // `data_inicio` é uma coluna `date` (string "YYYY-MM-DD"). `new Date(str)` sem
+            // hora é interpretado como meia-noite UTC e, em fusos negativos (BRT, UTC-3),
+            // "volta" um dia — fazendo uma turma que começa amanhã ser tratada como se
+            // começasse hoje e bloqueando a transferência indevidamente. Parsear como
+            // horário LOCAL (append T00:00:00) mantém o dia correto.
+            const inicioDestino = new Date(`${String(turmaDestino.data_inicio).slice(0, 10)}T00:00:00`);
             inicioDestino.setHours(0, 0, 0, 0);
             if (inicioDestino <= hojeTransferencia) {
                 throw new BadRequestException(

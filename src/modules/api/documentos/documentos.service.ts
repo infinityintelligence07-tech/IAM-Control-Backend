@@ -3899,7 +3899,14 @@ export class DocumentosService {
             const limit = filtros?.limit || 10;
             const offset = (page - 1) * limit;
             const filtroTurmaSemPeriodo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
-            const aplicarFiltroPeriodo = !filtroTurmaSemPeriodo || Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
+            // Quando há busca por nome/CPF, a pesquisa deve cobrir TODAS as datas
+            // (retornando somente o aluno buscado), sem restringir ao período
+            // padrão dos últimos dias. Datas explícitas do usuário ainda são
+            // respeitadas.
+            const buscaPorTextoAtiva = Boolean(this.normalizarTexto(filtros?.search));
+            const temDatasExplicitas = Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
+            const aplicarFiltroPeriodo =
+                (!filtroTurmaSemPeriodo || temDatasExplicitas) && (!buscaPorTextoAtiva || temDatasExplicitas);
             const dataInicioPadrao = (() => {
                 const d = new Date();
                 d.setDate(d.getDate() - 30);

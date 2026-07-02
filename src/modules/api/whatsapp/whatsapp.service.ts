@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
+import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { ChatGuruService } from './chatguru/chatguru.service';
 import * as jwt from 'jsonwebtoken';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
@@ -198,6 +199,57 @@ export class WhatsAppService {
         }
 
         return { alunoTurmaId: decodedJwtToken.alunoTurmaId };
+    }
+
+    /**
+     * Resolve a matrícula (turmas_alunos) referenciada por um token de check-in de forma robusta,
+     * garantindo que a copy de check-in funcione em todos os casos (sem retornar 404 "página não
+     * encontrada").
+     *
+     * O token carrega o `turmas_alunos.id` do momento do envio. Se, entre o envio e o clique, esse
+     * registro sofreu soft delete (transferência em turma ativa, cancelamento ou reimportação que
+     * recria a linha do aluno na turma), o `findOne` padrão passa a excluí-lo (`deletado_em IS NULL`)
+     * e o link retorna 404. Estratégia de resolução:
+     *   1) matrícula ATIVA pelo id do token (caminho normal);
+     *   2) se não achar, recarrega o registro incluindo soft-deletados só para descobrir aluno+turma;
+     *   3) tenta a matrícula ATIVA atual do mesmo aluno na mesma turma (cobre reimportação/reativação/
+     *      transferência interna que gerou uma nova linha);
+     *   4) como último recurso, usa o próprio registro soft-deletado, para o link nunca quebrar.
+     */
+    private async resolveTurmaAlunoPorToken(alunoTurmaId: string, relations: string[]): Promise<TurmasAlunos | null> {
+        const matriculaAtivaPorId = await this.uow.turmasAlunosRP.findOne({
+            where: { id: alunoTurmaId },
+            relations,
+        });
+        if (matriculaAtivaPorId) {
+            return matriculaAtivaPorId;
+        }
+
+        // O id do token pode apontar para um registro soft-deletado: recarrega (incluindo deletados)
+        // apenas para obter aluno e turma e tentar reencontrar a matrícula ativa correspondente.
+        const registroComDeletados = await this.uow.turmasAlunosRP.findOne({
+            where: { id: alunoTurmaId },
+            relations,
+            withDeleted: true,
+        });
+        if (!registroComDeletados) {
+            return null;
+        }
+
+        const idAluno = registroComDeletados.id_aluno;
+        const idTurma = registroComDeletados.id_turma;
+        if (idAluno != null && idTurma != null) {
+            const matriculaAtivaAtual = await this.uow.turmasAlunosRP.findOne({
+                where: { id_aluno: idAluno, id_turma: idTurma },
+                relations,
+                order: { criado_em: 'DESC' },
+            });
+            if (matriculaAtivaAtual) {
+                return matriculaAtivaAtual;
+            }
+        }
+
+        return registroComDeletados;
     }
 
     private async sortStudentsByEnrollment(students: CheckInStudentDto[]): Promise<CheckInStudentDto[]> {
@@ -1087,11 +1139,8 @@ Vamos Prosperar! 🙌`;
                 throw new BadRequestException('Token inválido');
             }
 
-            // Buscar aluno na turma
-            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
-                where: { id: decoded.alunoTurmaId },
-                relations: ['id_aluno_fk', 'id_turma_fk'],
-            });
+            // Buscar aluno na turma (resolve mesmo se a matrícula do token foi soft-deletada).
+            const alunoTurma = await this.resolveTurmaAlunoPorToken(decoded.alunoTurmaId, ['id_aluno_fk', 'id_turma_fk']);
 
             if (!alunoTurma) {
                 throw new NotFoundException('Aluno não encontrado na turma');
@@ -1163,11 +1212,12 @@ Vamos Prosperar! 🙌`;
                 throw new BadRequestException('Token inválido');
             }
 
-            // Buscar aluno na turma
-            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
-                where: { id: decoded.alunoTurmaId },
-                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk'],
-            });
+            // Buscar aluno na turma (resolve mesmo se a matrícula do token foi soft-deletada).
+            const alunoTurma = await this.resolveTurmaAlunoPorToken(decoded.alunoTurmaId, [
+                'id_aluno_fk',
+                'id_turma_fk',
+                'id_turma_fk.id_treinamento_fk',
+            ]);
 
             if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                 throw new NotFoundException('Aluno não encontrado na turma');
@@ -1238,10 +1288,13 @@ Vamos Prosperar! 🙌`;
             }
 
             // Buscar aluno na turma com todas as relações necessárias
-            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
-                where: { id: decoded.alunoTurmaId },
-                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk', 'id_turma_fk.id_polo_fk'],
-            });
+            // (resolve mesmo se a matrícula do token foi soft-deletada/reimportada).
+            const alunoTurma = await this.resolveTurmaAlunoPorToken(decoded.alunoTurmaId, [
+                'id_aluno_fk',
+                'id_turma_fk',
+                'id_turma_fk.id_treinamento_fk',
+                'id_turma_fk.id_polo_fk',
+            ]);
 
             if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                 throw new NotFoundException('Aluno não encontrado na turma');
@@ -1284,7 +1337,7 @@ Vamos Prosperar! 🙌`;
             const statusAtualizado = alunoTurma.status_aluno_turma !== EStatusAlunosTurmas.CHECKIN_REALIZADO;
             if (statusAtualizado) {
                 await this.uow.turmasAlunosRP.update(
-                    { id: decoded.alunoTurmaId },
+                    { id: alunoTurma.id },
                     {
                         status_aluno_turma: EStatusAlunosTurmas.CHECKIN_REALIZADO,
                         confirmacao_realizada: true,
@@ -1370,11 +1423,8 @@ Vamos Prosperar! 🙌`;
                 throw new BadRequestException('Token inválido');
             }
 
-            // Buscar aluno na turma
-            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
-                where: { id: decoded.alunoTurmaId },
-                relations: ['id_aluno_fk'],
-            });
+            // Buscar aluno na turma (resolve mesmo se a matrícula do token foi soft-deletada).
+            const alunoTurma = await this.resolveTurmaAlunoPorToken(decoded.alunoTurmaId, ['id_aluno_fk']);
 
             if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                 throw new NotFoundException('Aluno não encontrado na turma');

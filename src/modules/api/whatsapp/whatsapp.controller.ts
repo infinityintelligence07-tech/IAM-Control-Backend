@@ -45,6 +45,10 @@ export interface ResendCheckInByTurmaDto {
     turmaId: number;
 }
 
+export interface SendQRCodeBulkDto {
+    items: SendQRCodeDto[];
+}
+
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('whatsapp')
 export class WhatsAppController {
@@ -71,14 +75,44 @@ export class WhatsAppController {
     @UseGuards(JwtAuthGuard)
     async sendCheckInLinks(@Body() data: SendCheckInLinksDto) {
         console.log('Enviando links de check-in via WhatsApp para:', data.students.length, 'alunos');
-        return this.whatsappService.sendCheckInLinksToStudents(data.students);
+        // Envio individual permanece inline (resposta imediata com o resultado real).
+        if ((data.students?.length || 0) <= 1) {
+            return this.whatsappService.sendCheckInLinksToStudents(data.students);
+        }
+        // Envio em MASSA vai para a fila: a request responde na hora (sem timeout
+        // exceeded) e cada aluno tem timeout próprio + retentativas (2 min, máx. 3).
+        const job = await this.whatsappService.enqueueCheckInLinks(data.students);
+        return { success: true, queued: true, job };
     }
 
     @Post('send-confirmacao-links')
     @UseGuards(JwtAuthGuard)
     async sendConfirmacaoLinks(@Body() data: SendCheckInLinksDto) {
         console.log('Enviando mensagens de confirmação via WhatsApp para:', data.students.length, 'alunos');
-        return this.whatsappService.sendConfirmacaoToStudents(data.students);
+        if ((data.students?.length || 0) <= 1) {
+            return this.whatsappService.sendConfirmacaoToStudents(data.students);
+        }
+        const job = this.whatsappService.enqueueConfirmacaoLinks(data.students);
+        return { success: true, queued: true, job };
+    }
+
+    /**
+     * Envio em MASSA de QR Codes de credenciamento via fila (retorno imediato).
+     * Cada aluno tem timeout próprio; falhas são retentadas a cada 2 min (máx. 3 tentativas).
+     */
+    @Post('send-qrcode-bulk')
+    @UseGuards(JwtAuthGuard)
+    sendQRCodeBulk(@Body() data: SendQRCodeBulkDto) {
+        console.log('Enfileirando envio de QR Codes em massa para:', data.items?.length || 0, 'alunos');
+        const job = this.whatsappService.enqueueQRCodeCredenciamento(data.items || []);
+        return { success: true, queued: true, job };
+    }
+
+    /** Status de um job de envio em massa (polling do frontend). */
+    @Get('bulk-status/:jobId')
+    @UseGuards(JwtAuthGuard)
+    getBulkStatus(@Param('jobId') jobId: string) {
+        return this.whatsappService.getBulkJobStatus(jobId);
     }
 
     @Post('generate-checkin-link')

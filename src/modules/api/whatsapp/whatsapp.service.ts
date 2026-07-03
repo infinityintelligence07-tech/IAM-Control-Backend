@@ -3,6 +3,7 @@ import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { ChatGuruService } from './chatguru/chatguru.service';
+import { WhatsAppBulkQueueService, BulkSendJobSnapshot } from './whatsapp-bulk-queue.service';
 import * as jwt from 'jsonwebtoken';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
@@ -57,6 +58,7 @@ export class WhatsAppService {
     constructor(
         private readonly uow: UnitOfWorkService,
         private readonly chatGuruService: ChatGuruService,
+        private readonly bulkQueue: WhatsAppBulkQueueService,
     ) {
         this.frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
         this.jwtSecret = this.resolveJwtSecret();
@@ -534,131 +536,115 @@ export class WhatsAppService {
     }
 
     /**
-     * Envia links de check-in para múltiplos alunos
+     * Envia o link de check-in para UM aluno. Retorna sucesso/erro sem lançar
+     * exceção (para uso tanto no envio inline quanto na fila de envios em massa).
      */
-    async sendCheckInLinksToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
-        const orderedStudents = await this.sortStudentsByEnrollment(students);
-        const results = {
-            success: true,
-            sent: 0,
-            errors: [] as string[],
-        };
+    private async enviarCheckInParaAluno(student: CheckInStudentDto): Promise<{ success: boolean; error?: string }> {
+        try {
+            const alunoTurma = await this.uow.turmasAlunosRP.findOne({
+                where: { id: student.alunoTurmaId },
+                relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_endereco_evento_fk'],
+            });
 
-        const configuredConcurrency = Number(process.env.CHECKIN_BULK_CONCURRENCY || 5);
-        const concurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0 ? Math.min(Math.floor(configuredConcurrency), 20) : 5;
+            if (!alunoTurma || !alunoTurma.id_aluno_fk) {
+                return { success: false, error: `Aluno não encontrado: ${student.alunoNome}` };
+            }
 
-        const processStudent = async (student: CheckInStudentDto): Promise<void> => {
-            try {
-                const alunoTurma = await this.uow.turmasAlunosRP.findOne({
-                    where: { id: student.alunoTurmaId },
-                    relations: ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_polo_fk', 'id_turma_fk.id_endereco_evento_fk'],
-                });
+            const checkInToken = this.generateCheckInToken(student.alunoTurmaId);
+            const checkInUrl = this.buildCheckInLink(checkInToken);
+            const turma = alunoTurma.id_turma_fk;
+            const enderecoEvento = turma?.id_endereco_evento_fk;
 
-                if (!alunoTurma || !alunoTurma.id_aluno_fk) {
-                    results.errors.push(`Aluno não encontrado: ${student.alunoNome}`);
-                    return;
-                }
+            const formatDateOnly = (dateStr: string): string => {
+                if (!dateStr || typeof dateStr !== 'string') return 'A confirmar';
+                const datePart = dateStr.trim().split('T')[0];
+                const parts = datePart.split(/[-/]/);
+                if (parts.length < 3) return 'A confirmar';
+                const d = parts[2].padStart(2, '0');
+                const m = parts[1].padStart(2, '0');
+                const y = parts[0];
+                return `${d}/${m}/${y}`;
+            };
 
-                const checkInToken = this.generateCheckInToken(student.alunoTurmaId);
-                const checkInUrl = this.buildCheckInLink(checkInToken);
-                const turma = alunoTurma.id_turma_fk;
-                const enderecoEvento = turma?.id_endereco_evento_fk;
+            const dataInicioStr = turma?.data_inicio;
+            const dataFinalStr = turma?.data_final;
+            let dataStr = 'A confirmar';
+            if (dataInicioStr) {
+                dataStr =
+                    dataFinalStr && dataInicioStr !== dataFinalStr
+                        ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`
+                        : formatDateOnly(dataInicioStr);
+            }
 
-                const formatDateOnly = (dateStr: string): string => {
-                    if (!dateStr || typeof dateStr !== 'string') return 'A confirmar';
-                    const datePart = dateStr.trim().split('T')[0];
-                    const parts = datePart.split(/[-/]/);
-                    if (parts.length < 3) return 'A confirmar';
-                    const d = parts[2].padStart(2, '0');
-                    const m = parts[1].padStart(2, '0');
-                    const y = parts[0];
-                    return `${d}/${m}/${y}`;
-                };
+            const localStr = enderecoEvento?.local_evento?.trim() || '';
 
-                const dataInicioStr = turma?.data_inicio;
-                const dataFinalStr = turma?.data_final;
-                let dataStr = 'A confirmar';
-                if (dataInicioStr) {
-                    dataStr =
-                        dataFinalStr && dataInicioStr !== dataFinalStr
-                            ? `${formatDateOnly(dataInicioStr)} à ${formatDateOnly(dataFinalStr)}`
-                            : formatDateOnly(dataInicioStr);
-                }
+            const buildEndereco = (e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null): string => {
+                if (!e) return 'A confirmar';
+                const partes = [];
+                if (e.logradouro || e.numero) partes.push([e.logradouro, e.numero].filter(Boolean).join(', '));
+                if (e.bairro) partes.push(e.bairro);
+                const cepCidade = [e.cep, e.cidade].filter(Boolean).join(', ');
+                if (cepCidade) partes.push(cepCidade);
+                if (e.estado) partes.push(e.estado);
+                return partes.length ? partes.join(' - ') : 'A confirmar';
+            };
 
-                const localStr = enderecoEvento?.local_evento?.trim() || '';
+            const enderecoStr =
+                buildEndereco(enderecoEvento) !== 'A confirmar'
+                    ? buildEndereco(enderecoEvento)
+                    : buildEndereco(
+                          turma
+                              ? {
+                                    logradouro: turma.logradouro,
+                                    numero: turma.numero,
+                                    bairro: turma.bairro,
+                                    cep: turma.cep,
+                                    cidade: turma.cidade,
+                                    estado: turma.estado,
+                                }
+                              : null,
+                      );
 
-                const buildEndereco = (
-                    e: { logradouro?: string; numero?: string; bairro?: string; cep?: string; cidade?: string; estado?: string } | null,
-                ): string => {
-                    if (!e) return 'A confirmar';
-                    const partes = [];
-                    if (e.logradouro || e.numero) partes.push([e.logradouro, e.numero].filter(Boolean).join(', '));
-                    if (e.bairro) partes.push(e.bairro);
-                    const cepCidade = [e.cep, e.cidade].filter(Boolean).join(', ');
-                    if (cepCidade) partes.push(cepCidade);
-                    if (e.estado) partes.push(e.estado);
-                    return partes.length ? partes.join(' - ') : 'A confirmar';
-                };
+            const templateParams = [student.alunoNome, student.treinamentoNome, dataStr, localStr, enderecoStr, checkInUrl];
+            const phone = alunoTurma.id_aluno_fk.telefone_um;
+            const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
 
-                const enderecoStr =
-                    buildEndereco(enderecoEvento) !== 'A confirmar'
-                        ? buildEndereco(enderecoEvento)
-                        : buildEndereco(
-                              turma
-                                  ? {
-                                        logradouro: turma.logradouro,
-                                        numero: turma.numero,
-                                        bairro: turma.bairro,
-                                        cep: turma.cep,
-                                        cidade: turma.cidade,
-                                        estado: turma.estado,
-                                    }
-                                  : null,
-                          );
+            let sendResult: any = { success: false };
+            const checkinTemplateNameFromEnv = process.env.GUPSHUP_TEMPLATE_NAME;
 
-                const templateParams = [student.alunoNome, student.treinamentoNome, dataStr, localStr, enderecoStr, checkInUrl];
-                const phone = alunoTurma.id_aluno_fk.telefone_um;
-                const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
+            if (checkinTemplateNameFromEnv && checkinTemplateNameFromEnv !== this.CHECKIN_TEMPLATE_ID_GUPSHUP) {
+                console.log(`📋 Tentativa 1: Usando nome do template da variável de ambiente: ${checkinTemplateNameFromEnv}`);
+                sendResult = await this.sendTemplateMessage(phone, checkinTemplateNameFromEnv, templateParams, alunoNome);
+            }
 
-                let sendResult: any = { success: false };
-                const checkinTemplateNameFromEnv = process.env.GUPSHUP_TEMPLATE_NAME;
+            if (!sendResult.success) {
+                console.log(`📋 Tentativa 2: Usando UUID do template: ${this.CHECKIN_TEMPLATE_NAME}`);
+                sendResult = await this.sendTemplateMessage(phone, this.CHECKIN_TEMPLATE_NAME, templateParams, alunoNome);
+            }
 
-                if (checkinTemplateNameFromEnv && checkinTemplateNameFromEnv !== this.CHECKIN_TEMPLATE_ID_GUPSHUP) {
-                    console.log(`📋 Tentativa 1: Usando nome do template da variável de ambiente: ${checkinTemplateNameFromEnv}`);
-                    sendResult = await this.sendTemplateMessage(phone, checkinTemplateNameFromEnv, templateParams, alunoNome);
-                }
+            if (!sendResult.success) {
+                console.log(`📋 Tentativa 3: Usando nome padrão do template: link_checkin`);
+                sendResult = await this.sendTemplateMessage(phone, 'link_checkin', templateParams, alunoNome);
+            }
 
-                if (!sendResult.success) {
-                    console.log(`📋 Tentativa 2: Usando UUID do template: ${this.CHECKIN_TEMPLATE_NAME}`);
-                    sendResult = await this.sendTemplateMessage(phone, this.CHECKIN_TEMPLATE_NAME, templateParams, alunoNome);
-                }
+            if (!sendResult.success) {
+                console.error(`❌ Falha ao enviar template de check-in para ${alunoNome} (${phone})`);
+                console.error(`📄 Erro: ${sendResult.error || 'Erro desconhecido'}`);
+                return { success: false, error: sendResult.error || 'Erro desconhecido no envio do template' };
+            }
 
-                if (!sendResult.success) {
-                    console.log(`📋 Tentativa 3: Usando nome padrão do template: link_checkin`);
-                    sendResult = await this.sendTemplateMessage(phone, 'link_checkin', templateParams, alunoNome);
-                }
+            await this.uow.turmasAlunosRP.update(
+                { id: student.alunoTurmaId },
+                {
+                    status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
+                    confirmacao_realizada: true,
+                    checkin_realizado: false,
+                },
+            );
 
-                if (!sendResult.success) {
-                    console.error(`❌ Falha ao enviar template de check-in para ${alunoNome} (${phone})`);
-                    console.error(`📄 Erro: ${sendResult.error || 'Erro desconhecido'}`);
-                    results.errors.push(`Erro ao enviar para ${student.alunoNome}: ${sendResult.error}`);
-                    return;
-                }
-
-                await this.uow.turmasAlunosRP.update(
-                    { id: student.alunoTurmaId },
-                    {
-                        status_aluno_turma: EStatusAlunosTurmas.AGUARDANDO_CHECKIN,
-                        confirmacao_realizada: true,
-                        checkin_realizado: false,
-                    },
-                );
-
-                results.sent++;
-
-                // Não bloqueia o fluxo principal com a mensagem de redundância.
-                const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
-                const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
+            // Não bloqueia o fluxo principal com a mensagem de redundância.
+            const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
+            const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
 
 Você garantiu a sua vaga no _*${student.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
 
@@ -675,37 +661,127 @@ Para não correr o risco de esquecer ou perder o prazo, faça agora mesmo seu ch
 
 Vamos Prosperar! 🙌`;
 
-                void this.sendMessage(phone, checkInMessage, alunoNome)
-                    .then((redundancyResult) => {
-                        if (redundancyResult.success) {
-                            console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
-                            return;
-                        }
-                        console.warn(`⚠️ Redundância via ChatGuru falhou: ${redundancyResult.error || 'erro desconhecido'}`);
-                    })
-                    .catch((redundancyErrorException: unknown) => {
-                        const redundancyMsg =
-                            redundancyErrorException instanceof Error
-                                ? redundancyErrorException.message
-                                : typeof redundancyErrorException === 'string'
-                                  ? redundancyErrorException
-                                  : 'Erro desconhecido na redundância';
-                        console.warn(`⚠️ Exceção ao enviar redundância via ChatGuru: ${redundancyMsg}`);
-                    });
-            } catch (error: unknown) {
-                console.error(`Erro ao processar aluno ${student.alunoNome}:`, error);
-                const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-                results.errors.push(`Erro interno para ${student.alunoNome}: ${errorMessage}`);
+            void this.sendMessage(phone, checkInMessage, alunoNome)
+                .then((redundancyResult) => {
+                    if (redundancyResult.success) {
+                        console.log(`✅ Redundância enviada com sucesso via ChatGuru (Z-API)`);
+                        return;
+                    }
+                    console.warn(`⚠️ Redundância via ChatGuru falhou: ${redundancyResult.error || 'erro desconhecido'}`);
+                })
+                .catch((redundancyErrorException: unknown) => {
+                    const redundancyMsg =
+                        redundancyErrorException instanceof Error
+                            ? redundancyErrorException.message
+                            : typeof redundancyErrorException === 'string'
+                              ? redundancyErrorException
+                              : 'Erro desconhecido na redundância';
+                    console.warn(`⚠️ Exceção ao enviar redundância via ChatGuru: ${redundancyMsg}`);
+                });
+
+            return { success: true };
+        } catch (error: unknown) {
+            console.error(`Erro ao processar aluno ${student.alunoNome}:`, error);
+            const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+            return { success: false, error: `Erro interno: ${errorMessage}` };
+        }
+    }
+
+    /**
+     * Envia links de check-in para múltiplos alunos (execução INLINE/síncrona).
+     * Usada para envios pequenos (individual, disparo pós-confirmação inbound).
+     * Para envios em massa a partir das telas, use `enqueueCheckInLinks`.
+     */
+    async sendCheckInLinksToStudents(students: CheckInStudentDto[]): Promise<{ success: boolean; sent: number; errors: string[] }> {
+        const orderedStudents = await this.sortStudentsByEnrollment(students);
+        const results = {
+            success: true,
+            sent: 0,
+            errors: [] as string[],
+        };
+
+        const configuredConcurrency = Number(process.env.CHECKIN_BULK_CONCURRENCY || 5);
+        const concurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0 ? Math.min(Math.floor(configuredConcurrency), 20) : 5;
+
+        const processStudent = async (student: CheckInStudentDto): Promise<void> => {
+            const resultado = await this.enviarCheckInParaAluno(student);
+            if (resultado.success) {
+                results.sent++;
+            } else {
+                results.errors.push(`Erro ao enviar para ${student.alunoNome}: ${resultado.error || 'Erro desconhecido'}`);
             }
         };
 
         for (let i = 0; i < orderedStudents.length; i += concurrency) {
             const batch = orderedStudents.slice(i, i + concurrency);
-            await Promise.all(batch.map((student) => processStudent(student)));
+            // allSettled: falha de um aluno nunca interrompe o restante do lote.
+            await Promise.allSettled(batch.map((student) => processStudent(student)));
         }
 
         results.success = results.errors.length === 0;
         return results;
+    }
+
+    /**
+     * Enfileira o envio em massa de links de CHECK-IN.
+     * Responde imediatamente (jobId) e processa em background com timeout por
+     * aluno e retentativas automáticas (2 min de intervalo, máx. 3 tentativas).
+     */
+    async enqueueCheckInLinks(students: CheckInStudentDto[]): Promise<BulkSendJobSnapshot> {
+        const orderedStudents = await this.sortStudentsByEnrollment(students);
+        return this.bulkQueue.enqueue(
+            'checkin',
+            orderedStudents.map((student) => ({
+                id: String(student.alunoTurmaId),
+                nome: student.alunoNome,
+                executor: () => this.enviarCheckInParaAluno(student),
+            })),
+        );
+    }
+
+    /**
+     * Enfileira o envio em massa de QR Codes de credenciamento (mesma fila com
+     * timeout por aluno e retentativas de 2 em 2 minutos, máx. 3 tentativas).
+     */
+    enqueueQRCodeCredenciamento(items: SendQRCodeDto[]): BulkSendJobSnapshot {
+        return this.bulkQueue.enqueue(
+            'qrcode',
+            items.map((item) => ({
+                id: String(item.alunoTurmaId),
+                nome: item.alunoNome,
+                executor: async () => {
+                    const resultado = await this.sendQRCodeCredenciamento(item);
+                    return { success: !!resultado.success, error: resultado.error };
+                },
+            })),
+        );
+    }
+
+    /**
+     * Enfileira o envio em massa de mensagens de CONFIRMAÇÃO (quando habilitado).
+     */
+    enqueueConfirmacaoLinks(students: CheckInStudentDto[]): BulkSendJobSnapshot {
+        // Curto-circuito: não enfileira (nem retenta) quando o gatilho está desabilitado.
+        if (process.env.CONFIRMACAO_ENVIO_HABILITADO !== 'true') {
+            throw new BadRequestException('O envio de mensagens de confirmação está desabilitado no sistema.');
+        }
+        return this.bulkQueue.enqueue(
+            'confirmacao',
+            students.map((student) => ({
+                id: String(student.alunoTurmaId),
+                nome: student.alunoNome,
+                executor: async () => {
+                    const resultado = await this.sendConfirmacaoToStudents([student]);
+                    if (resultado.sent > 0) return { success: true };
+                    return { success: false, error: resultado.errors[0] || 'Falha desconhecida no envio da confirmação' };
+                },
+            })),
+        );
+    }
+
+    /** Consulta o status de um job de envio em massa (para polling do frontend). */
+    getBulkJobStatus(jobId: string): BulkSendJobSnapshot {
+        return this.bulkQueue.getJobSnapshot(jobId);
     }
 
     async resendCheckInLinksByTurma(turmaId: number): Promise<{
@@ -714,7 +790,7 @@ Vamos Prosperar! 🙌`;
         totalAlunosNaTurma: number;
         totalPendentes: number;
         ignored: string[];
-        dispatch: { success: boolean; sent: number; errors: string[] } | null;
+        dispatch: BulkSendJobSnapshot | null;
         message: string;
     }> {
         if (!Number.isFinite(turmaId) || turmaId <= 0) {
@@ -773,15 +849,17 @@ Vamos Prosperar! 🙌`;
             };
         }
 
-        const dispatch = await this.sendCheckInLinksToStudents(pendentes);
+        // Envio em massa via fila: responde imediatamente e processa em background
+        // (timeout por aluno + retentativas de 2 em 2 min, máx. 3 tentativas).
+        const dispatch = await this.enqueueCheckInLinks(pendentes);
         return {
-            success: dispatch.success,
+            success: true,
             turmaId,
             totalAlunosNaTurma: turmaAlunos.length,
             totalPendentes: pendentes.length,
             ignored,
             dispatch,
-            message: `Redisparo executado para ${pendentes.length} aluno(s) pendente(s)`,
+            message: `Redisparo enfileirado para ${pendentes.length} aluno(s) pendente(s)`,
         };
     }
 
@@ -1235,11 +1313,7 @@ Vamos Prosperar! 🙌`;
             }
 
             // Buscar aluno na turma (resolve mesmo se a matrícula do token foi soft-deletada).
-            const alunoTurma = await this.resolveTurmaAlunoPorToken(decoded.alunoTurmaId, [
-                'id_aluno_fk',
-                'id_turma_fk',
-                'id_turma_fk.id_treinamento_fk',
-            ]);
+            const alunoTurma = await this.resolveTurmaAlunoPorToken(decoded.alunoTurmaId, ['id_aluno_fk', 'id_turma_fk', 'id_turma_fk.id_treinamento_fk']);
 
             if (!alunoTurma || !alunoTurma.id_aluno_fk) {
                 throw new NotFoundException('Aluno não encontrado na turma');

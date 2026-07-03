@@ -1009,6 +1009,10 @@ export class TurmaStatusAlunosItemDto {
     checkin_realizado?: boolean;
     transferencia_direcao?: 'Transferido De' | 'Transferido Para' | null;
     transferencia_turma_relacionada?: string | null;
+    /** Data/hora em que o aluno foi inserido na turma/estratégia (criado_em da matrícula). */
+    inserido_em?: string | null;
+    /** Nome do usuário que inseriu o aluno (criado_por da matrícula). */
+    inserido_por_nome?: string | null;
 }
 
 export class TurmaStatusAlunosResponseDto {

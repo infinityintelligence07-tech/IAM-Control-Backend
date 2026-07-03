@@ -45,6 +45,7 @@ import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity'
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
 import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
 import { TurmasAlunos } from '../../config/entities/turmasAlunos.entity';
+import { Usuarios } from '../../config/entities/usuarios.entity';
 import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
 
 export interface PresenteSorteioPayload {
@@ -5699,6 +5700,7 @@ export class TurmasService {
         const qb = this.uow.turmasAlunosRP
             .createQueryBuilder('ta')
             .leftJoin('ta.id_aluno_fk', 'aluno')
+            .leftJoin(Usuarios, 'usuarioInsercao', 'usuarioInsercao.id = ta.criado_por')
             .select('ta.id', 'id_turma_aluno')
             .addSelect('aluno.id', 'id_aluno')
             .addSelect('aluno.nome', 'nome')
@@ -5708,6 +5710,8 @@ export class TurmasService {
             .addSelect('ta.status_aluno_turma', 'status_aluno_turma')
             .addSelect('ta.confirmacao_realizada', 'confirmacao_realizada')
             .addSelect('ta.checkin_realizado', 'checkin_realizado')
+            .addSelect('ta.criado_em', 'inserido_em')
+            .addSelect('usuarioInsercao.nome', 'inserido_por_nome')
             .where('ta.id_turma = :id_turma', { id_turma })
             .andWhere('ta.deletado_em IS NULL');
 
@@ -5731,7 +5735,7 @@ export class TurmasService {
                 titulo = 'Inscritos';
                 break;
             case 'origem_presente':
-                titulo = 'Origem: Presente';
+                titulo = 'Origem: Estratégia Presente';
                 qb.andWhere('ta.origem_aluno = :origemPresente', {
                     origemPresente: EOrigemAlunos.PRESENTE,
                 });
@@ -5949,7 +5953,10 @@ export class TurmasService {
                         .leftJoin('turmaDe.id_polo_fk', 'poloDe')
                         .leftJoin('turmaPara.id_treinamento_fk', 'treinoPara')
                         .leftJoin('turmaPara.id_polo_fk', 'poloPara')
+                        .leftJoin(Usuarios, 'usuarioInsercao', 'usuarioInsercao.id = ht.criado_por')
                         .select('COALESCE(ht.id_turma_aluno_para::text, ht.id_turma_aluno_de::text, ht.id::text)', 'id_turma_aluno')
+                        .addSelect('ht.criado_em', 'inserido_em')
+                        .addSelect('usuarioInsercao.nome', 'inserido_por_nome')
                         .addSelect('aluno.id', 'id_aluno')
                         .addSelect('aluno.nome', 'nome')
                         .addSelect('aluno.email', 'email')
@@ -5991,6 +5998,8 @@ export class TurmasService {
                                       row.turma_para_edicao,
                                       Number(row.id_turma_para),
                                   ),
+                        inserido_em: row.inserido_em ? new Date(row.inserido_em).toISOString() : null,
+                        inserido_por_nome: row.inserido_por_nome || null,
                     }));
 
                     return {
@@ -6011,7 +6020,10 @@ export class TurmasService {
                         .leftJoin('ht.id_turma_de_fk', 'turmaDe')
                         .leftJoin('turmaDe.id_treinamento_fk', 'treinoDe')
                         .leftJoin('turmaDe.id_polo_fk', 'poloDe')
+                        .leftJoin(Usuarios, 'usuarioInsercao', 'usuarioInsercao.id = ht.criado_por')
                         .select('COALESCE(ht.id_turma_aluno_para::text, ht.id::text)', 'id_turma_aluno')
+                        .addSelect('ht.criado_em', 'inserido_em')
+                        .addSelect('usuarioInsercao.nome', 'inserido_por_nome')
                         .addSelect('aluno.id', 'id_aluno')
                         .addSelect('aluno.nome', 'nome')
                         .addSelect('aluno.email', 'email')
@@ -6046,6 +6058,8 @@ export class TurmasService {
                             row.turma_de_edicao,
                             Number(row.id_turma_de),
                         ),
+                        inserido_em: row.inserido_em ? new Date(row.inserido_em).toISOString() : null,
+                        inserido_por_nome: row.inserido_por_nome || null,
                     }));
 
                     return {
@@ -6066,7 +6080,10 @@ export class TurmasService {
                         .leftJoin('ht.id_turma_para_fk', 'turmaPara')
                         .leftJoin('turmaPara.id_treinamento_fk', 'treinoPara')
                         .leftJoin('turmaPara.id_polo_fk', 'poloPara')
+                        .leftJoin(Usuarios, 'usuarioInsercao', 'usuarioInsercao.id = ht.criado_por')
                         .select('COALESCE(ht.id_turma_aluno_de::text, ht.id::text)', 'id_turma_aluno')
+                        .addSelect('ht.criado_em', 'inserido_em')
+                        .addSelect('usuarioInsercao.nome', 'inserido_por_nome')
                         .addSelect('aluno.id', 'id_aluno')
                         .addSelect('aluno.nome', 'nome')
                         .addSelect('aluno.email', 'email')
@@ -6101,6 +6118,8 @@ export class TurmasService {
                             row.turma_para_edicao,
                             Number(row.id_turma_para),
                         ),
+                        inserido_em: row.inserido_em ? new Date(row.inserido_em).toISOString() : null,
+                        inserido_por_nome: row.inserido_por_nome || null,
                     }));
 
                     return {
@@ -6166,6 +6185,8 @@ export class TurmasService {
             status_aluno_turma: (row.status_aluno_turma as EStatusAlunosTurmas) || null,
             confirmacao_realizada: row.confirmacao_realizada === true || row.confirmacao_realizada === 'true',
             checkin_realizado: row.checkin_realizado === true || row.checkin_realizado === 'true',
+            inserido_em: row.inserido_em ? new Date(row.inserido_em).toISOString() : null,
+            inserido_por_nome: row.inserido_por_nome || null,
         }));
 
         return {

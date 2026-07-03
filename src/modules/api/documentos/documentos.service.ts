@@ -382,10 +382,7 @@ export class DocumentosService {
             duracao_meses: treinamento.duracao_meses,
         });
         // Adiantamento: conta a partir do término vigente; senão, a partir de hoje.
-        const baseAdiantamento =
-            fimVigente && /^\d{4}-\d{2}-\d{2}/.test(fimVigente)
-                ? new Date(`${fimVigente.slice(0, 10)}T00:00:00`)
-                : null;
+        const baseAdiantamento = fimVigente && /^\d{4}-\d{2}-\d{2}/.test(fimVigente) ? new Date(`${fimVigente.slice(0, 10)}T00:00:00`) : null;
         const inicio = baseAdiantamento ?? new Date();
         // Renovação: o novo período inicia no DIA SEGUINTE ao término vigente,
         // para não sobrepor o último dia do contrato anterior (ex.: vence 01/07
@@ -396,8 +393,7 @@ export class DocumentosService {
         inicio.setHours(0, 0, 0, 0);
         const fim = new Date(inicio);
         fim.setMonth(fim.getMonth() + duracaoMeses);
-        const toIsoDate = (data: Date) =>
-            `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+        const toIsoDate = (data: Date) => `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
         return {
             data_inicio_mentoria: toIsoDate(inicio),
             data_fim_mentoria: toIsoDate(fim),
@@ -477,9 +473,7 @@ export class DocumentosService {
             // Conferência de adiantamento: se o aluno já está nesta mentoria, o
             // novo período conta a partir do término vigente dele (renovação
             // antecipada); senão, conta a partir da assinatura (hoje).
-            const fimMentoriaVigente = treinamento.tipo_mentoria
-                ? await this.buscarFimMentoriaVigente(aluno.id, treinamento.id)
-                : null;
+            const fimMentoriaVigente = treinamento.tipo_mentoria ? await this.buscarFimMentoriaVigente(aluno.id, treinamento.id) : null;
 
             // Período da mentoria (início na assinatura/finalização + duração,
             // ou término vigente + duração quando for adiantamento).
@@ -497,8 +491,7 @@ export class DocumentosService {
                           data_fim_mentoria: criarContratoDto.data_fim_mentoria.slice(0, 10),
                       }
                     : null;
-            const periodoMentoria =
-                periodoMentoriaManual ?? this.calcularPeriodoMentoria(treinamento, fimMentoriaVigente);
+            const periodoMentoria = periodoMentoriaManual ?? this.calcularPeriodoMentoria(treinamento, fimMentoriaVigente);
 
             // Buscar ou criar registro de TurmasAlunos primeiro
             let turmaAluno = await this.uow.turmasAlunosRP.findOne({
@@ -3959,8 +3952,7 @@ export class DocumentosService {
             // respeitadas.
             const buscaPorTextoAtiva = Boolean(this.normalizarTexto(filtros?.search));
             const temDatasExplicitas = Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
-            const aplicarFiltroPeriodo =
-                (!filtroTurmaSemPeriodo || temDatasExplicitas) && (!buscaPorTextoAtiva || temDatasExplicitas);
+            const aplicarFiltroPeriodo = (!filtroTurmaSemPeriodo || temDatasExplicitas) && (!buscaPorTextoAtiva || temDatasExplicitas);
             const dataInicioPadrao = (() => {
                 const d = new Date();
                 d.setDate(d.getDate() - 30);

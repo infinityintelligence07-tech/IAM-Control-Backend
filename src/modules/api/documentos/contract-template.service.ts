@@ -2000,7 +2000,7 @@ export class ContractTemplateService {
                               const temIPR = bonus?.tipos_bonus?.includes('ipr');
                               const dataImersao = temIPR
                                   ? campos_variaveis?.['Data do Imersão Prosperar'] ||
-                                    (bonus?.turma_bonus_info?.data_inicio ? new Date(bonus.turma_bonus_info.data_inicio).toLocaleDateString('pt-BR') : '___/___/___')
+                                    (bonus?.turma_bonus_info?.data_inicio ? this.formatDate(bonus.turma_bonus_info.data_inicio) : '___/___/___')
                                   : '';
 
                               // Obter quantidade de inscrições dos campos variáveis
@@ -2790,13 +2790,22 @@ export class ContractTemplateService {
     }
 
     /**
-     * Formata a data para exibição
+     * Formata a data para exibição. Datas "YYYY-MM-DD" (colunas `date`) são
+     * formatadas direto da string: parsear com `new Date()` interpretaria como
+     * meia-noite UTC e, em UTC-3, a data exibida voltaria um dia.
      */
     formatDate(date: string | Date): string {
         if (!date) return '';
 
-        const dateObj = typeof date === 'string' ? new Date(date) : date;
-        return dateObj.toLocaleDateString('pt-BR');
+        if (typeof date === 'string') {
+            const somenteData = date.slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(somenteData)) {
+                const [ano, mes, dia] = somenteData.split('-');
+                return `${dia}/${mes}/${ano}`;
+            }
+            return new Date(date).toLocaleDateString('pt-BR');
+        }
+        return date.toLocaleDateString('pt-BR');
     }
 
     /**

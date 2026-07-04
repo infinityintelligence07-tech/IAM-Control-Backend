@@ -922,7 +922,6 @@ export class ContractTemplateService {
                     ${label} - ${formatCurrencyBRL(data.valorTotal)}
                 </label>`;
 
-                const valorParcelaCartao = cartaoCreditoParcelado.parcelas > 0 ? cartaoCreditoParcelado.valorTotal / cartaoCreditoParcelado.parcelas : 0;
                 const valorParcelaBoleto = boletoParcelado.parcelas > 0 ? boletoParcelado.valorTotal / boletoParcelado.parcelas : 0;
 
                 const avistaHtml = [
@@ -954,11 +953,13 @@ export class ContractTemplateService {
                 </label>`
                     : '';
 
+                // A quantidade de parcelas do cartão de crédito não é impressa na
+                // caixa de FORMA DE PAGAMENTO: o formato de pagamento (parcelas)
+                // é descrito nas OBSERVAÇÕES do contrato.
                 const parceladoHtml = `
                 <label class="checkbox-item">
                     <input type="checkbox" class="checkbox" ${cartaoCreditoParcelado.checked ? 'checked' : ''} disabled>
-                    CARTÃO DE CRÉDITO - ${formatCurrencyBRL(cartaoCreditoParcelado.valorTotal)}<br>
-                    ${cartaoCreditoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaCartao)}
+                    CARTÃO DE CRÉDITO - ${formatCurrencyBRL(cartaoCreditoParcelado.valorTotal)}
                 </label>
                 ${boletoParceladoHtml}
                 <label class="checkbox-item">
@@ -2214,33 +2215,27 @@ export class ContractTemplateService {
 
                           if (mostrarCartaoCredito) {
                               const totalCartaoCredito = temCartaoCreditoParcelado?.valor || 0;
-                              const numeroParcelas = temCartaoCreditoParcelado?.parcelas || 0;
-                              const valorParcela = numeroParcelas > 0 ? totalCartaoCredito / numeroParcelas : 0;
 
                               const totalFormatado = totalCartaoCredito.toLocaleString('pt-BR', {
                                   style: 'currency',
                                   currency: 'BRL',
                               });
 
-                              const valorParcelaFormatado = valorParcela.toLocaleString('pt-BR', {
-                                  style: 'currency',
-                                  currency: 'BRL',
-                              });
-
+                              // A quantidade de parcelas do cartão de crédito não é
+                              // impressa aqui: o formato de pagamento (parcelas) é
+                              // descrito nas OBSERVAÇÕES do contrato.
                               if (temCartaoCreditoParcelado) {
                                   formasParceladas.push(`
                               <label class="checkbox-item">
                                 <input type="checkbox" class="checkbox" checked disabled>
-                                CARTÃO DE CRÉDITO - Valor: ${totalFormatado}<br>
-                                ${numeroParcelas} parcelas de: ${valorParcelaFormatado}
+                                CARTÃO DE CRÉDITO - Valor: ${totalFormatado}
                               </label>
                             `);
                               } else {
                                   formasParceladas.push(`
                               <label class="checkbox-item">
                                 <input type="checkbox" class="checkbox" disabled>
-                                CARTÃO DE CRÉDITO - Valor: R$ 0,00<br>
-                                0 parcelas de: R$ 0,00
+                                CARTÃO DE CRÉDITO - Valor: R$ 0,00
                               </label>
                             `);
                               }

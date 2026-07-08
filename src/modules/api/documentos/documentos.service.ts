@@ -3934,6 +3934,10 @@ export class DocumentosService {
         turma_origem?: string;
         turma_destino?: string;
         staff_lider_id?: string;
+        // Origem do aluno (canal do dashboard/planilha). Aceita múltiplos valores
+        // separados por "|" (ex.: "Bônus|Transbordo"). Filtra tanto a listagem
+        // quanto o resumo consolidado (ambos derivam do mesmo baseQb).
+        origem?: string;
         // Modo "leve" (ex.: exportação): omite os comprovantes em base64 da
         // resposta. Sem isso, páginas grandes estouram o limite de string do
         // JSON.stringify (o mesmo blob se repete em vários campos por item).
@@ -3991,6 +3995,7 @@ export class DocumentosService {
                 turma_origem: filtros?.turma_origem || null,
                 turma_destino: filtros?.turma_destino || null,
                 staff_lider_id: staffLiderId || null,
+                origem: filtros?.origem || null,
             });
             const cacheExistente = this.contratosBancoCache.get(chaveCache);
 
@@ -4075,6 +4080,28 @@ export class DocumentosService {
                 COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Origem', ''),
                 COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Observações', '')
             ))`;
+            // Classifica cada venda no MESMO canal/origem exibido na turma (dashboard/planilha),
+            // em buckets mutuamente exclusivos por prioridade. Espelha
+            // TurmasService.getClassificacaoOrigemPorTurmaAluno, adaptado ao histórico:
+            // Presente > Bônus > Cortesia/Sorteio > Time de Vendas > Transbordo > Masterclass
+            // > Transferência > Demais Vendas. Masterclass/Time de Vendas reaproveitam a mesma
+            // heurística de texto do filtro "Canal de vendas" para manter os dois consistentes.
+            const origemAlunoSql = `UPPER(TRIM(COALESCE(ta.origem_aluno, '')))`;
+            const codigoOrigemPlanilhaSql = `UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, '')))`;
+            const origemLabelSql = `CASE
+                WHEN ${origemAlunoSql} = 'PRESENTE' THEN 'Presente'
+                WHEN COALESCE(ta.vaga_bonus, false) = true OR ${origemAlunoSql} = 'ALUNO_BONUS' THEN 'Bônus'
+                WHEN ${origemAlunoSql} IN ('CORTESIA', 'SORTEIO') THEN 'Cortesia/Sorteio'
+                WHEN ${canalTextoSql} LIKE '%time de vendas%' OR ${canalTextoSql} LIKE '%vendas iam%' THEN 'Time de Vendas'
+                WHEN ${codigoOrigemPlanilhaSql} = 'TRANSBORDO' THEN 'Transbordo'
+                WHEN ${canalTextoSql} LIKE '%masterclass%' OR LEFT(${codigoOrigemPlanilhaSql}, 3) = 'MC_' THEN 'Masterclass'
+                WHEN ${origemAlunoSql} = 'TRANSFERENCIA' THEN 'Transferência'
+                ELSE 'Demais Vendas'
+            END`;
+            const origensFiltro = String(filtros?.origem || '')
+                .split('|')
+                .map((valor) => valor.trim())
+                .filter(Boolean);
             const pendenciaJsonSql = `CASE
                 WHEN contrato.dados_contrato->'turma_aluno'->>'pendencia_pagamento' IN ('true', 'false')
                     THEN (contrato.dados_contrato->'turma_aluno'->>'pendencia_pagamento')::boolean
@@ -4192,6 +4219,14 @@ export class DocumentosService {
                         canalVendasIam: '%vendas iam%',
                     },
                 );
+            }
+
+            // Filtro por origem do aluno (multi-seleção). Aplicado ao baseQb, portanto
+            // reflete simultaneamente na contagem, na listagem paginada e no resumo/ranking.
+            if (origensFiltro.length > 0) {
+                baseQb.andWhere(`(${origemLabelSql}) IN (:...origensFiltro)`, {
+                    origensFiltro,
+                });
             }
 
             let total: number;

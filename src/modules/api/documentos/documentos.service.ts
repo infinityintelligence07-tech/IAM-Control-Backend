@@ -3934,6 +3934,10 @@ export class DocumentosService {
         turma_origem?: string;
         turma_destino?: string;
         staff_lider_id?: string;
+        // Modo "leve" (ex.: exportação): omite os comprovantes em base64 da
+        // resposta. Sem isso, páginas grandes estouram o limite de string do
+        // JSON.stringify (o mesmo blob se repete em vários campos por item).
+        omitir_comprovantes?: boolean | string;
     }): Promise<{
         data: any[];
         total: number;
@@ -3967,11 +3971,13 @@ export class DocumentosService {
             const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
             const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
             const staffLiderId = String(filtros?.staff_lider_id || '').trim() || undefined;
+            const omitirComprovantes = filtros?.omitir_comprovantes === true || filtros?.omitir_comprovantes === 'true' || filtros?.omitir_comprovantes === '1';
             const marcadorAtualizacao = await this.obterMarcadorAtualizacaoHistorico();
             const chaveCache = JSON.stringify({
                 page,
                 limit,
                 marcadorAtualizacao,
+                omitir_comprovantes: omitirComprovantes,
                 id_aluno: filtros?.id_aluno || null,
                 id_treinamento: filtros?.id_treinamento || null,
                 status: filtros?.status || null,
@@ -4841,8 +4847,13 @@ export class DocumentosService {
                     const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
                     // Comprovante(s) por VENDA: prioriza a coluna do contrato; cai
                     // para o snapshot do contrato e, por último, para o turma_aluno legado.
-                    const comprovantesPagamento = this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
-                    const comprovantePagamentoBase64 = this.serializarComprovantes(comprovantesPagamento);
+                    // No modo omitir_comprovantes os base64 saem vazios (a mesma string
+                    // se repetiria em vários campos por item e estoura o JSON.stringify
+                    // em páginas grandes); possui_comprovantes preserva o indicador.
+                    const comprovantesPagamentoCompletos = this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
+                    const possuiComprovantes = comprovantesPagamentoCompletos.length > 0;
+                    const comprovantesPagamento = omitirComprovantes ? [] : comprovantesPagamentoCompletos;
+                    const comprovantePagamentoBase64 = omitirComprovantes ? '' : this.serializarComprovantes(comprovantesPagamento);
                     const criadoPorContrato = contrato?.criado_por ?? null;
                     const criadoPorTurmaAlunoTreinamento = turmaAlunoTreinamento?.criado_por ?? null;
                     const criadoPorTurmaAluno = turmaAluno?.criado_por ?? null;
@@ -4905,6 +4916,7 @@ export class DocumentosService {
                         aluno_nome: aluno?.nome || dadosContrato?.aluno?.nome || null,
                         treinamento_nome: treinamento?.treinamento || dadosContrato?.treinamento?.treinamento || null,
                         comprovantes_pagamento: comprovantesPagamento,
+                        possui_comprovantes: possuiComprovantes,
                         turma_aluno: {
                             pendencia_pagamento: pendenciaPagamento,
                             quantidade_inscricoes: quantidadeInscricoes,

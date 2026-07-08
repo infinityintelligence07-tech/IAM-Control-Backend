@@ -211,6 +211,7 @@ export class DocumentosController {
         @Query('turma_origem') turma_origem?: string,
         @Query('turma_destino') turma_destino?: string,
         @Query('staff_lider_id') staff_lider_id?: string,
+        @Query('omitir_comprovantes') omitir_comprovantes?: string,
     ) {
         const filtros = {
             page: page ? parseInt(page) : 1,
@@ -228,6 +229,7 @@ export class DocumentosController {
             turma_origem,
             turma_destino,
             staff_lider_id,
+            omitir_comprovantes,
         };
 
         try {

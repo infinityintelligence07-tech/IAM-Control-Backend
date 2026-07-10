@@ -29,6 +29,7 @@ import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
+import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { resolverDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
 
 const parsePositiveIntEnv = (value: string | undefined, fallback: number): number => {
@@ -4080,22 +4081,81 @@ export class DocumentosService {
                 COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Origem', ''),
                 COALESCE(contrato.dados_contrato->'campos_variaveis'->>'Observações', '')
             ))`;
-            // Classifica cada venda no MESMO canal/origem exibido na turma (dashboard/planilha),
-            // em buckets mutuamente exclusivos por prioridade. Espelha
-            // TurmasService.getClassificacaoOrigemPorTurmaAluno, adaptado ao histórico:
-            // Presente > Bônus > Cortesia/Sorteio > Time de Vendas > Transbordo > Masterclass
-            // > Transferência > Demais Vendas. Masterclass/Time de Vendas reaproveitam a mesma
-            // heurística de texto do filtro "Canal de vendas" para manter os dois consistentes.
-            const origemAlunoSql = `UPPER(TRIM(COALESCE(ta.origem_aluno, '')))`;
-            const codigoOrigemPlanilhaSql = `UPPER(TRIM(COALESCE(ta.codigo_turma_origem_planilha, '')))`;
+            // Classifica cada venda pela origem do ALUNO na turma de ORIGEM da venda
+            // (fluxo_evento_origem_id_turma), com a mesma partição de
+            // TurmasService.getClassificacaoOrigemPorTurmaAluno / dashboard:
+            // Presente > Bônus > Cortesia/Sorteio > Time de Vendas > Transbordo > Liberty
+            // (conta como Demais Vendas) > Masterclass > Transferência > Demais Vendas.
+            const idAlunoVendaSql = `NULLIF(COALESCE(aluno.id::text, NULLIF(contrato.dados_contrato->'aluno'->>'id', '')), '')`;
+            const idTurmaOrigemClassificacaoSql = idTurmaOrigemDadosContratoSql;
+            const taOrigemIdSubquerySql = `(
+                SELECT ta_o.id
+                FROM turmas_alunos ta_o
+                WHERE ta_o.id_turma = ${idTurmaOrigemClassificacaoSql}
+                  AND ta_o.id_aluno::text = ${idAlunoVendaSql}
+                  AND ${idAlunoVendaSql} IS NOT NULL
+                  AND ${idTurmaOrigemClassificacaoSql} IS NOT NULL
+                ORDER BY CASE WHEN ta_o.deletado_em IS NULL THEN 0 ELSE 1 END, ta_o.criado_em DESC
+                LIMIT 1
+            )`;
+            const origemAlunoOrigemSql = `UPPER(TRIM(COALESCE(ta_origem.origem_aluno, '')))`;
+            const codigoOrigemPlanilhaOrigemSql = `UPPER(TRIM(COALESCE(ta_origem.codigo_turma_origem_planilha, '')))`;
+            const histTimeVendasOrigemSql = `(
+                EXISTS (
+                    SELECT 1
+                    FROM historico_transferencias_alunos h
+                    WHERE h.id_turma_aluno_para = ta_origem.id
+                      AND h.id_turma_para = ${idTurmaOrigemClassificacaoSql}
+                      AND h.id_turma_de = ${idTurmaOrigemClassificacaoSql}
+                      AND h.deletado_em IS NULL
+                )
+            )`;
+            const origemEhMcOrigemSql = `(
+                COALESCE((
+                    SELECT (
+                        (tr.tipo_palestra = true OR tr.tipo_treinamento = false)
+                        OR (t_de.edicao_turma IS NOT NULL AND LEFT(UPPER(TRIM(t_de.edicao_turma)), 3) = 'MC_')
+                    )
+                    FROM historico_transferencias_alunos h
+                    INNER JOIN turmas t_de ON t_de.id = h.id_turma_de
+                    INNER JOIN treinamentos tr ON tr.id = t_de.id_treinamento
+                    WHERE h.id_turma_aluno_para = ta_origem.id
+                      AND h.id_turma_para = ${idTurmaOrigemClassificacaoSql}
+                      AND h.id_turma_de <> ${idTurmaOrigemClassificacaoSql}
+                      AND h.deletado_em IS NULL
+                    ORDER BY h.id DESC
+                    LIMIT 1
+                ), false)
+                OR (
+                    ta_origem.id_turma_transferencia_de IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM turmas t_td
+                        INNER JOIN treinamentos tr_td ON tr_td.id = t_td.id_treinamento
+                        WHERE t_td.id = ta_origem.id_turma_transferencia_de
+                          AND t_td.deletado_em IS NULL
+                          AND (
+                              tr_td.tipo_palestra = true
+                              OR tr_td.tipo_treinamento = false
+                              OR (t_td.edicao_turma IS NOT NULL AND LEFT(UPPER(TRIM(t_td.edicao_turma)), 3) = 'MC_')
+                          )
+                    )
+                )
+                OR (
+                    ta_origem.codigo_turma_origem_planilha IS NOT NULL
+                    AND LEFT(UPPER(TRIM(ta_origem.codigo_turma_origem_planilha)), 3) = 'MC_'
+                )
+            )`;
             const origemLabelSql = `CASE
-                WHEN ${origemAlunoSql} = 'PRESENTE' THEN 'Presente'
-                WHEN COALESCE(ta.vaga_bonus, false) = true OR ${origemAlunoSql} = 'ALUNO_BONUS' THEN 'Bônus'
-                WHEN ${origemAlunoSql} IN ('CORTESIA', 'SORTEIO') THEN 'Cortesia/Sorteio'
-                WHEN ${canalTextoSql} LIKE '%time de vendas%' OR ${canalTextoSql} LIKE '%vendas iam%' THEN 'Time de Vendas'
-                WHEN ${codigoOrigemPlanilhaSql} = 'TRANSBORDO' THEN 'Transbordo'
-                WHEN ${canalTextoSql} LIKE '%masterclass%' OR LEFT(${codigoOrigemPlanilhaSql}, 3) = 'MC_' THEN 'Masterclass'
-                WHEN ${origemAlunoSql} = 'TRANSFERENCIA' THEN 'Transferência'
+                WHEN ${idTurmaOrigemClassificacaoSql} IS NULL OR ta_origem.id IS NULL THEN 'Demais Vendas'
+                WHEN ${origemAlunoOrigemSql} = 'PRESENTE' THEN 'Presente'
+                WHEN COALESCE(ta_origem.vaga_bonus, false) = true OR ${origemAlunoOrigemSql} = 'ALUNO_BONUS' THEN 'Bônus'
+                WHEN ${origemAlunoOrigemSql} IN ('CORTESIA', 'SORTEIO') THEN 'Cortesia/Sorteio'
+                WHEN ${histTimeVendasOrigemSql} THEN 'Time de Vendas'
+                WHEN ${codigoOrigemPlanilhaOrigemSql} = 'TRANSBORDO' THEN 'Transbordo'
+                WHEN ${codigoOrigemPlanilhaOrigemSql} = 'LIBERTY' THEN 'Demais Vendas'
+                WHEN ${origemEhMcOrigemSql} THEN 'Masterclass'
+                WHEN ${origemAlunoOrigemSql} = 'TRANSFERENCIA' THEN 'Transferência'
                 ELSE 'Demais Vendas'
             END`;
             const origensFiltro = String(filtros?.origem || '')
@@ -4122,6 +4182,7 @@ export class DocumentosService {
                 .leftJoin('turma_destino_evento.id_treinamento_fk', 'treinamento_destino_evento')
                 .leftJoin(Turmas, 'turma_destino_tat', 'turma_destino_tat.id = tat.id_turma_destino')
                 .leftJoin('turma_destino_tat.id_treinamento_fk', 'treinamento_destino_tat')
+                .leftJoin(TurmasAlunos, 'ta_origem', `ta_origem.id = ${taOrigemIdSubquerySql}`)
                 .where('contrato.deletado_em IS NULL');
 
             if (aplicarFiltroPeriodo) {

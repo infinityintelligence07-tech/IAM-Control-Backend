@@ -4086,19 +4086,13 @@ export class DocumentosService {
             // TurmasService.getClassificacaoOrigemPorTurmaAluno / dashboard:
             // Presente > Bônus > Cortesia/Sorteio > Time de Vendas > Transbordo > Liberty
             // (conta como Demais Vendas) > Masterclass > Transferência > Demais Vendas.
-            const idAlunoVendaSql = `NULLIF(COALESCE(aluno.id::text, NULLIF(contrato.dados_contrato->'aluno'->>'id', '')), '')`;
             const idTurmaOrigemClassificacaoSql = idTurmaOrigemDadosContratoSql;
-            const taOrigemIdSubquerySql = `(
-                SELECT ta_o.id
-                FROM turmas_alunos ta_o
-                WHERE ta_o.id_turma = ${idTurmaOrigemClassificacaoSql}
-                  AND ta_o.id_aluno::text = ${idAlunoVendaSql}
-                  AND ${idAlunoVendaSql} IS NOT NULL
-                  AND ${idTurmaOrigemClassificacaoSql} IS NOT NULL
-                ORDER BY CASE WHEN ta_o.deletado_em IS NULL THEN 0 ELSE 1 END, ta_o.criado_em DESC
-                LIMIT 1
-            )`;
-            const origemAlunoOrigemSql = `UPPER(TRIM(COALESCE(ta_origem.origem_aluno, '')))`;
+            // Matrícula ATIVA do aluno na turma de origem da venda (join direto,
+            // sem subquery correlacionada — que fazia a query inteira degradar).
+            const taOrigemJoinCondSql = `ta_origem.id_turma = ${idTurmaOrigemClassificacaoSql}
+                AND ta_origem.id_aluno = ta.id_aluno
+                AND ta_origem.deletado_em IS NULL`;
+            const origemAlunoOrigemSql = `UPPER(TRIM(COALESCE(ta_origem.origem_aluno::text, '')))`;
             const codigoOrigemPlanilhaOrigemSql = `UPPER(TRIM(COALESCE(ta_origem.codigo_turma_origem_planilha, '')))`;
             const histTimeVendasOrigemSql = `(
                 EXISTS (
@@ -4182,8 +4176,13 @@ export class DocumentosService {
                 .leftJoin('turma_destino_evento.id_treinamento_fk', 'treinamento_destino_evento')
                 .leftJoin(Turmas, 'turma_destino_tat', 'turma_destino_tat.id = tat.id_turma_destino')
                 .leftJoin('turma_destino_tat.id_treinamento_fk', 'treinamento_destino_tat')
-                .leftJoin(TurmasAlunos, 'ta_origem', `ta_origem.id = ${taOrigemIdSubquerySql}`)
                 .where('contrato.deletado_em IS NULL');
+
+            // O join com a matrícula na turma de origem só entra quando o filtro
+            // de origem está ativo, para não onerar a listagem padrão.
+            if (origensFiltro.length > 0) {
+                baseQb.leftJoin(TurmasAlunos, 'ta_origem', taOrigemJoinCondSql);
+            }
 
             if (aplicarFiltroPeriodo) {
                 baseQb.andWhere('contrato.criado_em BETWEEN :dataInicioPeriodo AND :dataFimPeriodo', {

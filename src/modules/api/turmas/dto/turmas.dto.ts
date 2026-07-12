@@ -611,6 +611,9 @@ export class TurmaResponseDto {
     id_treinamento: number;
     lider_evento?: number;
     edicao_turma?: string;
+    // Identificador de origem externa (feed de masterclass). Preenchido quando a
+    // turma foi importada; nulo quando criada manualmente no IAM Control.
+    referencia_externa?: string | null;
     id_endereco_evento?: number;
     cep: string;
     logradouro: string;
@@ -645,6 +648,7 @@ export class TurmaResponseDto {
     polo?: {
         id: number;
         nome: string;
+        sigla_polo?: string;
         cidade: string;
         estado: string;
     };

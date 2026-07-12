@@ -1737,6 +1737,7 @@ export class TurmasService {
                     id_treinamento: turma.id_treinamento,
                     lider_evento: turma.lider_evento,
                     edicao_turma: turma.edicao_turma,
+                    referencia_externa: turma.referencia_externa ?? null,
                     cep: turma.cep,
                     logradouro: turma.logradouro,
                     complemento: turma.complemento,
@@ -1767,6 +1768,7 @@ export class TurmasService {
                         ? {
                               id: turma.id_polo_fk.id,
                               nome: turma.id_polo_fk.polo,
+                              sigla_polo: turma.id_polo_fk.sigla_polo,
                               cidade: turma.id_polo_fk.cidade,
                               estado: turma.id_polo_fk.estado,
                           }
@@ -2737,6 +2739,7 @@ export class TurmasService {
                     id_treinamento: turma.id_treinamento,
                     lider_evento: turma.lider_evento,
                     edicao_turma: turma.edicao_turma,
+                    referencia_externa: turma.referencia_externa ?? null,
                     cep: turma.cep,
                     logradouro: turma.logradouro,
                     complemento: turma.complemento,
@@ -2767,6 +2770,7 @@ export class TurmasService {
                         ? {
                               id: turma.id_polo_fk.id,
                               nome: turma.id_polo_fk.polo,
+                              sigla_polo: turma.id_polo_fk.sigla_polo,
                               cidade: turma.id_polo_fk.cidade,
                               estado: turma.id_polo_fk.estado,
                           }

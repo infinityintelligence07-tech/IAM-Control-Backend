@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn, OneToMany, Index } from 'typeorm';
 
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
@@ -26,6 +26,14 @@ export class Turmas extends BaseEntity {
 
     @Column({ type: 'int', name: 'id_polo', nullable: false })
     id_polo: number;
+
+    // Identificador do evento na origem externa (ex.: feed de masterclass do
+    // dash-masterclass-iam). Usado para sincronização idempotente: cada masterclass
+    // importada guarda aqui o UUID de origem para evitar duplicidade em novas execuções.
+    // NULL para turmas criadas manualmente dentro do IAM Control.
+    @Index('idx_turmas_referencia_externa')
+    @Column({ type: 'varchar', name: 'referencia_externa', nullable: true })
+    referencia_externa: string | null;
 
     @Column({ type: 'int', name: 'id_treinamento', nullable: false })
     id_treinamento: number;

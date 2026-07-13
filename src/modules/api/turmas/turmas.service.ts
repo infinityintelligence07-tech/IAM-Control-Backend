@@ -747,13 +747,13 @@ export class TurmasService {
     private static readonly FUNCOES_LIDERANCA = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
 
     /**
-     * Regra de gestão manual de alunos da turma (adicionar/remover):
+     * Regra de gestão manual de alunos da turma (REMOÇÃO apenas — a adição é
+     * liberada para qualquer usuário autenticado):
      * - Somente funcionários do setor Cuidado de Alunos (administradores têm bypass).
      * - Se a turma tiver acessora definida, somente ela (além de administradores)
      *   pode executar a operação.
      * Chamadas internas do sistema (sem userId — ex.: cancelamento de contrato,
-     * robô de transferências) e inserções do fluxo de vendas/bônus não passam
-     * por esta validação.
+     * robô de transferências) não passam por esta validação.
      */
     private async validarPermissaoGerenciarAlunosTurma(turma: { id_acessora?: number | null } | null | undefined, userId: number | undefined, acao: 'adicionar' | 'remover'): Promise<void> {
         if (!userId) return; // chamada interna do sistema
@@ -3988,11 +3988,8 @@ export class TurmasService {
                 throw new BadRequestException('Não é possível adicionar alunos em turmas com inscrições pausadas');
             }
 
-            // Exceção da regra de Cuidado de Alunos/acessora: inserções realizadas
-            // pelo fluxo de vendas/bônus (via_fluxo_venda) não passam pela validação.
-            if (!addAlunoDto.via_fluxo_venda) {
-                await this.validarPermissaoGerenciarAlunosTurma(turma, userId, 'adicionar');
-            }
+            // A adição de alunos é liberada para qualquer usuário autenticado;
+            // a regra de Cuidado de Alunos/acessora vale apenas para a remoção.
 
             const aluno = await this.uow.alunosRP.findOne({ where: { id: addAlunoDto.id_aluno } });
 

@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import * as puppeteer from 'puppeteer';
+import { PdfBrowserService } from './pdf-browser.service';
 
 @Injectable()
 export class TermTemplateService {
+    constructor(private readonly pdfBrowserService: PdfBrowserService) {}
+
     /**
      * Gera HTML para o termo baseado no layout fornecido
      */
@@ -382,48 +384,22 @@ export class TermTemplateService {
             // Gerar HTML baseado nos dados do termo
             const html = this.generateTermHTML(termoData);
 
-            const isWindows = process.platform === 'win32';
-            const chromiumArgs = isWindows
-                ? ['--disable-gpu', '--disable-software-rasterizer']
-                : [
-                      '--no-sandbox',
-                      '--disable-setuid-sandbox',
-                      '--disable-dev-shm-usage',
-                      '--disable-accelerated-2d-canvas',
-                      '--no-first-run',
-                      '--disable-gpu',
-                      '--disable-software-rasterizer',
-                  ];
-
-            // Configurar o Puppeteer com transporte pipe (mais estável que websocket)
-            const browser = await puppeteer.launch({
-                headless: true,
-                pipe: true,
-                args: chromiumArgs,
-                ignoreDefaultArgs: ['--disable-extensions'],
-                protocolTimeout: 120000,
-            });
-
-            const page = await browser.newPage();
-
-            // Definir o conteúdo HTML
-            await page.setContent(html, { waitUntil: 'domcontentloaded' });
-
-            // Gerar o PDF
-            const pdfBuffer = await page.pdf({
-                format: 'A4',
-                printBackground: true,
-                margin: {
-                    top: '15mm',
-                    right: '20mm',
-                    bottom: '15mm',
-                    left: '20mm',
+            // Geração centralizada no PdfBrowserService: navegador único
+            // compartilhado com fila e retentativas (antes cada termo abria um
+            // Chromium próprio e, em caso de erro, o processo vazava).
+            return await this.pdfBrowserService.gerarPdf(html, {
+                waitUntil: 'domcontentloaded',
+                pdfOptions: {
+                    format: 'A4',
+                    printBackground: true,
+                    margin: {
+                        top: '15mm',
+                        right: '20mm',
+                        bottom: '15mm',
+                        left: '20mm',
+                    },
                 },
             });
-
-            await browser.close();
-
-            return Buffer.from(pdfBuffer);
         } catch (error: any) {
             console.error('Erro ao gerar PDF do termo:', error);
 

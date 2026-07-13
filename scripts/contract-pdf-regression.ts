@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { ContractTemplateService } from '@/modules/api/documentos/contract-template.service';
+import { PdfBrowserService } from '@/modules/api/documentos/pdf-browser.service';
 
 type Scenario = {
     fileSlug: string;
@@ -231,7 +232,8 @@ async function run(): Promise<void> {
         },
     ];
 
-    const service = new ContractTemplateService();
+    const pdfBrowserService = new PdfBrowserService();
+    const service = new ContractTemplateService(pdfBrowserService);
     const outputDir = path.resolve(process.cwd(), 'tmp', 'contract-regression');
     await mkdir(outputDir, { recursive: true });
 
@@ -247,6 +249,9 @@ async function run(): Promise<void> {
     console.log('- margens superiores a partir da 3ª página');
     console.log('- assinatura em imagem vs fallback "Contrato assinado digitalmente"');
     console.log('- logo IAM vs Liberty por treinamento de destino');
+
+    // Fecha o Chromium compartilhado para o script encerrar imediatamente.
+    await pdfBrowserService.onModuleDestroy();
 }
 
 run().catch((error) => {

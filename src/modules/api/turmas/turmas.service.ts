@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException,
 import { Cron } from '@nestjs/schedule';
 import { getRequestUserId } from '@/common/context/request-user.context';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral, EFormasPagamento, EStatusEventoCalendario } from '../../config/entities/enum';
+import { EFuncoes, ESetores, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral, EFormasPagamento, EStatusEventoCalendario } from '../../config/entities/enum';
 import {
     GetTurmasDto,
     CreateTurmaDto,
@@ -41,6 +41,10 @@ import {
     ExtratoMovimentacaoDetalheDto,
     GetMovimentacaoAlunosDto,
     MovimentacaoAlunosResponseDto,
+    GetAlunosSaldoPeriodoDto,
+    AlunoSaldoPeriodoItemDto,
+    AlunosSaldoPeriodoCanalDto,
+    AlunosSaldoPeriodoResponseDto,
     MovimentacaoAlunoItemDto,
 } from './dto/turmas.dto';
 import { FindOptionsSelect, Not, In, IsNull } from 'typeorm';
@@ -733,6 +737,99 @@ export class TurmasService {
         if (!isAdmin) {
             throw new ForbiddenException('Somente administrador pode executar esta ação');
         }
+    }
+
+    private isUsuarioAdministrador(usuario: Pick<Usuarios, 'setor' | 'funcao'> | null | undefined): boolean {
+        const funcoes = Array.isArray(usuario?.funcao) ? usuario.funcao : [];
+        return funcoes.includes(EFuncoes.ADMINISTRADOR) || usuario?.setor === ESetores.ADMINISTRADOR;
+    }
+
+    private static readonly FUNCOES_LIDERANCA = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
+
+    /**
+     * Regra de gestão manual de alunos da turma (adicionar/remover):
+     * - Somente funcionários do setor Cuidado de Alunos (administradores têm bypass).
+     * - Se a turma tiver acessora definida, somente ela (além de administradores)
+     *   pode executar a operação.
+     * Chamadas internas do sistema (sem userId — ex.: cancelamento de contrato,
+     * robô de transferências) e inserções do fluxo de vendas/bônus não passam
+     * por esta validação.
+     */
+    private async validarPermissaoGerenciarAlunosTurma(turma: { id_acessora?: number | null } | null | undefined, userId: number | undefined, acao: 'adicionar' | 'remover'): Promise<void> {
+        if (!userId) return; // chamada interna do sistema
+
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'setor', 'funcao'] as any,
+        });
+
+        if (this.isUsuarioAdministrador(usuario)) return;
+
+        if (usuario?.setor !== ESetores.CUIDADO_DE_ALUNOS) {
+            throw new ForbiddenException(`Somente o time do Cuidado de Alunos pode ${acao} alunos da turma.`);
+        }
+
+        const idAcessora = turma?.id_acessora ?? null;
+        if (idAcessora && Number(idAcessora) !== Number(userId)) {
+            const acessora = await this.uow.usuariosRP.findOne({
+                where: { id: idAcessora },
+                select: ['id', 'nome'] as any,
+                withDeleted: true,
+            });
+            const nomeAcessora = acessora?.nome ? ` (${acessora.nome})` : '';
+            throw new ForbiddenException(`Somente a acessora definida para esta turma${nomeAcessora} pode ${acao} alunos.`);
+        }
+    }
+
+    /**
+     * Define (ou remove, com null) a acessora do Cuidado de Alunos responsável pela
+     * turma. Somente administradores ou líderes do Cuidado de Alunos podem definir;
+     * a acessora escolhida precisa ser uma colaboradora do Cuidado de Alunos.
+     */
+    async updateTurmaAcessora(id_turma: number, idAcessora: number | null, userId?: number): Promise<{ id_acessora: number | null; acessora: { id: number; nome: string } | null }> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado');
+        }
+
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'setor', 'funcao'] as any,
+        });
+        const funcoes = Array.isArray(usuario?.funcao) ? usuario.funcao : [];
+        const isLiderCuidadoDeAlunos = usuario?.setor === ESetores.CUIDADO_DE_ALUNOS && TurmasService.FUNCOES_LIDERANCA.some((funcao) => funcoes.includes(funcao));
+
+        if (!this.isUsuarioAdministrador(usuario) && !isLiderCuidadoDeAlunos) {
+            throw new ForbiddenException('Somente a líder do Cuidado de Alunos pode definir a acessora da turma.');
+        }
+
+        const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma, deletado_em: null } });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        let acessora: Usuarios | null = null;
+        if (idAcessora) {
+            acessora = await this.uow.usuariosRP.findOne({
+                where: { id: idAcessora, deletado_em: null },
+                select: ['id', 'nome', 'setor'] as any,
+            });
+            if (!acessora) {
+                throw new NotFoundException('Acessora não encontrada');
+            }
+            if (acessora.setor !== ESetores.CUIDADO_DE_ALUNOS) {
+                throw new BadRequestException('A acessora da turma deve ser uma colaboradora do Cuidado de Alunos.');
+            }
+        }
+
+        turma.id_acessora = idAcessora ?? null;
+        turma.atualizado_por = userId;
+        turma.atualizado_em = new Date();
+        await this.uow.turmasRP.save(turma);
+
+        return {
+            id_acessora: turma.id_acessora,
+            acessora: acessora ? { id: acessora.id, nome: acessora.nome } : null,
+        };
     }
 
     private async getTransferidosCountByTurmas(turmaIds: number[]): Promise<Record<number, number>> {
@@ -1617,6 +1714,7 @@ export class TurmasService {
                 .leftJoinAndSelect('turma.id_polo_fk', 'polo', 'polo.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento', 'treinamento.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
+                .leftJoinAndSelect('turma.id_acessora_fk', 'acessora', 'acessora.deletado_em IS NULL')
                 .where('turma.deletado_em IS NULL');
 
             // Aplicar filtros básicos
@@ -1769,6 +1867,13 @@ export class TurmasService {
                               nome: turma.lider_evento_fk.nome,
                           }
                         : undefined,
+                    id_acessora: turma.id_acessora ?? null,
+                    acessora: turma.id_acessora_fk
+                        ? {
+                              id: turma.id_acessora_fk.id,
+                              nome: turma.id_acessora_fk.nome,
+                          }
+                        : null,
                     meta_pico_inscritos: picosPorTurma[turma.id]?.meta_pico_inscritos ?? null,
                     meta_pico_extras: picosPorTurma[turma.id]?.meta_pico_extras ?? null,
                     // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, contagens agregadas
@@ -1800,7 +1905,7 @@ export class TurmasService {
         try {
             const turma = await this.uow.turmasRP.findOne({
                 where: { id, deletado_em: null },
-                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk'],
+                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'id_acessora_fk'],
             });
 
             if (!turma) {
@@ -1881,6 +1986,13 @@ export class TurmasService {
                           nome: turma.lider_evento_fk.nome,
                       }
                     : undefined,
+                id_acessora: turma.id_acessora ?? null,
+                acessora: turma.id_acessora_fk
+                    ? {
+                          id: turma.id_acessora_fk.id,
+                          nome: turma.id_acessora_fk.nome,
+                      }
+                    : null,
                 // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
                 alunos_count: alunosCountCalc,
                 alunos_inscricoes_extras_count: extrasCountCalc,
@@ -3876,6 +3988,12 @@ export class TurmasService {
                 throw new BadRequestException('Não é possível adicionar alunos em turmas com inscrições pausadas');
             }
 
+            // Exceção da regra de Cuidado de Alunos/acessora: inserções realizadas
+            // pelo fluxo de vendas/bônus (via_fluxo_venda) não passam pela validação.
+            if (!addAlunoDto.via_fluxo_venda) {
+                await this.validarPermissaoGerenciarAlunosTurma(turma, userId, 'adicionar');
+            }
+
             const aluno = await this.uow.alunosRP.findOne({ where: { id: addAlunoDto.id_aluno } });
 
             if (!aluno) {
@@ -3985,7 +4103,7 @@ export class TurmasService {
             };
         } catch (error) {
             this.logger.error('turma.aluno.add | Erro ao adicionar aluno à turma', error instanceof Error ? error.stack : undefined);
-            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof ForbiddenException) {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao adicionar aluno à turma');
@@ -4921,6 +5039,175 @@ export class TurmasService {
         }
     }
 
+    /**
+     * Alunos que compunham o saldo da turma no INÍCIO ou no FIM do período do
+     * extrato (matrículas ativas naquele momento), agrupados por estratégia de
+     * origem (canal do dashboard) com a contagem de cada uma. Usado ao clicar
+     * nos números "Início" e "Saldo" do acompanhamento.
+     */
+    async getAlunosSaldoPeriodoTurma(id_turma: number, filtros: GetAlunosSaldoPeriodoDto): Promise<AlunosSaldoPeriodoResponseDto> {
+        try {
+            const dataInicioStr = (filtros?.data_inicio || '').trim();
+            const dataFinalStr = (filtros?.data_final || '').trim();
+            const momento = filtros?.momento === 'FIM' ? 'FIM' : 'INICIO';
+            if (!dataInicioStr || !dataFinalStr) {
+                throw new BadRequestException('Informe o período (data_inicio e data_final).');
+            }
+            const start = new Date(`${dataInicioStr}T00:00:00`);
+            const endInclusive = new Date(`${dataFinalStr}T23:59:59.999`);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(endInclusive.getTime()) || start > endInclusive) {
+                throw new BadRequestException('Período inválido.');
+            }
+
+            const turma = await this.uow.turmasRP.findOne({
+                where: { id: id_turma, deletado_em: IsNull() as any },
+                relations: ['id_treinamento_fk'],
+            });
+            if (!turma) {
+                throw new NotFoundException('Turma não encontrada.');
+            }
+            const treinamentoNome = turma.id_treinamento_fk?.treinamento ?? null;
+            const sigla = turma.id_treinamento_fk?.sigla_treinamento ?? null;
+            const edicao = turma.edicao_turma ?? null;
+            const labelBase = treinamentoNome || sigla || `Turma ${turma.id}`;
+            const turma_label = edicao ? `${labelBase} - ${edicao}` : labelBase;
+
+            // Matrículas ativas no momento de referência:
+            // - INICIO: criadas antes do início do período e não removidas antes dele;
+            // - FIM: criadas até o fim do período e não removidas até o fim dele.
+            const qb = this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .withDeleted()
+                .leftJoin('ta.id_aluno_fk', 'aluno')
+                .select('ta.id', 'id_turma_aluno')
+                .addSelect('ta.id_aluno', 'id_aluno')
+                .addSelect('aluno.nome', 'nome')
+                .addSelect('aluno.email', 'email')
+                .addSelect(`to_char(ta.criado_em, 'YYYY-MM-DD')`, 'dia_entrada')
+                .where('ta.id_turma = :id_turma', { id_turma });
+            if (momento === 'INICIO') {
+                qb.andWhere('ta.criado_em < :start', { start }).andWhere('(ta.deletado_em IS NULL OR ta.deletado_em >= :start)', { start });
+            } else {
+                qb.andWhere('ta.criado_em <= :end', { end: endInclusive }).andWhere('(ta.deletado_em IS NULL OR ta.deletado_em > :end)', { end: endInclusive });
+            }
+            const rows = await qb.getRawMany<{ id_turma_aluno: string; id_aluno: number; nome: string | null; email: string | null; dia_entrada: string | null }>();
+
+            const idsTurmaAluno = rows.map((r) => String(r.id_turma_aluno));
+            const classif = idsTurmaAluno.length > 0 ? await this.getClassificacaoOrigemPorTurmaAluno(id_turma, idsTurmaAluno) : new Map<string, { canal: string; categoria: string }>();
+
+            // Observações registradas para cada aluno (agregadas ao aluno, todas as turmas).
+            const idsAlunos = Array.from(new Set(rows.map((r) => Number(r.id_aluno)).filter((n) => Number.isFinite(n))));
+            const obsMap = new Map<number, { dia: string; texto: string }[]>();
+            if (idsAlunos.length > 0) {
+                const obsRows = await this.uow.historicoAlunosTurmasLogsRP
+                    .createQueryBuilder('h')
+                    .select('h.id_aluno', 'id_aluno')
+                    .addSelect('h.titulo', 'titulo')
+                    .addSelect('h.descricao', 'descricao')
+                    .addSelect(`to_char(h.data_acao, 'YYYY-MM-DD')`, 'dia')
+                    .where('h.id_aluno IN (:...idsAlunos)', { idsAlunos: idsAlunos.map((n) => String(n)) })
+                    .andWhere(`h.tipo_acao = 'OBSERVACAO'`)
+                    .andWhere('h.deletado_em IS NULL')
+                    .orderBy('h.data_acao', 'DESC')
+                    .addOrderBy('h.id', 'DESC')
+                    .getRawMany<{ id_aluno: string; titulo: string | null; descricao: string | null; dia: string }>();
+                for (const row of obsRows) {
+                    const idAluno = Number(row.id_aluno);
+                    if (!Number.isFinite(idAluno)) continue;
+                    const texto = (row.descricao || row.titulo || '').toString().trim();
+                    if (!texto) continue;
+                    const lista = obsMap.get(idAluno) ?? [];
+                    lista.push({ dia: row.dia, texto });
+                    obsMap.set(idAluno, lista);
+                }
+            }
+
+            // Turma de origem dos alunos que chegaram por transferência (última recebida por matrícula).
+            const origemTransferenciaMap = new Map<string, number>(); // id_turma_aluno -> id_turma_de
+            if (idsTurmaAluno.length > 0) {
+                const transfRows = await this.uow.historicoTransferenciasRP
+                    .createQueryBuilder('h')
+                    .select('h.id_turma_aluno_para', 'id_turma_aluno_para')
+                    .addSelect('h.id_turma_de', 'id_turma_de')
+                    .where('h.id_turma_para = :id_turma', { id_turma })
+                    .andWhere('h.id_turma_aluno_para IN (:...idsTurmaAluno)', { idsTurmaAluno })
+                    .andWhere('h.deletado_em IS NULL')
+                    .orderBy('h.criado_em', 'ASC')
+                    .getRawMany<{ id_turma_aluno_para: string; id_turma_de: number }>();
+                for (const row of transfRows) {
+                    // ASC + set: a última transferência recebida prevalece.
+                    origemTransferenciaMap.set(String(row.id_turma_aluno_para), Number(row.id_turma_de));
+                }
+            }
+            const turmaLabelMap = new Map<number, string>();
+            const idsTurmasOrigem = Array.from(new Set(Array.from(origemTransferenciaMap.values()).filter((n) => Number.isFinite(n))));
+            if (idsTurmasOrigem.length > 0) {
+                const turmasRef = await this.uow.turmasRP
+                    .createQueryBuilder('t')
+                    .withDeleted()
+                    .leftJoin('t.id_treinamento_fk', 'tr')
+                    .select('t.id', 'id')
+                    .addSelect('t.edicao_turma', 'edicao_turma')
+                    .addSelect('tr.treinamento', 'treinamento')
+                    .addSelect('tr.sigla_treinamento', 'sigla_treinamento')
+                    .where('t.id IN (:...idsTurmasOrigem)', { idsTurmasOrigem })
+                    .getRawMany<{ id: number; edicao_turma: string | null; treinamento: string | null; sigla_treinamento: string | null }>();
+                for (const t of turmasRef) {
+                    const base = t.treinamento || t.sigla_treinamento || `Turma ${t.id}`;
+                    turmaLabelMap.set(Number(t.id), t.edicao_turma ? `${base} - ${t.edicao_turma}` : base);
+                }
+            }
+
+            const grupos = new Map<string, AlunoSaldoPeriodoItemDto[]>();
+            for (const row of rows) {
+                const canal = classif.get(String(row.id_turma_aluno))?.canal || 'Demais Vendas';
+                const idTurmaOrigem = origemTransferenciaMap.get(String(row.id_turma_aluno));
+                const lista = grupos.get(canal) ?? [];
+                lista.push({
+                    id_aluno: Number(row.id_aluno),
+                    id_turma_aluno: String(row.id_turma_aluno),
+                    nome: row.nome || 'Aluno',
+                    email: row.email ?? null,
+                    dia_entrada: row.dia_entrada ?? null,
+                    turma_origem_label: idTurmaOrigem != null ? (turmaLabelMap.get(idTurmaOrigem) ?? `Turma ${idTurmaOrigem}`) : null,
+                    observacoes: obsMap.get(Number(row.id_aluno)) ?? [],
+                });
+                grupos.set(canal, lista);
+            }
+
+            // Ordem fixa das estratégias (igual ao filtro de Origem da turma), com
+            // canais desconhecidos ao final por total decrescente.
+            const ordemCanais = ['Demais Vendas', 'Masterclass', 'Time de Vendas', 'Transbordo', 'Liberty', 'Bônus', 'Cortesia/Sorteio', 'Transferência', 'Presente'];
+            const canais: AlunosSaldoPeriodoCanalDto[] = Array.from(grupos.entries())
+                .map(([canal, alunos]) => ({
+                    canal,
+                    total: alunos.length,
+                    alunos: alunos.sort((a, b) => a.nome.localeCompare(b.nome)),
+                }))
+                .sort((a, b) => {
+                    const ia = ordemCanais.indexOf(a.canal);
+                    const ib = ordemCanais.indexOf(b.canal);
+                    if (ia !== -1 && ib !== -1) return ia - ib;
+                    if (ia !== -1) return -1;
+                    if (ib !== -1) return 1;
+                    return b.total - a.total;
+                });
+
+            return {
+                id_turma,
+                turma_label,
+                momento,
+                data_referencia: momento === 'INICIO' ? dataInicioStr : dataFinalStr,
+                total: rows.length,
+                canais,
+            };
+        } catch (error) {
+            if (error instanceof BadRequestException || error instanceof NotFoundException) throw error;
+            this.logger.error(`Erro ao listar alunos do saldo da turma no período: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+            throw new BadRequestException(error instanceof Error ? error.message : 'Erro desconhecido');
+        }
+    }
+
     async getAlunoTurmaHistorico(id_turma_aluno: string): Promise<AlunoTurmaHistoricoResponseDto> {
         const turmaAluno = await this.uow.turmasAlunosRP.findOne({
             where: { id: id_turma_aluno },
@@ -5620,6 +5907,8 @@ export class TurmasService {
                 throw new NotFoundException('Aluno não encontrado na turma');
             }
 
+            await this.validarPermissaoGerenciarAlunosTurma(turmaAluno.id_turma_fk, userId, 'remover');
+
             if (this.isTurmaCongelada(turmaAluno.id_turma_fk)) {
                 throw new BadRequestException('Não é possível remover alunos de uma turma encerrada. O registro permanece congelado para a trilha do aluno.');
             }
@@ -5646,7 +5935,7 @@ export class TurmasService {
             await this.softDeleteAlunoTurmaCascade(id_turma_aluno, turmaAluno);
         } catch (error) {
             console.error('Erro ao remover aluno da turma:', error);
-            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException || error instanceof ForbiddenException) {
                 throw error;
             }
             throw new Error('Erro interno do servidor ao remover aluno da turma');

@@ -41,6 +41,12 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'lider_evento', nullable: true })
     lider_evento: number;
 
+    // Acessora da turma (usuária do Cuidado de Alunos) definida pela líder do setor.
+    // Quando preenchida, somente ela (além de administradores) pode adicionar/remover
+    // alunos da turma — exceto inserções feitas pelo fluxo de vendas/bônus.
+    @Column({ type: 'int', name: 'id_acessora', nullable: true })
+    id_acessora: number | null;
+
     @Column({ type: 'varchar', name: 'edicao_turma', nullable: true })
     edicao_turma: string;
 
@@ -156,6 +162,10 @@ export class Turmas extends BaseEntity {
     @ManyToOne(() => Usuarios, (usuarios) => usuarios.turmas)
     @JoinColumn([{ name: 'lider_evento', referencedColumnName: 'id' }])
     lider_evento_fk: Usuarios;
+
+    @ManyToOne(() => Usuarios)
+    @JoinColumn([{ name: 'id_acessora', referencedColumnName: 'id' }])
+    id_acessora_fk: Usuarios | null;
 
     @ManyToOne(() => EnderecoEventos)
     @JoinColumn([{ name: 'id_endereco_evento', referencedColumnName: 'id' }])

@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min, IsObject } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min, IsObject, IsIn } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos, EStatusEventoCalendario } from '../../../config/entities/enum';
 
@@ -490,6 +490,13 @@ export class AddAlunoTurmaDto {
     @IsOptional()
     @IsString()
     comprovante_pagamento_base64?: string;
+
+    // Marca inserções feitas pelo fluxo de vendas/bônus (finalização de venda,
+    // edição de venda no histórico). Essas inserções são a exceção da regra de
+    // acessora/Cuidado de Alunos e não passam pela validação de permissão.
+    @IsOptional()
+    @IsBoolean()
+    via_fluxo_venda?: boolean;
 }
 
 export class UpdateAlunoTurmaDto {
@@ -674,6 +681,12 @@ export class TurmaResponseDto {
         id: number;
         nome: string;
     };
+    /** Acessora da turma (usuária do Cuidado de Alunos) definida pela líder do setor. */
+    id_acessora?: number | null;
+    acessora?: {
+        id: number;
+        nome: string;
+    } | null;
     alunos_count?: number;
     alunos_inscricoes_extras_count?: number;
     alunos_confirmados_count?: number;
@@ -875,6 +888,17 @@ export class RemoveAlunoTurmaDto {
     @IsString()
     @Transform(({ value }) => value?.trim())
     motivo?: string;
+}
+
+/** Define (ou remove, com null) a acessora do Cuidado de Alunos responsável pela turma. */
+export class UpdateTurmaAcessoraDto {
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : null;
+    })
+    id_acessora?: number | null;
 }
 
 /** Item do histórico de observações agregado por aluno (todas as turmas). */
@@ -1249,4 +1273,53 @@ export class MovimentacaoAlunosResponseDto {
     data_final: string;
     /** Cada item é uma movimentação (um aluno pode aparecer em mais de uma). */
     alunos: MovimentacaoAlunoItemDto[];
+}
+
+/** Filtros para listar os alunos que compõem o saldo da turma no início ou no fim do período. */
+export class GetAlunosSaldoPeriodoDto {
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    data_inicio: string; // YYYY-MM-DD
+
+    @IsString()
+    @Transform(({ value }) => value?.toString().trim())
+    data_final: string; // YYYY-MM-DD
+
+    /** Momento do saldo: INICIO (antes do período) ou FIM (ao final do período). */
+    @IsIn(['INICIO', 'FIM'])
+    @Transform(({ value }) => value?.toString().trim().toUpperCase())
+    momento: 'INICIO' | 'FIM';
+}
+
+/** Um aluno que compunha o saldo da turma no momento consultado. */
+export class AlunoSaldoPeriodoItemDto {
+    id_aluno: number;
+    id_turma_aluno: string;
+    nome: string;
+    email: string | null;
+    /** Dia em que o aluno entrou na turma (YYYY-MM-DD). */
+    dia_entrada: string | null;
+    /** Turma de origem quando o aluno chegou por transferência. */
+    turma_origem_label?: string | null;
+    /** Observações registradas para o aluno (agregadas ao aluno, todas as turmas). */
+    observacoes?: { dia: string; texto: string }[];
+}
+
+/** Grupo de alunos do saldo por estratégia de origem (canal do dashboard). */
+export class AlunosSaldoPeriodoCanalDto {
+    /** Canal: Demais Vendas, Masterclass, Time de Vendas, Transbordo, Bônus, Cortesia/Sorteio, Transferência, Presente, Liberty. */
+    canal: string;
+    total: number;
+    alunos: AlunoSaldoPeriodoItemDto[];
+}
+
+export class AlunosSaldoPeriodoResponseDto {
+    id_turma: number;
+    turma_label: string;
+    momento: 'INICIO' | 'FIM';
+    /** Data de referência do saldo (YYYY-MM-DD): início ou fim do período. */
+    data_referencia: string;
+    /** Total de alunos que compunham o saldo no momento consultado. */
+    total: number;
+    canais: AlunosSaldoPeriodoCanalDto[];
 }

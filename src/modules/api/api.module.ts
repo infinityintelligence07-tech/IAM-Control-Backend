@@ -13,6 +13,7 @@ import { RelatoriosFinanceiroModule } from './relatorios/financeiro/relatorios-f
 import { UploadModule } from './upload/upload.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
+import { NotificacoesModule } from './notificacoes/notificacoes.module';
 
 @Module({
     imports: [
@@ -30,6 +31,7 @@ import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
         UploadModule,
         WebhooksModule,
         ConfiguracoesModule,
+        NotificacoesModule,
     ],
 })
 export class ApiModule {}

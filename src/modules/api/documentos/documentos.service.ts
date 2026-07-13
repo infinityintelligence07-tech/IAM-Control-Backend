@@ -28,6 +28,8 @@ import { TermTemplateService } from './term-template.service';
 import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
+import { NotificacoesService } from '../notificacoes/notificacoes.service';
+import { ESetores } from '@/modules/config/entities/enum';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { resolverDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
@@ -116,6 +118,7 @@ export class DocumentosService {
         private readonly termTemplateService: TermTemplateService,
         private readonly mailService: MailService,
         private readonly turmasService: TurmasService,
+        private readonly notificacoesService: NotificacoesService,
     ) {}
 
     private normalizarClausulasParaHtml(conteudo: string): string {
@@ -2010,6 +2013,8 @@ export class DocumentosService {
                 .leftJoinAndSelect('contrato.id_turma_aluno_treinamento_fk', 'turma_aluno_treinamento')
                 .leftJoinAndSelect('turma_aluno_treinamento.id_turma_aluno_fk', 'turma_aluno')
                 .leftJoinAndSelect('turma_aluno.id_aluno_fk', 'aluno')
+                .leftJoinAndSelect('turma_aluno.id_turma_fk', 'turma')
+                .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento')
                 .where('contrato.deletado_em IS NULL')
                 .andWhere('contrato.id = :contratoId', { contratoId: contratoIdNumerico })
                 .getOne();
@@ -2027,44 +2032,20 @@ export class DocumentosService {
 
             this.logger.debug('contract.repo.delete | Exclusão por IDs mapeada');
 
-            // IDs de matrícula em turma a remover (comprador + bônus da venda)
-            const idsTurmasAlunosParaRemover = new Set<string>();
-            const adicionarTurmaAlunoParaRemocao = (idTurmaAluno?: string | null) => {
+            // As matrículas do aluno e os bônus NÃO são mais removidos na exclusão do
+            // contrato: eles são apenas identificados para compor a notificação enviada
+            // ao Cuidado de Alunos, que decide manualmente o que fazer com cada um.
+            const idsTurmasAlunosVinculados = new Set<string>();
+            const adicionarTurmaAlunoVinculado = (idTurmaAluno?: string | null) => {
                 if (!idTurmaAluno) return;
-                idsTurmasAlunosParaRemover.add(idTurmaAluno);
-            };
-            const podeRemoverTurmaAlunoSemAfetarOutrosContratos = async (idTurmaAluno: string) => {
-                const treinamentosDaMatricula = await this.uow.turmasAlunosTreinamentosRP.find({
-                    where: {
-                        id_turma_aluno: idTurmaAluno,
-                        deletado_em: null,
-                    },
-                    select: {
-                        id: true,
-                    },
-                });
-
-                const idsTreinamentosDaMatricula = treinamentosDaMatricula.map((item) => item.id);
-                if (idsTreinamentosDaMatricula.length === 0) {
-                    return true;
-                }
-
-                const outrosContratosAtivosVinculados = await this.uow.turmasAlunosTreinamentosContratosRP
-                    .createQueryBuilder('contrato')
-                    .where('contrato.deletado_em IS NULL')
-                    .andWhere('contrato.id <> :idContratoAtual', { idContratoAtual: contrato.id })
-                    .andWhere('contrato.id_turma_aluno_treinamento IN (:...idsTreinamentos)', {
-                        idsTreinamentos: idsTreinamentosDaMatricula,
-                    })
-                    .getCount();
-
-                return outrosContratosAtivosVinculados === 0;
+                idsTurmasAlunosVinculados.add(idTurmaAluno);
             };
 
             // 1) Matrícula principal do aluno comprador na turma desta venda
-            adicionarTurmaAlunoParaRemocao(idTurmaAlunoComprador);
+            adicionarTurmaAlunoVinculado(idTurmaAlunoComprador);
 
             // 2) Matrículas bônus vinculadas ao comprador (sempre por IDs)
+            let quantidadeMatriculasBonus = 0;
             if (idAlunoComprador) {
                 const idsTurmasBonusRelacionadas = new Set<number>();
 
@@ -2106,34 +2087,13 @@ export class DocumentosService {
                     });
 
                     for (const turmaAlunoBonus of matriculasBonus) {
-                        adicionarTurmaAlunoParaRemocao(turmaAlunoBonus.id);
+                        adicionarTurmaAlunoVinculado(turmaAlunoBonus.id);
                     }
+                    quantidadeMatriculasBonus = matriculasBonus.length;
 
                     this.logger.debug(`contract.repo.delete | Matrículas bônus identificadas=${matriculasBonus.length}`);
                 } else {
                     this.logger.debug('contract.repo.delete | Nenhuma turma bônus vinculada por ID encontrada para esta venda');
-                }
-            }
-
-            // 3) Remover matrículas de turma (não remove cadastro base do aluno)
-            const idsTurmasAlunosElegiveisParaRemocao = new Set<string>();
-            for (const idTurmaAluno of idsTurmasAlunosParaRemover) {
-                const podeRemover = await podeRemoverTurmaAlunoSemAfetarOutrosContratos(idTurmaAluno);
-                if (podeRemover) {
-                    idsTurmasAlunosElegiveisParaRemocao.add(idTurmaAluno);
-                } else {
-                    this.logger.debug(`contract.repo.delete | Matrícula preservada por contrato ativo idTurmaAluno=${idTurmaAluno}`);
-                }
-            }
-
-            this.logger.log(`contract.repo.delete | Removendo matrículas elegíveis=${idsTurmasAlunosElegiveisParaRemocao.size}`);
-            for (const idTurmaAluno of idsTurmasAlunosElegiveisParaRemocao) {
-                try {
-                    await this.turmasService.removeAlunoTurma(idTurmaAluno);
-                    this.logger.debug(`contract.repo.delete | Aluno removido da turma idTurmaAluno=${idTurmaAluno}`);
-                } catch (error) {
-                    this.logger.warn(`contract.repo.delete | Erro ao remover aluno da turma idTurmaAluno=${idTurmaAluno}`);
-                    // Continuar removendo os outros mesmo se um falhar
                 }
             }
 
@@ -2149,14 +2109,61 @@ export class DocumentosService {
                 }
             }
 
-            // 4) Fazer soft delete do contrato (por ID do contrato)
+            // 3) Fazer soft delete do contrato (por ID do contrato)
             await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
                 deletado_em: new Date(),
                 atualizado_por: userId,
             });
 
-            this.logger.log('contract.repo.delete | Contrato e vínculos de turma removidos com sucesso');
-            return { message: 'Contrato, matrícula da turma e bônus removidos com sucesso. Cadastro do aluno preservado.' };
+            // 4) Notificar o Cuidado de Alunos: os alunos/bônus permanecem nas turmas
+            // e o time decide manualmente se devem ser removidos.
+            const turmaVenda = turmaAlunoComprador?.id_turma_fk;
+            const treinamentoVenda = turmaVenda?.id_treinamento_fk;
+            const nomeAluno = turmaAlunoComprador?.id_aluno_fk?.nome || dadosContrato?.aluno?.nome || 'Aluno não identificado';
+            const turmaLabel = turmaVenda
+                ? `${treinamentoVenda?.treinamento || `Treinamento #${turmaVenda.id_treinamento}`} - ${turmaVenda.edicao_turma || 'Sem edição'}`
+                : null;
+
+            let nomeUsuarioExclusao: string | null = null;
+            if (userId) {
+                const usuarioExclusao = await this.uow.usuariosRP.findOne({
+                    where: { id: userId },
+                    select: ['id', 'nome'] as any,
+                    withDeleted: true,
+                });
+                nomeUsuarioExclusao = usuarioExclusao?.nome || null;
+            }
+
+            const partesMensagem = [
+                `O contrato #${contrato.id} do aluno ${nomeAluno}${turmaLabel ? ` (turma ${turmaLabel})` : ''} foi excluído${nomeUsuarioExclusao ? ` por ${nomeUsuarioExclusao}` : ''} no Histórico de Vendas.`,
+                'As matrículas do aluno e os bônus vinculados à venda NÃO foram removidos das turmas.',
+                `Matrículas vinculadas à venda: ${idsTurmasAlunosVinculados.size}${quantidadeMatriculasBonus > 0 ? ` (sendo ${quantidadeMatriculasBonus} de bônus)` : ''}.`,
+                'Avalie na tela da turma se o aluno e os bônus devem ser removidos manualmente.',
+            ];
+
+            await this.notificacoesService.criarNotificacao({
+                tipo: 'CONTRATO_EXCLUIDO',
+                titulo: `Contrato excluído: ${nomeAluno}`,
+                mensagem: partesMensagem.join(' '),
+                setorDestino: ESetores.CUIDADO_DE_ALUNOS,
+                criadoPor: userId,
+                dados: {
+                    id_contrato: contrato.id,
+                    id_aluno: idAlunoComprador,
+                    nome_aluno: nomeAluno,
+                    id_turma: turmaVenda?.id ?? null,
+                    turma_label: turmaLabel,
+                    ids_turmas_alunos_vinculados: Array.from(idsTurmasAlunosVinculados),
+                    quantidade_matriculas_bonus: quantidadeMatriculasBonus,
+                    excluido_por: userId ?? null,
+                    excluido_por_nome: nomeUsuarioExclusao,
+                },
+            });
+
+            this.logger.log('contract.repo.delete | Contrato removido; matrículas/bônus preservados e Cuidado de Alunos notificado');
+            return {
+                message: 'Contrato excluído com sucesso. As matrículas do aluno e os bônus foram mantidos nas turmas e o Cuidado de Alunos foi notificado.',
+            };
         } catch (error) {
             this.logger.error('zapsign.delete | Erro ao excluir contrato', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException(`Erro ao excluir contrato: ${(error as Error).message}`);

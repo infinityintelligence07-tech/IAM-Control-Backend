@@ -9,9 +9,10 @@ import { UnitOfWorkModule } from '@/modules/config/unit_of_work/uow.module';
 import { ConfigModule } from '@nestjs/config';
 import { MailModule } from '@/modules/mail/mail.module';
 import { TurmasModule } from '../turmas/turmas.module';
+import { NotificacoesModule } from '../notificacoes/notificacoes.module';
 
 @Module({
-    imports: [UnitOfWorkModule, ConfigModule, MailModule, TurmasModule],
+    imports: [UnitOfWorkModule, ConfigModule, MailModule, TurmasModule, NotificacoesModule],
     controllers: [DocumentosController],
     providers: [DocumentosService, ZapSignService, ContractTemplateService, TermTemplateService],
     exports: [DocumentosService, ZapSignService, ContractTemplateService, TermTemplateService],

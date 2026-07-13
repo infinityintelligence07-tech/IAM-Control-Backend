@@ -27,6 +27,8 @@ import { HistoricoAlunosTurmasLog } from '../entities/historicoAlunosTurmasLog.e
 import { HistoricoTurmasLog } from '../entities/historicoTurmasLog.entity';
 import { TurmasMetricasSnapshot } from '../entities/turmasMetricasSnapshot.entity';
 import { ConfiguracoesSistema } from '../entities/configuracoesSistema.entity';
+import { Notificacoes } from '../entities/notificacoes.entity';
+import { NotificacoesLeituras } from '../entities/notificacoesLeituras.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -248,6 +250,18 @@ export class UnitOfWorkService {
     get configuracoesSistemaRP(): Repository<ConfiguracoesSistema> {
         if (!this._configuracoesSistemaRP) this._configuracoesSistemaRP = this.postgresEM.getRepository(ConfiguracoesSistema);
         return this._configuracoesSistemaRP;
+    }
+
+    private _notificacoesRP?: Repository<Notificacoes>;
+    get notificacoesRP(): Repository<Notificacoes> {
+        if (!this._notificacoesRP) this._notificacoesRP = this.postgresEM.getRepository(Notificacoes);
+        return this._notificacoesRP;
+    }
+
+    private _notificacoesLeiturasRP?: Repository<NotificacoesLeituras>;
+    get notificacoesLeiturasRP(): Repository<NotificacoesLeituras> {
+        if (!this._notificacoesLeiturasRP) this._notificacoesLeiturasRP = this.postgresEM.getRepository(NotificacoesLeituras);
+        return this._notificacoesLeiturasRP;
     }
     /*****************************************************************************/
 }

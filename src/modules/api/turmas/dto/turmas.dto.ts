@@ -1,6 +1,11 @@
 import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min, IsObject } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos } from '../../../config/entities/enum';
+import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos, EStatusEventoCalendario } from '../../../config/entities/enum';
+
+export class UpdateStatusEventoDto {
+    @IsEnum(EStatusEventoCalendario)
+    status_evento: EStatusEventoCalendario;
+}
 
 export class GetTurmasDto {
     @IsOptional()
@@ -614,6 +619,8 @@ export class TurmaResponseDto {
     // Identificador de origem externa (feed de masterclass). Preenchido quando a
     // turma foi importada; nulo quando criada manualmente no IAM Control.
     referencia_externa?: string | null;
+    // Status do evento no calendário (cores da legenda). Ver EStatusEventoCalendario.
+    status_evento?: string;
     id_endereco_evento?: number;
     cep: string;
     logradouro: string;
@@ -895,6 +902,48 @@ export class AlunoHistoricoObservacoesResponseDto {
 }
 
 export class CreateAlunoTurmaHistoricoDto {
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    template_key?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    titulo?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    descricao?: string;
+
+    @IsOptional()
+    @IsObject()
+    detalhes?: Record<string, unknown>;
+}
+
+/* ============ Histórico (log de alterações) da turma/evento ============ */
+
+export class TurmaHistoricoItemDto {
+    id: string;
+    id_turma: number;
+    tipo_acao: string;
+    titulo: string;
+    descricao: string | null;
+    template_key: string | null;
+    detalhes?: Record<string, unknown>;
+    criado_por?: number | null;
+    nome_usuario?: string | null;
+    data_acao: Date;
+    criado_em: Date;
+}
+
+export class TurmaHistoricoResponseDto {
+    data: TurmaHistoricoItemDto[];
+    templates: AlunoTurmaHistoricoTemplateDto[];
+}
+
+export class CreateTurmaHistoricoDto {
     @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())

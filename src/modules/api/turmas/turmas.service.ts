@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { getRequestUserId } from '@/common/context/request-user.context';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral, EFormasPagamento } from '../../config/entities/enum';
+import { EFuncoes, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral, EFormasPagamento, EStatusEventoCalendario } from '../../config/entities/enum';
 import {
     GetTurmasDto,
     CreateTurmaDto,
@@ -26,6 +27,9 @@ import {
     AlunoTurmaHistoricoItemDto,
     AlunoTurmaHistoricoResponseDto,
     CreateAlunoTurmaHistoricoDto,
+    TurmaHistoricoResponseDto,
+    TurmaHistoricoItemDto,
+    CreateTurmaHistoricoDto,
     AlunoTurmaHistoricoTemplateDto,
     AlunoHistoricoObservacoesResponseDto,
     AlunoHistoricoObservacaoItemDto,
@@ -39,7 +43,7 @@ import {
     MovimentacaoAlunosResponseDto,
     MovimentacaoAlunoItemDto,
 } from './dto/turmas.dto';
-import { FindManyOptions, FindOptionsSelect, ILike, Not, In, IsNull } from 'typeorm';
+import { FindOptionsSelect, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
@@ -86,6 +90,19 @@ const ALUNO_TURMA_HISTORICO_TEMPLATES: AlunoTurmaHistoricoTemplateDto[] = [
     { key: 'ALUNO_CANCELOU_INSCRICAO', label: 'Aluno cancelou a inscrição' },
     { key: 'ALUNO_SOLICITOU_CONTATO', label: 'Aluno solicitou contato' },
     { key: 'ALUNO_SEM_RETORNO', label: 'Sem retorno do aluno' },
+];
+
+// Histórico (log de alterações) da turma/evento.
+type TurmaHistoricoTipoAcao = 'CRIACAO' | 'ATUALIZACAO' | 'STATUS' | 'REMOCAO' | 'IMPORTACAO' | 'OBSERVACAO';
+
+const TURMA_HISTORICO_TEMPLATES: AlunoTurmaHistoricoTemplateDto[] = [
+    { key: 'LOCAL_CONFIRMADO', label: 'Local confirmado' },
+    { key: 'LOCAL_ALTERADO', label: 'Local alterado' },
+    { key: 'LIDER_ALTERADO', label: 'Líder do evento alterado' },
+    { key: 'DATA_ALTERADA', label: 'Data do evento alterada' },
+    { key: 'EVENTO_ADIADO', label: 'Evento adiado' },
+    { key: 'EVENTO_CANCELADO', label: 'Evento cancelado' },
+    { key: 'OBSERVACAO_GERAL', label: 'Observação geral' },
 ];
 
 const TURMA_STATUS_TIPOS_SNAPSHOT: string[] = [
@@ -1595,106 +1612,65 @@ export class TurmasService {
         const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final } = filters;
 
         try {
-            let turmas: any[];
-            let total: number;
+            const queryBuilder = this.uow.turmasRP
+                .createQueryBuilder('turma')
+                .leftJoinAndSelect('turma.id_polo_fk', 'polo', 'polo.deletado_em IS NULL')
+                .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento', 'treinamento.deletado_em IS NULL')
+                .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
+                .where('turma.deletado_em IS NULL');
 
-            // Se houver filtros de data, usar QueryBuilder para condições mais complexas
-            if (data_inicio || data_final) {
-                const queryBuilder = this.uow.turmasRP
-                    .createQueryBuilder('turma')
-                    .leftJoinAndSelect('turma.id_polo_fk', 'polo', 'polo.deletado_em IS NULL')
-                    .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento', 'treinamento.deletado_em IS NULL')
-                    .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
-                    .where('turma.deletado_em IS NULL');
-
-                // Aplicar filtros básicos
-                if (edicao_turma) {
-                    queryBuilder.andWhere('turma.edicao_turma ILIKE :edicao_turma', { edicao_turma: `%${edicao_turma}%` });
-                }
-
-                if (status_turma) {
-                    queryBuilder.andWhere('turma.status_turma = :status_turma', { status_turma });
-                }
-
-                if (id_polo) {
-                    queryBuilder.andWhere('turma.id_polo = :id_polo', { id_polo });
-                }
-
-                if (id_treinamento) {
-                    queryBuilder.andWhere('turma.id_treinamento = :id_treinamento', { id_treinamento });
-                }
-
-                // Aplicar filtros de data
-                // Buscar turmas que tenham sobreposição com o intervalo especificado
-                // Uma turma está no intervalo se: data_inicio_turma <= data_final_filtro E data_final_turma >= data_inicio_filtro
-                if (data_inicio && data_final) {
-                    queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
-                    queryBuilder.andWhere('turma.data_final >= :data_inicio', { data_inicio });
-                } else if (data_inicio) {
-                    // Apenas data início: buscar turmas que terminem depois ou na data inicial
-                    queryBuilder.andWhere('turma.data_final >= :data_inicio', { data_inicio });
-                } else if (data_final) {
-                    // Apenas data final: buscar turmas que comecem antes ou na data final
-                    queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
-                }
-
-                queryBuilder.orderBy('turma.criado_em', 'DESC');
-                queryBuilder.skip((page - 1) * limit);
-                queryBuilder.take(limit);
-
-                [turmas, total] = await queryBuilder.getManyAndCount();
-            } else {
-                // Sem filtros de data, usar o método padrão
-                const whereConditions: any = {};
-
-                if (edicao_turma) {
-                    whereConditions.edicao_turma = ILike(`%${edicao_turma}%`);
-                }
-
-                if (status_turma) {
-                    whereConditions.status_turma = status_turma;
-                }
-
-                if (id_polo) {
-                    whereConditions.id_polo = id_polo;
-                }
-
-                if (id_treinamento) {
-                    whereConditions.id_treinamento = id_treinamento;
-                }
-
-                whereConditions.deletado_em = null;
-
-                const findOptions: FindManyOptions = {
-                    where: whereConditions,
-                    relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk'],
-                    order: {
-                        criado_em: 'DESC',
-                    },
-                    skip: (page - 1) * limit,
-                    take: limit,
-                };
-
-                [turmas, total] = await this.uow.turmasRP.findAndCount(findOptions);
+            // Aplicar filtros básicos
+            if (edicao_turma) {
+                queryBuilder.andWhere('turma.edicao_turma ILIKE :edicao_turma', { edicao_turma: `%${edicao_turma}%` });
             }
 
-            // Filtrar por tipo de treinamento se especificado
-            let turmasFiltradas = turmas;
-            if (tipo_treinamento) {
-                turmasFiltradas = turmas.filter((turma) => {
-                    if (!turma.id_treinamento_fk) return false;
-                    // Filtrar por tipo de treinamento baseado nos campos booleanos
-                    if (tipo_treinamento === 'palestra') {
-                        return turma.id_treinamento_fk.tipo_palestra === true;
-                    } else if (tipo_treinamento === 'mentoria') {
-                        return turma.id_treinamento_fk.tipo_mentoria === true;
-                    } else if (tipo_treinamento === 'treinamento') {
-                        // Mentorias saem da aba de treinamentos e ficam na aba própria.
-                        return turma.id_treinamento_fk.tipo_treinamento === true && turma.id_treinamento_fk.tipo_mentoria !== true;
-                    }
-                    return false;
-                });
+            if (status_turma) {
+                queryBuilder.andWhere('turma.status_turma = :status_turma', { status_turma });
             }
+
+            if (id_polo) {
+                queryBuilder.andWhere('turma.id_polo = :id_polo', { id_polo });
+            }
+
+            if (id_treinamento) {
+                queryBuilder.andWhere('turma.id_treinamento = :id_treinamento', { id_treinamento });
+            }
+
+            // Filtrar por tipo de treinamento NA QUERY (antes da paginação): com o
+            // volume de masterclasses sincronizadas, as turmas mais recentes por
+            // criado_em são quase todas palestras e o filtro em memória (após o
+            // limit) devolvia 0 turmas para as abas Treinamentos/Mentorias.
+            if (tipo_treinamento === 'palestra') {
+                queryBuilder.andWhere('treinamento.tipo_palestra = true');
+            } else if (tipo_treinamento === 'mentoria') {
+                queryBuilder.andWhere('treinamento.tipo_mentoria = true');
+            } else if (tipo_treinamento === 'treinamento') {
+                // Mentorias saem da aba de treinamentos e ficam na aba própria.
+                queryBuilder.andWhere('treinamento.tipo_treinamento = true');
+                queryBuilder.andWhere('(treinamento.tipo_mentoria IS NULL OR treinamento.tipo_mentoria = false)');
+            }
+
+            // Aplicar filtros de data
+            // Buscar turmas que tenham sobreposição com o intervalo especificado
+            // Uma turma está no intervalo se: data_inicio_turma <= data_final_filtro E data_final_turma >= data_inicio_filtro
+            if (data_inicio && data_final) {
+                queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
+                queryBuilder.andWhere('turma.data_final >= :data_inicio', { data_inicio });
+            } else if (data_inicio) {
+                // Apenas data início: buscar turmas que terminem depois ou na data inicial
+                queryBuilder.andWhere('turma.data_final >= :data_inicio', { data_inicio });
+            } else if (data_final) {
+                // Apenas data final: buscar turmas que comecem antes ou na data final
+                queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
+            }
+
+            queryBuilder.orderBy('turma.criado_em', 'DESC');
+            queryBuilder.skip((page - 1) * limit);
+            queryBuilder.take(limit);
+
+            const [turmas, total] = await queryBuilder.getManyAndCount();
+
+            const turmasFiltradas = turmas;
 
             const idsListagem = turmasFiltradas.map((t) => t.id);
 
@@ -1738,6 +1714,7 @@ export class TurmasService {
                     lider_evento: turma.lider_evento,
                     edicao_turma: turma.edicao_turma,
                     referencia_externa: turma.referencia_externa ?? null,
+                    status_evento: turma.status_evento,
                     cep: turma.cep,
                     logradouro: turma.logradouro,
                     complemento: turma.complemento,
@@ -2050,6 +2027,13 @@ export class TurmasService {
             });
 
             const turmaSalva = await this.uow.turmasRP.save(novaTurma);
+
+            await this.registrarLogTurma({
+                id_turma: turmaSalva.id,
+                tipo_acao: 'CRIACAO',
+                titulo: 'Evento criado',
+                descricao: 'A turma/evento foi criada no IAM Control.',
+            });
 
             // Retornar turma criada com relações
             return this.findById(turmaSalva.id);
@@ -2740,6 +2724,7 @@ export class TurmasService {
                     lider_evento: turma.lider_evento,
                     edicao_turma: turma.edicao_turma,
                     referencia_externa: turma.referencia_externa ?? null,
+                    status_evento: turma.status_evento,
                     cep: turma.cep,
                     logradouro: turma.logradouro,
                     complemento: turma.complemento,
@@ -2805,6 +2790,44 @@ export class TurmasService {
         }
     }
 
+    /**
+     * Atualiza somente o status do evento no calendário (cores da legenda).
+     * MC_EXTRA é exclusivo de masterclass (palestra); eventos/treinamentos não podem usá-lo.
+     */
+    async updateStatusEvento(id: number, statusEvento: EStatusEventoCalendario, userId?: number): Promise<{ id: number; status_evento: string }> {
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id, deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+        if (!turma) {
+            throw new NotFoundException(`Turma com ID ${id} não encontrada`);
+        }
+
+        const isPalestra = turma.id_treinamento_fk?.tipo_palestra === true || turma.id_treinamento_fk?.tipo_treinamento === false;
+        if (statusEvento === EStatusEventoCalendario.MC_EXTRA && !isPalestra) {
+            throw new BadRequestException('O status "MC extra" é exclusivo de masterclass.');
+        }
+
+        const statusAnterior = turma.status_evento;
+        turma.status_evento = statusEvento;
+        await this.uow.turmasRP.save(turma);
+        this.logger.log(`turma.status_evento.update | id=${id} status_evento=${statusEvento}`);
+
+        if (statusAnterior !== statusEvento) {
+            await this.registrarLogTurma(
+                {
+                    id_turma: id,
+                    tipo_acao: 'STATUS',
+                    titulo: `Status alterado para "${this.labelStatusEvento(statusEvento)}"`,
+                    descricao: `De "${this.labelStatusEvento(statusAnterior)}" para "${this.labelStatusEvento(statusEvento)}".`,
+                    detalhes: { de: statusAnterior ?? null, para: statusEvento },
+                },
+                userId,
+            );
+        }
+        return { id, status_evento: statusEvento };
+    }
+
     async update(id: number, updateTurmaDto: UpdateTurmaDto): Promise<TurmaResponseDto> {
         try {
             this.logger.debug(`turma.repo.update | Atualizando turma id=${id}`);
@@ -2819,6 +2842,20 @@ export class TurmasService {
             if (!turma) {
                 throw new NotFoundException('Turma não encontrada');
             }
+
+            // Snapshot dos campos-chave antes da alteração (para o histórico).
+            const antesUpdate = {
+                id_polo: turma.id_polo,
+                id_treinamento: turma.id_treinamento,
+                lider_evento: turma.lider_evento,
+                data_inicio: turma.data_inicio,
+                data_final: turma.data_final,
+                capacidade_turma: turma.capacidade_turma,
+                meta: turma.meta,
+                status_turma: turma.status_turma,
+                logradouro: turma.logradouro,
+                cidade: turma.cidade,
+            };
 
             // Validações se campos forem fornecidos
             if (updateTurmaDto.id_polo) {
@@ -2977,6 +3014,9 @@ export class TurmasService {
                 atualizado_por: updateTurmaDto.atualizado_por,
             });
 
+            // Registrar no histórico os campos que realmente mudaram.
+            await this.registrarLogAlteracaoTurma(id, antesUpdate, { ...updateDataWithDates, ...enderecoData }, updateTurmaDto.atualizado_por);
+
             // Buscar turma atualizada com relações para verificar status
             const turmaAtualizada = await this.uow.turmasRP.findOne({
                 where: { id, deletado_em: null },
@@ -3035,6 +3075,16 @@ export class TurmasService {
             if (!turma) {
                 throw new NotFoundException(`Turma com ID ${id} não encontrada`);
             }
+
+            await this.registrarLogTurma(
+                {
+                    id_turma: id,
+                    tipo_acao: 'REMOCAO',
+                    titulo: 'Evento removido',
+                    descricao: 'A turma/evento foi marcada como deletada.',
+                },
+                softDeleteDto.atualizado_por,
+            );
 
             turma.deletado_em = new Date(softDeleteDto.deletado_em);
             turma.atualizado_por = softDeleteDto.atualizado_por;
@@ -5089,6 +5139,171 @@ export class TurmasService {
             criado_por: userId,
             atualizado_por: userId,
         });
+    }
+
+    /* ============ Histórico (log de alterações) da turma/evento ============ */
+
+    private labelStatusEvento(status?: string | null): string {
+        switch (status) {
+            case 'OK':
+                return '100% OK';
+            case 'VERIFICAR_LOCAL':
+                return 'Verificar local';
+            case 'PENDENCIAS':
+                return 'Com pendências';
+            case 'CANCELADA':
+                return 'Cancelada ou adiada';
+            case 'MC_EXTRA':
+                return 'MC extra';
+            default:
+                return status || 'não definido';
+        }
+    }
+
+    /** Insere um registro no histórico da turma. Não lança erro para não quebrar a operação principal. */
+    private async registrarLogTurma(
+        logData: {
+            id_turma: number;
+            tipo_acao: TurmaHistoricoTipoAcao;
+            titulo: string;
+            descricao?: string | null;
+            template_key?: string | null;
+            detalhes?: Record<string, unknown>;
+            data_acao?: Date;
+        },
+        userId?: number,
+    ): Promise<void> {
+        const titulo = (logData.titulo || '').trim();
+        if (!titulo || !logData.id_turma) return;
+        // .insert() não dispara @BeforeInsert do BaseEntity, então resolvemos o
+        // usuário aqui (parâmetro explícito ou contexto da requisição).
+        const uid = userId ?? getRequestUserId();
+        try {
+            await this.uow.historicoTurmasLogsRP.insert({
+                id_turma: logData.id_turma,
+                tipo_acao: logData.tipo_acao,
+                titulo,
+                descricao: logData.descricao?.trim() || null,
+                template_key: logData.template_key?.trim() || null,
+                detalhes: logData.detalhes ?? {},
+                data_acao: logData.data_acao ?? new Date(),
+                criado_por: uid,
+                atualizado_por: uid,
+            });
+        } catch (error) {
+            this.logger.warn(`turma.historico.registrar | Falha ao registrar log da turma id=${logData.id_turma}: ${error instanceof Error ? error.message : error}`);
+        }
+    }
+
+    /** Compara os campos-chave antes/depois e registra no histórico o que mudou. */
+    private async registrarLogAlteracaoTurma(
+        id_turma: number,
+        antes: Record<string, unknown>,
+        depois: Record<string, unknown>,
+        userId?: number,
+    ): Promise<void> {
+        const labels: Record<string, string> = {
+            id_polo: 'Polo',
+            id_treinamento: 'Treinamento',
+            lider_evento: 'Líder do evento',
+            data_inicio: 'Data de início',
+            data_final: 'Data final',
+            capacidade_turma: 'Capacidade',
+            meta: 'Meta',
+            status_turma: 'Status da turma',
+            logradouro: 'Logradouro',
+            cidade: 'Cidade',
+        };
+        const mudancas: string[] = [];
+        const detalhes: Record<string, unknown> = {};
+        for (const campo of Object.keys(labels)) {
+            if (!(campo in depois) || depois[campo] === undefined) continue;
+            const de = antes[campo];
+            const para = depois[campo];
+            if (String(de ?? '') === String(para ?? '')) continue;
+            mudancas.push(`${labels[campo]}: "${this.normalizeLogValue(de)}" → "${this.normalizeLogValue(para)}"`);
+            detalhes[campo] = { de: de ?? null, para: para ?? null };
+        }
+        if (mudancas.length === 0) return;
+        await this.registrarLogTurma(
+            {
+                id_turma,
+                tipo_acao: 'ATUALIZACAO',
+                titulo: 'Evento atualizado',
+                descricao: mudancas.join(' · '),
+                detalhes,
+            },
+            userId,
+        );
+    }
+
+    /** Histórico (log de alterações) de uma turma/evento, mais recente primeiro. */
+    async getTurmaHistorico(id_turma: number): Promise<TurmaHistoricoResponseDto> {
+        const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma }, withDeleted: true, select: ['id'] as any });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada.');
+        }
+
+        const raw = await this.uow.historicoTurmasLogsRP
+            .createQueryBuilder('h')
+            .leftJoin('usuarios', 'u', 'u.id = h.criado_por')
+            .where('h.id_turma = :id_turma', { id_turma })
+            .andWhere('h.deletado_em IS NULL')
+            .orderBy('h.data_acao', 'DESC')
+            .addOrderBy('h.id', 'DESC')
+            .select([
+                'h.id AS id',
+                'h.id_turma AS id_turma',
+                'h.tipo_acao AS tipo_acao',
+                'h.titulo AS titulo',
+                'h.descricao AS descricao',
+                'h.template_key AS template_key',
+                'h.detalhes AS detalhes',
+                'h.criado_por AS criado_por',
+                'h.data_acao AS data_acao',
+                'h.criado_em AS criado_em',
+                'u.nome AS nome_usuario',
+            ])
+            .getRawMany();
+
+        const data: TurmaHistoricoItemDto[] = raw.map((item) => ({
+            id: String(item.id),
+            id_turma: Number(item.id_turma),
+            tipo_acao: String(item.tipo_acao),
+            titulo: String(item.titulo),
+            descricao: item.descricao ? String(item.descricao) : null,
+            template_key: item.template_key ? String(item.template_key) : null,
+            detalhes: (item.detalhes as Record<string, unknown>) || {},
+            criado_por: item.criado_por ? Number(item.criado_por) : null,
+            nome_usuario: item.nome_usuario ? String(item.nome_usuario) : null,
+            data_acao: item.data_acao ? new Date(item.data_acao) : new Date(),
+            criado_em: item.criado_em ? new Date(item.criado_em) : new Date(),
+        }));
+
+        return { data, templates: TURMA_HISTORICO_TEMPLATES };
+    }
+
+    /** Registra uma observação manual no histórico da turma. */
+    async createTurmaHistorico(id_turma: number, dto: CreateTurmaHistoricoDto, userId?: number): Promise<void> {
+        const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma, deletado_em: null }, select: ['id'] as any });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada para registrar histórico.');
+        }
+        const template = dto.template_key ? TURMA_HISTORICO_TEMPLATES.find((item) => item.key === dto.template_key) : undefined;
+        const tituloFinal = dto.titulo?.trim() || template?.label || 'Observação registrada';
+        const descricaoFinal = dto.descricao?.trim() || null;
+
+        await this.registrarLogTurma(
+            {
+                id_turma,
+                tipo_acao: 'OBSERVACAO',
+                titulo: tituloFinal,
+                descricao: descricaoFinal,
+                template_key: dto.template_key || template?.key,
+                detalhes: dto.detalhes ?? {},
+            },
+            userId,
+        );
     }
 
     private normalizeLogValue(value: unknown): string {

@@ -466,3 +466,93 @@ export class AlunoVinculoResponseDto {
         treinamento_nome: string;
     };
 }
+
+export class EmpresaInputDto {
+    @IsNotEmpty()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    cnpj: string;
+
+    @IsNotEmpty()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    razao_social: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    nome_fantasia?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    telefone?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    cep?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    logradouro?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    numero?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    complemento?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    bairro?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    cidade?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => value?.trim())
+    estado?: string;
+}
+
+export class SaveAlunoEmpresasDto {
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => EmpresaInputDto)
+    empresas: EmpresaInputDto[];
+
+    @IsOptional()
+    @IsNumber()
+    criado_por?: number;
+}
+
+export class AlunoEmpresaResponseDto {
+    id: number;
+    id_aluno: number;
+    cnpj: string;
+    razao_social: string;
+    nome_fantasia: string | null;
+    email: string | null;
+    telefone: string | null;
+    cep: string | null;
+    logradouro: string | null;
+    numero: string | null;
+    complemento: string | null;
+    bairro: string | null;
+    cidade: string | null;
+    estado: string | null;
+}

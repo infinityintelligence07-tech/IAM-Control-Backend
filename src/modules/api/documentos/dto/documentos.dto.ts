@@ -123,6 +123,56 @@ export class DocumentosFilterDto {
 }
 
 // DTOs para integração com ZapSign
+export class EmpresaContratanteDto {
+    @IsOptional()
+    @IsString()
+    cnpj?: string;
+
+    @IsOptional()
+    @IsString()
+    razao_social?: string;
+
+    @IsOptional()
+    @IsString()
+    nome_fantasia?: string;
+
+    @IsOptional()
+    @IsString()
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    telefone?: string;
+
+    @IsOptional()
+    @IsString()
+    cep?: string;
+
+    @IsOptional()
+    @IsString()
+    logradouro?: string;
+
+    @IsOptional()
+    @IsString()
+    numero?: string;
+
+    @IsOptional()
+    @IsString()
+    complemento?: string;
+
+    @IsOptional()
+    @IsString()
+    bairro?: string;
+
+    @IsOptional()
+    @IsString()
+    cidade?: string;
+
+    @IsOptional()
+    @IsString()
+    estado?: string;
+}
+
 export class CriarContratoZapSignDto {
     @IsString()
     @IsNotEmpty()
@@ -286,6 +336,22 @@ export class CriarContratoZapSignDto {
     @IsOptional()
     @IsBoolean()
     contrato_manual?: boolean;
+
+    /**
+     * Tipo de pessoa do CONTRATANTE do contrato/venda:
+     * 'PF' (padrão) = o aluno (CPF); 'PJ' = uma empresa do aluno (CNPJ).
+     * Quando 'PJ', os dados da empresa vêm em `empresa_contratante` e passam a
+     * qualificar o contratante no contrato (o signatário continua sendo a pessoa
+     * física do `id_aluno`).
+     */
+    @IsOptional()
+    @IsString()
+    tipo_pessoa?: string; // 'PF' | 'PJ'
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => EmpresaContratanteDto)
+    empresa_contratante?: EmpresaContratanteDto;
 }
 
 export class FormaPagamentoDto {

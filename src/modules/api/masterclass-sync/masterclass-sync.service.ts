@@ -4,7 +4,7 @@ import { IsNull } from 'typeorm';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { Turmas } from '../../config/entities/turmas.entity';
 import { Polos } from '../../config/entities/polos.entity';
-import { EStatusTurmas } from '../../config/entities/enum';
+import { EStatusTurmas, EStatusEventoCalendario } from '../../config/entities/enum';
 import {
     MasterclassFeedItem,
     MasterclassFeedLead,
@@ -195,6 +195,7 @@ export class MasterclassSyncService {
         resultado: MasterclassSyncResult,
     ): Promise<Turmas> {
         const status = this.mapearStatus(item);
+        const statusEvento = this.mapearStatusEvento(item);
         // Dados de endereço da masterclass (o que importa aqui): cidade, polo,
         // endereço (endereco_local -> logradouro) e local/nome do espaço (-> complemento).
         const logradouro = (item.endereco_local || item.local || 'A definir').slice(0, 255);
@@ -209,6 +210,7 @@ export class MasterclassSyncService {
             turma.cidade = item.cidade || polo.cidade;
             turma.estado = polo.estado;
             turma.status_turma = status;
+            turma.status_evento = statusEvento;
             turma.logradouro = logradouro;
             turma.complemento = complemento;
             turma.meta = meta ?? turma.meta;
@@ -254,6 +256,7 @@ export class MasterclassSyncService {
             cidade: item.cidade || polo.cidade,
             estado: polo.estado,
             status_turma: status,
+            status_evento: statusEvento,
             complemento,
             // Campos obrigatórios da turma sem correspondência direta no feed.
             cep: '',
@@ -316,6 +319,21 @@ export class MasterclassSyncService {
             default:
                 return EStatusTurmas.AGUARDANDO_LIBERACAO;
         }
+    }
+
+    /**
+     * Traduz o status/flags do feed para o status de calendário (cores da legenda),
+     * que é salvo na turma:
+     *  - cancelada           → CANCELADA (roxo)
+     *  - extra               → MC_EXTRA (azul)
+     *  - prevista (só metas) → VERIFICAR_LOCAL (vermelho — evento ainda sem local)
+     *  - demais (realizada/agendada) → OK (verde, 100% OK)
+     */
+    private mapearStatusEvento(item: MasterclassFeedItem): EStatusEventoCalendario {
+        if (item.cancelada || item.status === 'cancelada') return EStatusEventoCalendario.CANCELADA;
+        if (item.extra) return EStatusEventoCalendario.MC_EXTRA;
+        if (item.status === 'prevista') return EStatusEventoCalendario.VERIFICAR_LOCAL;
+        return EStatusEventoCalendario.OK;
     }
 
     /**

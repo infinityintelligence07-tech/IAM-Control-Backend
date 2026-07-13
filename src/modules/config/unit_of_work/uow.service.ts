@@ -19,10 +19,12 @@ import { MasterclassPreCadastros } from '../entities/masterclassPreCadastros.ent
 import { Usuarios } from '../entities/usuarios.entity';
 import { EnderecoEventos } from '../entities/enderecoEventos.entity';
 import { AlunosVinculos } from '../entities/alunosVinculos.entity';
+import { AlunosEmpresas } from '../entities/alunosEmpresas.entity';
 import { HistoricoTransferenciasAlunos } from '../entities/historicoTransferenciasAlunos.entity';
 import { PresentesSorteio } from '../entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../entities/historicoSorteados.entity';
 import { HistoricoAlunosTurmasLog } from '../entities/historicoAlunosTurmasLog.entity';
+import { HistoricoTurmasLog } from '../entities/historicoTurmasLog.entity';
 import { TurmasMetricasSnapshot } from '../entities/turmasMetricasSnapshot.entity';
 import { ConfiguracoesSistema } from '../entities/configuracoesSistema.entity';
 /*****************************************************************************/
@@ -200,6 +202,12 @@ export class UnitOfWorkService {
         return this._alunosVinculosRP;
     }
 
+    private _alunosEmpresasRP?: Repository<AlunosEmpresas>;
+    get alunosEmpresasRP(): Repository<AlunosEmpresas> {
+        if (!this._alunosEmpresasRP) this._alunosEmpresasRP = this.postgresEM.getRepository(AlunosEmpresas);
+        return this._alunosEmpresasRP;
+    }
+
     private _historicoTransferenciasRP?: Repository<HistoricoTransferenciasAlunos>;
     get historicoTransferenciasRP(): Repository<HistoricoTransferenciasAlunos> {
         if (!this._historicoTransferenciasRP) this._historicoTransferenciasRP = this.postgresEM.getRepository(HistoricoTransferenciasAlunos);
@@ -222,6 +230,12 @@ export class UnitOfWorkService {
     get historicoAlunosTurmasLogsRP(): Repository<HistoricoAlunosTurmasLog> {
         if (!this._historicoAlunosTurmasLogsRP) this._historicoAlunosTurmasLogsRP = this.postgresEM.getRepository(HistoricoAlunosTurmasLog);
         return this._historicoAlunosTurmasLogsRP;
+    }
+
+    private _historicoTurmasLogsRP?: Repository<HistoricoTurmasLog>;
+    get historicoTurmasLogsRP(): Repository<HistoricoTurmasLog> {
+        if (!this._historicoTurmasLogsRP) this._historicoTurmasLogsRP = this.postgresEM.getRepository(HistoricoTurmasLog);
+        return this._historicoTurmasLogsRP;
     }
 
     private _turmasMetricasSnapshotRP?: Repository<TurmasMetricasSnapshot>;

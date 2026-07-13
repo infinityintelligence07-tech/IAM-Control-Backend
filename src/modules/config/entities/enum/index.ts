@@ -111,6 +111,19 @@ export enum EStatusTurmas {
     INSCRICOES_PAUSADAS = 'INSCRICOES_PAUSADAS',
 }
 
+/**
+ * Status do evento/masterclass no calendário (cores da legenda).
+ * É salvo na turma. Eventos usam todos, exceto MC_EXTRA (exclusivo de masterclass).
+ * Novo evento nasce em VERIFICAR_LOCAL; masterclasses vêm com o status do webhook.
+ */
+export enum EStatusEventoCalendario {
+    OK = 'OK', // 100% OK (verde)
+    VERIFICAR_LOCAL = 'VERIFICAR_LOCAL', // vermelho (padrão de eventos novos)
+    PENDENCIAS = 'PENDENCIAS', // Com pendências (amarelo)
+    CANCELADA = 'CANCELADA', // Cancelada ou adiada (roxo)
+    MC_EXTRA = 'MC_EXTRA', // MC extra (azul) — só masterclass
+}
+
 export enum ETiposProdutos {
     LIVRO = 'LIVRO',
     MATERIAL_ESCRITORIO = 'MATERIAL_ESCRITORIO',

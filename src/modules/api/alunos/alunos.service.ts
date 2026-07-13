@@ -9,10 +9,13 @@ import {
     SoftDeleteAlunoDto,
     SaveAlunoVinculosDto,
     AlunoVinculoResponseDto,
+    SaveAlunoEmpresasDto,
+    AlunoEmpresaResponseDto,
 } from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
 import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
+import { AlunosEmpresas } from '../../config/entities/alunosEmpresas.entity';
 import { EProfissao } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 
@@ -663,6 +666,58 @@ export class AlunosService {
         await this.uow.alunosVinculosRP.save(newVinculos);
         // Return with relations
         return this.getVinculos(id_aluno);
+    }
+
+    async getEmpresas(id_aluno: number): Promise<AlunoEmpresaResponseDto[]> {
+        const empresas = await this.uow.alunosEmpresasRP.find({
+            where: { id_aluno, deletado_em: null },
+            order: { criado_em: 'ASC' },
+        });
+        return empresas.map((e) => ({
+            id: e.id,
+            id_aluno: e.id_aluno,
+            cnpj: e.cnpj,
+            razao_social: e.razao_social,
+            nome_fantasia: e.nome_fantasia,
+            email: e.email,
+            telefone: e.telefone,
+            cep: e.cep,
+            logradouro: e.logradouro,
+            numero: e.numero,
+            complemento: e.complemento,
+            bairro: e.bairro,
+            cidade: e.cidade,
+            estado: e.estado,
+        }));
+    }
+
+    async saveEmpresas(id_aluno: number, dto: SaveAlunoEmpresasDto): Promise<AlunoEmpresaResponseDto[]> {
+        // Substitui a lista inteira: remove as empresas existentes e regrava as enviadas.
+        const existing = await this.uow.alunosEmpresasRP.find({ where: { id_aluno, deletado_em: null } });
+        if (existing.length > 0) {
+            await this.uow.alunosEmpresasRP.remove(existing);
+        }
+        if (dto.empresas.length === 0) return [];
+        const novas = dto.empresas.map((e) => {
+            const empresa = new AlunosEmpresas();
+            empresa.id_aluno = id_aluno;
+            empresa.cnpj = e.cnpj;
+            empresa.razao_social = e.razao_social;
+            empresa.nome_fantasia = e.nome_fantasia ?? null;
+            empresa.email = e.email ?? null;
+            empresa.telefone = e.telefone ?? null;
+            empresa.cep = e.cep ?? null;
+            empresa.logradouro = e.logradouro ?? null;
+            empresa.numero = e.numero ?? null;
+            empresa.complemento = e.complemento ?? null;
+            empresa.bairro = e.bairro ?? null;
+            empresa.cidade = e.cidade ?? null;
+            empresa.estado = e.estado ?? null;
+            empresa.criado_por = dto.criado_por;
+            return empresa;
+        });
+        await this.uow.alunosEmpresasRP.save(novas);
+        return this.getEmpresas(id_aluno);
     }
 
     /**

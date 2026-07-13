@@ -730,8 +730,12 @@ export class DocumentosService {
             if (isContratoManual) {
                 this.logger.debug('zapsign.create.contract | Contrato escrito à mão — pulando geração de PDF e criação na ZapSign');
             } else {
-                // Preparar dados para o template usando os dados do DTO
-                const templateData = await this.prepareTemplateDataFromDto(aluno, treinamento, turma, criarContratoDto);
+                // Preparar dados para o template usando os dados do DTO.
+                // Quando a venda é para Pessoa Jurídica, o CONTRATANTE do contrato
+                // passa a ser a empresa (razão social/CNPJ/endereço). O signatário
+                // (signers) continua sendo a pessoa física do id_aluno.
+                const alunoParaTemplate = this.aplicarEmpresaContratante(aluno, criarContratoDto);
+                const templateData = await this.prepareTemplateDataFromDto(alunoParaTemplate, treinamento, turma, criarContratoDto);
 
                 const pdfBuffer = await this.contractTemplateService.generateContractPDF(templateData);
 
@@ -838,6 +842,27 @@ export class DocumentosService {
                             estado: aluno.id_polo_fk?.estado,
                         },
                     },
+                    // Contratante do contrato: PF (aluno) ou PJ (empresa do aluno).
+                    // `aluno` acima permanece sendo a pessoa física (base do casamento
+                    // de assinatura por CPF); `contratante` é o que aparece impresso.
+                    tipo_pessoa: this.isContratantePJ(criarContratoDto) ? 'PJ' : 'PF',
+                    empresa_contratante: this.isContratantePJ(criarContratoDto) ? criarContratoDto.empresa_contratante : null,
+                    contratante: (() => {
+                        const c = this.aplicarEmpresaContratante(aluno, criarContratoDto);
+                        return {
+                            nome: c.nome,
+                            cpf: c.cpf,
+                            email: c.email,
+                            telefone_um: c.telefone_um,
+                            logradouro: c.logradouro,
+                            numero: c.numero,
+                            complemento: c.complemento,
+                            bairro: c.bairro,
+                            cidade: c.cidade,
+                            estado: c.estado,
+                            cep: c.cep,
+                        };
+                    })(),
                     pagamento: (() => {
                         const formasProcessadas = this.processPaymentMethods(criarContratoDto);
                         this.logger.debug(`contract.payment.process | Formas processadas para salvar=${formasProcessadas.length}`);
@@ -957,6 +982,44 @@ export class DocumentosService {
     /**
      * Prepara os dados para o template do contrato usando dados do DTO
      */
+    /**
+     * Indica se a venda é para Pessoa Jurídica (contrato emitido no CNPJ de uma
+     * empresa do aluno) com dados de empresa preenchidos.
+     */
+    private isContratantePJ(dto: CriarContratoZapSignDto): boolean {
+        return String(dto.tipo_pessoa || '').toUpperCase() === 'PJ' && !!dto.empresa_contratante && !!dto.empresa_contratante.cnpj;
+    }
+
+    /**
+     * Retorna o objeto de contratante usado nos placeholders do contrato. Para PF
+     * devolve o próprio aluno; para PJ sobrepõe nome/CPF-CNPJ/endereço/contato com
+     * os dados da empresa (sem alterar a entidade original do aluno, que segue
+     * sendo o signatário e a base do casamento de assinatura pelo CPF).
+     */
+    private aplicarEmpresaContratante(aluno: any, dto: CriarContratoZapSignDto): any {
+        if (!this.isContratantePJ(dto)) return aluno;
+        const emp = dto.empresa_contratante;
+        if (!emp) return aluno;
+        const fantasia = (emp.nome_fantasia || '').trim();
+        const razao = (emp.razao_social || '').trim();
+        const nomeContratante = razao ? (fantasia ? `${razao} (${fantasia})` : razao) : aluno?.nome;
+        return {
+            ...aluno,
+            nome: nomeContratante,
+            cpf: emp.cnpj || aluno?.cpf,
+            data_nascimento: '',
+            email: emp.email || aluno?.email,
+            telefone_um: emp.telefone || aluno?.telefone_um,
+            logradouro: emp.logradouro ?? aluno?.logradouro,
+            numero: emp.numero ?? aluno?.numero,
+            complemento: emp.complemento ?? aluno?.complemento,
+            bairro: emp.bairro ?? aluno?.bairro,
+            cidade: emp.cidade ?? aluno?.cidade,
+            estado: emp.estado ?? aluno?.estado,
+            cep: emp.cep ?? aluno?.cep,
+        };
+    }
+
     private async prepareTemplateDataFromDto(aluno: any, treinamento: any, turma: any, criarContratoDto: CriarContratoZapSignDto) {
         this.logger.debug('contract.template.prepare | Preparando dados do DTO para template de contrato');
 
@@ -2106,9 +2169,10 @@ export class DocumentosService {
     private prepareTemplateDataFromSavedContract(contrato: any) {
         this.logger.debug('contract.template.prepare.saved | Preparando dados do contrato salvo para template');
 
-        // Usar diretamente os dados salvos no banco
+        // Usar diretamente os dados salvos no banco. Para vendas PJ, o contratante
+        // impresso é a empresa (`contrato.contratante`); PF cai no `contrato.aluno`.
         return {
-            aluno: contrato.aluno || {},
+            aluno: contrato.contratante || contrato.aluno || {},
             treinamento: contrato.treinamento || {},
             pagamento: contrato.pagamento || {},
             formas_pagamento: contrato.formas_pagamento || [],

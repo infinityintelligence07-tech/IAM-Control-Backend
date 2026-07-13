@@ -20,6 +20,9 @@ import {
     TurmaStatusAlunosResponseDto,
     UpdateTurmaTimesDto,
     TurmaTimesResponseDto,
+    UpdateStatusEventoDto,
+    TurmaHistoricoResponseDto,
+    CreateTurmaHistoricoDto,
     AlunoTurmaHistoricoResponseDto,
     CreateAlunoTurmaHistoricoDto,
     RemoveAlunoTurmaDto,
@@ -165,6 +168,26 @@ export class TurmasController {
     ): Promise<{ message: string }> {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         await this.turmasService.createAlunoTurmaHistorico(id_turma_aluno, dto, userId);
+        return { message: 'Histórico registrado com sucesso.' };
+    }
+
+    /** Histórico (log de alterações) de uma turma/evento. */
+    @Get(':id/logs')
+    @UseGuards(JwtAuthGuard)
+    async getTurmaHistorico(@Param('id', ParseIntPipe) id: number): Promise<TurmaHistoricoResponseDto> {
+        return this.turmasService.getTurmaHistorico(id);
+    }
+
+    /** Registra uma observação manual no histórico da turma/evento. */
+    @Post(':id/logs')
+    @UseGuards(JwtAuthGuard)
+    async createTurmaHistorico(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: CreateTurmaHistoricoDto,
+        @Req() req: any,
+    ): Promise<{ message: string }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        await this.turmasService.createTurmaHistorico(id, dto, userId);
         return { message: 'Histórico registrado com sucesso.' };
     }
 
@@ -334,6 +357,18 @@ export class TurmasController {
     async create(@Body() createTurmaDto: CreateTurmaDto): Promise<TurmaResponseDto> {
         console.log('Criando nova turma:', createTurmaDto);
         return this.turmasService.create(createTurmaDto);
+    }
+
+    /** Atualiza somente o status do evento no calendário (cores da legenda). */
+    @Put(':id/status-evento')
+    @UseGuards(JwtAuthGuard)
+    async updateStatusEvento(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: UpdateStatusEventoDto,
+        @Req() req: any,
+    ): Promise<{ id: number; status_evento: string }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.updateStatusEvento(id, dto.status_evento, userId);
     }
 
     @Put(':id')

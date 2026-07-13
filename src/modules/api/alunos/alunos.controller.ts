@@ -9,6 +9,8 @@ import {
     SoftDeleteAlunoDto,
     SaveAlunoVinculosDto,
     AlunoVinculoResponseDto,
+    SaveAlunoEmpresasDto,
+    AlunoEmpresaResponseDto,
 } from './dto/alunos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 
@@ -32,6 +34,16 @@ export class AlunosController {
     @Put(':id/vinculos')
     async saveVinculos(@Param('id', ParseIntPipe) id: number, @Body() dto: SaveAlunoVinculosDto): Promise<AlunoVinculoResponseDto[]> {
         return this.alunosService.saveVinculos(id, dto);
+    }
+
+    @Get(':id/empresas')
+    async getEmpresas(@Param('id', ParseIntPipe) id: number): Promise<AlunoEmpresaResponseDto[]> {
+        return this.alunosService.getEmpresas(id);
+    }
+
+    @Put(':id/empresas')
+    async saveEmpresas(@Param('id', ParseIntPipe) id: number, @Body() dto: SaveAlunoEmpresasDto): Promise<AlunoEmpresaResponseDto[]> {
+        return this.alunosService.saveEmpresas(id, dto);
     }
 
     @Get(':id')

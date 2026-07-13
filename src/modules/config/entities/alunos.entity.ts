@@ -7,6 +7,7 @@ import { EProfissao, EStatusAlunosGeral, ETipoVinculoAluno } from './enum';
 import { Polos } from './polos.entity';
 import { MasterclassPreCadastros } from './masterclassPreCadastros.entity';
 import { AlunosVinculos } from './alunosVinculos.entity';
+import { AlunosEmpresas } from './alunosEmpresas.entity';
 
 @Entity('alunos', { schema: type_schema })
 export class Alunos extends BaseEntity {
@@ -130,4 +131,7 @@ export class Alunos extends BaseEntity {
 
     @OneToMany(() => AlunosVinculos, (vinculo) => vinculo.id_aluno_fk)
     vinculos: AlunosVinculos[];
+
+    @OneToMany(() => AlunosEmpresas, (empresa) => empresa.id_aluno_fk)
+    empresas: AlunosEmpresas[];
 }

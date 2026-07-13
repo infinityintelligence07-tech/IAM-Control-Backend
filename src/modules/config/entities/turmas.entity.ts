@@ -4,7 +4,7 @@ import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
 import { Polos } from './polos.entity';
 import { Treinamentos } from './treinamentos.entity';
-import { EStatusTurmas } from './enum/index';
+import { EStatusTurmas, EStatusEventoCalendario } from './enum/index';
 import { TurmasAlunos } from './turmasAlunos.entity';
 import { Usuarios } from './usuarios.entity';
 import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.entity';
@@ -70,6 +70,18 @@ export class Turmas extends BaseEntity {
 
     @Column({ type: 'enum', enum: EStatusTurmas, enumName: 'EStatusTurmas', name: 'status_turma', default: EStatusTurmas.AGUARDANDO_LIBERACAO, nullable: false })
     status_turma: EStatusTurmas;
+
+    // Status do evento no calendário (cores da legenda). Novo evento nasce em
+    // VERIFICAR_LOCAL; masterclasses recebem o status vindo do webhook.
+    @Column({
+        type: 'enum',
+        enum: EStatusEventoCalendario,
+        enumName: 'EStatusEventoCalendario',
+        name: 'status_evento',
+        default: EStatusEventoCalendario.VERIFICAR_LOCAL,
+        nullable: false,
+    })
+    status_evento: EStatusEventoCalendario;
 
     @Column({ type: 'boolean', name: 'autorizar_bonus', default: false, nullable: false })
     autorizar_bonus: boolean;

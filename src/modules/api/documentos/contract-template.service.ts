@@ -2760,17 +2760,26 @@ export class ContractTemplateService {
             throw ultimaFalha;
         } catch (error: any) {
             console.error('Erro ao gerar PDF do contrato:', error);
+            const mensagemOriginal = String(error?.message || '');
 
             // Verificar se é erro de dependências do sistema
-            if (error?.message?.includes('cannot open shared object file') || error?.message?.includes('Failed to launch the browser process')) {
+            if (mensagemOriginal.includes('cannot open shared object file') || mensagemOriginal.includes('Failed to launch the browser process')) {
                 const errorMessage =
                     'Erro ao iniciar o navegador. Dependências do sistema podem estar faltando. ' +
                     'Execute: apt-get update && apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2';
                 console.error(errorMessage);
-                throw new Error('Erro ao gerar PDF do contrato: Dependências do sistema faltando. Verifique os logs do servidor.');
+                throw new Error('Erro ao gerar PDF do contrato: dependências do sistema faltando no servidor. Verifique os logs.');
             }
 
-            throw new Error('Erro ao gerar PDF do contrato');
+            // Chrome do Puppeteer ausente (comum após npm install/deploy limpar o
+            // cache de browsers): instrui a reinstalação do binário no servidor.
+            if (mensagemOriginal.includes('Could not find Chrome') || mensagemOriginal.includes('Could not find browser')) {
+                throw new Error('Erro ao gerar PDF do contrato: navegador do Puppeteer não encontrado no servidor. Execute: npx puppeteer browsers install chrome');
+            }
+
+            // Propaga a causa real para o frontend exibir no toast (antes a
+            // mensagem genérica escondia o motivo e impedia o diagnóstico).
+            throw new Error(`Erro ao gerar PDF do contrato${mensagemOriginal ? `: ${mensagemOriginal}` : ''}`);
         }
     }
 

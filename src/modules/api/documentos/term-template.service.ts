@@ -436,7 +436,9 @@ export class TermTemplateService {
                 throw new Error('Erro ao gerar PDF do termo: Dependências do sistema faltando. Verifique os logs do servidor.');
             }
 
-            throw new Error('Erro ao gerar PDF do termo');
+            // Propaga a causa real para o frontend exibir no toast.
+            const mensagemOriginal = String(error?.message || '');
+            throw new Error(`Erro ao gerar PDF do termo${mensagemOriginal ? `: ${mensagemOriginal}` : ''}`);
         }
     }
 }

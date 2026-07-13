@@ -2658,9 +2658,16 @@ export class DocumentosService {
             const treinamento = dadosContrato.treinamento || turmaAlunoTreinamento?.id_treinamento_fk || null;
             const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
             const pendenciaPagamento = turmaAluno?.pendencia_pagamento ?? turmaAlunoDadosContrato.pendencia_pagamento ?? false;
-            const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
+            // Quantidade de inscrições DA VENDA: prioriza o snapshot gravado no ato
+            // da venda (dados_contrato.turma_aluno); a matrícula vinculada ao
+            // contrato costuma ser a da turma de ORIGEM e carrega a quantidade de
+            // outra venda (fallback apenas para contratos legados sem snapshot).
+            const quantidadeInscricoes = turmaAlunoDadosContrato.quantidade_inscricoes ?? turmaAluno?.quantidade_inscricoes ?? 1;
             const contratoDuplo = quantidadeInscricoes > 1;
-            const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
+            // Outros clientes DA VENDA: mesmo racional — o snapshot da venda tem
+            // prioridade sobre a matrícula de origem (que carrega os clientes
+            // adicionais de OUTRA venda feita a partir da mesma turma).
+            const outrosClientes = turmaAlunoDadosContrato.outros_clientes ?? turmaAluno?.outros_clientes ?? [];
             // Comprovante(s) por VENDA: prioriza a coluna do contrato; cai para o
             // snapshot do contrato e, por último, para o turma_aluno legado.
             const comprovantesPagamento = this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
@@ -3812,10 +3819,15 @@ export class DocumentosService {
             (acc, row) => {
                 const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
                 const turmaAlunoDados = dadosContrato?.turma_aluno || {};
-                const outrosClientesRaw = row.outros_clientes ?? turmaAlunoDados?.outros_clientes;
+                // Snapshot da venda tem prioridade; row.* (matrícula de origem) só legado.
+                const outrosClientesRaw = (turmaAlunoDados as { outros_clientes?: unknown })?.outros_clientes ?? row.outros_clientes;
                 const contratoMapeado = {
                     turma_aluno: {
-                        quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
+                        // Prioriza o snapshot da venda (dados_contrato.turma_aluno):
+                        // a matrícula vinculada é a da turma de ORIGEM e carrega a
+                        // quantidade de outra venda (row.* só para contratos legados).
+                        quantidade_inscricoes:
+                            Number((turmaAlunoDados as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
                         // OR com o snapshot em dados_contrato.turma_aluno: a matrícula
                         // vinculada (origem) costuma vir com pendência = false explícito.
                         pendencia_pagamento:
@@ -3894,10 +3906,15 @@ export class DocumentosService {
             const vendedorId = this.obterCriadoPorResumoHistorico(row) || 'Não informado';
             const vendedorNome = nomeUsuarioPorId.get(Number(vendedorId)) || `ID ${vendedorId}`;
             const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
+            const turmaAlunoDadosVenda = dadosContrato?.turma_aluno || {};
+            const outrosClientesVendaRaw = (turmaAlunoDadosVenda as { outros_clientes?: unknown })?.outros_clientes ?? row.outros_clientes;
             const contratoMapeado = {
                 turma_aluno: {
-                    quantidade_inscricoes: Number(row.quantidade_inscricoes || 1) || 1,
-                    outros_clientes: Array.isArray(row.outros_clientes) ? row.outros_clientes : [],
+                    // Prioriza o snapshot da venda (dados_contrato.turma_aluno); a
+                    // matrícula vinculada é a da turma de ORIGEM (row.* só legado).
+                    quantidade_inscricoes:
+                        Number((turmaAlunoDadosVenda as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
+                    outros_clientes: Array.isArray(outrosClientesVendaRaw) ? outrosClientesVendaRaw : [],
                 },
                 dados_contrato: dadosContrato,
             };
@@ -5008,9 +5025,16 @@ export class DocumentosService {
                     // pendência = false explícito; por isso fazemos OR com o snapshot
                     // salvo em dados_contrato.turma_aluno (marcado no ato da venda).
                     const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento) || Boolean(turmaAlunoDadosContrato.pendencia_pagamento);
-                    const quantidadeInscricoes = turmaAluno?.quantidade_inscricoes ?? turmaAlunoDadosContrato.quantidade_inscricoes ?? 1;
+                    // Quantidade de inscrições DA VENDA: prioriza o snapshot gravado
+                    // no ato da venda (dados_contrato.turma_aluno); a matrícula
+                    // vinculada é a da turma de ORIGEM e carrega a quantidade de
+                    // outra venda (fallback só para contratos legados sem snapshot).
+                    const quantidadeInscricoes = turmaAlunoDadosContrato.quantidade_inscricoes ?? turmaAluno?.quantidade_inscricoes ?? 1;
                     const contratoDuplo = quantidadeInscricoes > 1;
-                    const outrosClientes = turmaAluno?.outros_clientes ?? turmaAlunoDadosContrato.outros_clientes ?? [];
+                    // Outros clientes DA VENDA: mesmo racional — o snapshot da venda
+                    // tem prioridade sobre a matrícula de origem (que carrega os
+                    // clientes adicionais de OUTRA venda da mesma turma de origem).
+                    const outrosClientes = turmaAlunoDadosContrato.outros_clientes ?? turmaAluno?.outros_clientes ?? [];
                     // Comprovante(s) por VENDA: prioriza a coluna do contrato; cai
                     // para o snapshot do contrato e, por último, para o turma_aluno legado.
                     // No modo omitir_comprovantes os base64 saem vazios (a mesma string

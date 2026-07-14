@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { PolosModule } from './polos/polos.module';
 import { AlunosModule } from './alunos/alunos.module';
 import { TreinamentosModule } from './treinamentos/treinamentos.module';
@@ -17,6 +18,7 @@ import { NotificacoesModule } from './notificacoes/notificacoes.module';
 
 @Module({
     imports: [
+        AuthModule,
         AlunosModule,
         PolosModule,
         TreinamentosModule,

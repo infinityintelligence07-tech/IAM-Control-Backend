@@ -16,8 +16,8 @@ import {
 import { UsuariosService } from './usuarios.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
-import { AdminGuard } from '@/modules/auth/guards/admin.guard';
-import { AdminOrLiderPuroGuard } from '@/modules/auth/guards/admin-or-lider-puro.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('usuarios')
@@ -25,7 +25,8 @@ export class UsuariosController {
     constructor(private readonly usuariosService: UsuariosService) {}
 
     @Get()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'usuarios', action: 'view' })
     async findAll(@Query() filters: GetUsuariosDto, @Req() req: any): Promise<UsuariosListResponseDto> {
         console.log('[usuarios-url-debug][backend][controller] requisição recebida:', {
             originalUrl: req?.originalUrl,
@@ -36,21 +37,24 @@ export class UsuariosController {
     }
 
     @Get(':id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'usuarios', action: 'view' })
     async findById(@Param('id', ParseIntPipe) id: number): Promise<UsuarioResponseDto | null> {
         console.log('Buscando usuário por ID:', id);
         return this.usuariosService.findById(id);
     }
 
     @Put(':id')
-    @UseGuards(JwtAuthGuard, AdminGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'usuarios', action: 'edit' })
     async update(@Param('id', ParseIntPipe) id: number, @Body() updateUsuarioDto: UpdateUsuarioDto): Promise<UsuarioResponseDto> {
         console.log('Atualizando usuário ID:', id, 'Dados:', updateUsuarioDto);
         return this.usuariosService.update(id, updateUsuarioDto);
     }
 
     @Put(':id/aprovar')
-    @UseGuards(JwtAuthGuard, AdminOrLiderPuroGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'usuarios', action: 'edit' })
     async approve(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<UsuarioResponseDto> {
         const aprovadoPor = req.user?.sub;
         if (!aprovadoPor) {
@@ -61,14 +65,16 @@ export class UsuariosController {
     }
 
     @Put(':id/soft-delete')
-    @UseGuards(JwtAuthGuard, AdminGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'usuarios', action: 'delete' })
     async softDelete(@Param('id', ParseIntPipe) id: number, @Body() softDeleteDto: SoftDeleteUsuarioDto): Promise<void> {
         console.log('Fazendo soft delete do usuário ID:', id);
         return this.usuariosService.softDelete(id, softDeleteDto);
     }
 
     @Delete(':id')
-    @UseGuards(JwtAuthGuard, AdminGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'usuarios', action: 'delete' })
     async delete(@Param('id', ParseIntPipe) id: number): Promise<void> {
         console.log('Deletando permanentemente o usuário ID:', id);
         return this.usuariosService.delete(id);

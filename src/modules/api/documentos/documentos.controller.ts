@@ -13,6 +13,8 @@ import {
     RespostaTermoZapSignDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 import { Request } from 'express';
 import { EFormasPagamento } from '@/modules/config/entities/enum';
 
@@ -23,7 +25,8 @@ export class DocumentosController {
     constructor(private readonly documentosService: DocumentosService) {}
 
     @Post()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'create' })
     async createDocumento(@Body() createDocumentoDto: CreateDocumentoDto, @Req() req: Request): Promise<DocumentoResponseDto> {
         console.log('Criando novo documento:', createDocumentoDto.documento);
         const userId = (req.user as any)?.sub;
@@ -31,7 +34,8 @@ export class DocumentosController {
     }
 
     @Get()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     async findAllDocumentos(
         @Query('page', ParseIntPipe) page: number = 1,
         @Query('limit', ParseIntPipe) limit: number = 10,
@@ -49,7 +53,8 @@ export class DocumentosController {
     }
 
     @Put(':id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'edit' })
     async updateDocumento(
         @Param('id', ParseIntPipe) id: number,
         @Body() updateDocumentoDto: UpdateDocumentoDto,
@@ -61,7 +66,8 @@ export class DocumentosController {
     }
 
     @Delete(':id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'delete' })
     async deleteDocumento(@Param('id', ParseIntPipe) id: number, @Req() req: Request): Promise<{ message: string }> {
         console.log('Removendo documento ID:', id);
         const userId = (req.user as any)?.sub;
@@ -156,7 +162,8 @@ export class DocumentosController {
     }
 
     @Post('zapsign/criar-contrato')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'create' })
     async criarContratoZapSign(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
         try {
             console.log('=== CRIANDO CONTRATO NO ZAPSIGN ===');
@@ -175,7 +182,8 @@ export class DocumentosController {
     }
 
     @Post('zapsign/criar-termo')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'create' })
     async criarTermoZapSign(@Body() criarTermoDto: CriarTermoZapSignDto, @Req() req: Request): Promise<RespostaTermoZapSignDto> {
         console.log('=== CRIANDO TERMO NO ZAPSIGN ===');
         console.log('Dados recebidos:', JSON.stringify(criarTermoDto, null, 2));
@@ -186,7 +194,8 @@ export class DocumentosController {
 
     // Endpoint público para teste (TEMPORÁRIO)
     @Post('public/criar-contrato')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     async criarContratoZapSignPublico(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
         console.log('Criando contrato no ZapSign para aluno (público):', criarContratoDto.id_aluno);
         const userId = (req.user as any)?.sub;
@@ -307,7 +316,8 @@ export class DocumentosController {
     }
 
     @Post('admin/cache/historico/clear')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     limparCachesHistorico() {
         const resultado = this.documentosService.limparCachesHistorico();
         return {
@@ -325,7 +335,8 @@ export class DocumentosController {
 
     // Endpoint para salvar assinatura (para compatibilidade com frontend)
     @Post('salvar-assinatura')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     salvarAssinatura(@Body() signatureData: any) {
         return this.documentosService.salvarAssinatura(signatureData);
     }
@@ -403,7 +414,8 @@ export class DocumentosController {
 
     // Endpoint para cancelar documento do ZapSign e fazer soft delete
     @Delete('zapsign/documento/:documentoId/cancelar')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'delete' })
     async cancelarDocumentoZapSign(@Param('documentoId') documentoId: string, @Req() req: Request): Promise<{ message: string }> {
         try {
             console.log('=== CANCELANDO DOCUMENTO ZAPSIGN ===');
@@ -419,7 +431,8 @@ export class DocumentosController {
 
     // Endpoint para excluir contrato (soft delete + remoção na Zapsign)
     @Delete('excluir-zapsign/:contratoId')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'delete' })
     async excluirDocumentoZapSign(@Param('contratoId') contratoId: string, @Req() req: Request): Promise<{ message: string }> {
         try {
             console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
@@ -435,7 +448,8 @@ export class DocumentosController {
 
     // Endpoint para enviar contrato por email
     @Post('enviar-email')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     async enviarContratoPorEmail(@Body() body: { email: string; nomeSignatario: string; signingUrl: string }): Promise<{ message: string }> {
         try {
             await this.documentosService.enviarContratoPorEmail(body.email, body.nomeSignatario, body.signingUrl);
@@ -447,7 +461,8 @@ export class DocumentosController {
     }
 
     @Post('sincronizar-status-zapsign/:contratoId')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     async sincronizarStatusZapSign(@Param('contratoId') contratoId: string): Promise<{
         message: string;
         status: string;
@@ -458,7 +473,8 @@ export class DocumentosController {
     }
 
     @Post('sincronizar-todos-status-zapsign')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'view' })
     async sincronizarTodosStatusZapSign(): Promise<{
         message: string;
         sincronizados: number;

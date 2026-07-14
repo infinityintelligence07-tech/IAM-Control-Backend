@@ -9,8 +9,11 @@ import {
     SoftDeleteTreinamentoDto,
 } from './dto/treinamentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission({ module: 'treinamentos', action: 'view' })
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('treinamentos')
 export class TreinamentosController {
@@ -29,18 +32,21 @@ export class TreinamentosController {
     }
 
     @Post()
+    @RequirePermission({ module: 'treinamentos', action: 'create' })
     async create(@Body() createTreinamentoDto: CreateTreinamentoDto): Promise<TreinamentoResponseDto> {
         console.log('Criando treinamento:', createTreinamentoDto);
         return this.treinamentosService.create(createTreinamentoDto);
     }
 
     @Put(':id')
+    @RequirePermission({ module: 'treinamentos', action: 'edit' })
     async update(@Param('id') id: number, @Body() updateTreinamentoDto: UpdateTreinamentoDto): Promise<TreinamentoResponseDto> {
         console.log('Atualizando treinamento ID:', id, 'Dados:', updateTreinamentoDto);
         return this.treinamentosService.update(id, updateTreinamentoDto);
     }
 
     @Put(':id/soft-delete')
+    @RequirePermission({ module: 'treinamentos', action: 'delete' })
     async softDelete(@Param('id') id: number, @Body() softDeleteDto: SoftDeleteTreinamentoDto): Promise<{ message: string }> {
         console.log('Soft delete do treinamento ID:', id, 'Dados:', softDeleteDto);
         await this.treinamentosService.softDelete(id, softDeleteDto);
@@ -48,6 +54,7 @@ export class TreinamentosController {
     }
 
     @Delete(':id')
+    @RequirePermission({ module: 'treinamentos', action: 'delete' })
     async delete(@Param('id') id: number): Promise<{ message: string }> {
         console.log('Excluindo treinamento ID (hard delete):', id);
         await this.treinamentosService.delete(id);

@@ -36,6 +36,8 @@ import {
     AlunosSaldoPeriodoResponseDto,
 } from './dto/turmas.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
 
 @UseInterceptors(ClassSerializerInterceptor)
@@ -46,27 +48,31 @@ export class TurmasController {
     // Rotas específicas (devem vir antes das rotas com parâmetros)
 
     @Get('presentes-sorteio')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getPresentesSorteio() {
         return this.turmasService.getPresentesSorteio();
     }
 
     @Post('presentes-sorteio')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async createPresenteSorteio(@Body() payload: PresenteSorteioPayload, @Req() req: any) {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.createPresenteSorteio(payload, userId);
     }
 
     @Put('presentes-sorteio/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async updatePresenteSorteio(@Param('id', ParseIntPipe) id: number, @Body() payload: PresenteSorteioPayload, @Req() req: any) {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.updatePresenteSorteio(id, payload, userId);
     }
 
     @Delete('presentes-sorteio/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async softDeletePresenteSorteio(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         await this.turmasService.softDeletePresenteSorteio(id, userId);
@@ -74,20 +80,23 @@ export class TurmasController {
     }
 
     @Post('historico-sorteados')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async registrarHistoricoSorteado(@Body() payload: HistoricoSorteadoPayload, @Req() req: any) {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.registrarHistoricoSorteado(payload, userId);
     }
 
     @Get('historico-sorteados')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getHistoricoSorteados(@Query() filters: HistoricoSorteadosFilters) {
         return this.turmasService.getHistoricoSorteados(filters);
     }
 
     @Delete('historico-sorteados/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async removerHistoricoSorteado(@Param('id') id: string, @Body() payload: RemoverHistoricoSorteadoPayload, @Req() req: any) {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         await this.turmasService.removerHistoricoSorteado(id, payload, userId);
@@ -122,13 +131,15 @@ export class TurmasController {
     }
 
     @Get('extrato-movimentacao')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getExtratoMovimentacao(@Query() filtros: GetExtratoMovimentacaoDto): Promise<ExtratoMovimentacaoResponseDto> {
         return this.turmasService.getExtratoMovimentacaoTurmas(filtros);
     }
 
     @Get('extrato-movimentacao/:id_turma/alunos')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getMovimentacaoAlunos(
         @Param('id_turma', ParseIntPipe) id_turma: number,
         @Query() filtros: GetMovimentacaoAlunosDto,
@@ -137,7 +148,8 @@ export class TurmasController {
     }
 
     @Get('extrato-movimentacao/:id_turma/alunos-saldo')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getAlunosSaldoPeriodo(
         @Param('id_turma', ParseIntPipe) id_turma: number,
         @Query() filtros: GetAlunosSaldoPeriodoDto,
@@ -146,13 +158,15 @@ export class TurmasController {
     }
 
     @Get('bonus-comprador/:id_aluno_comprador')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getBonusMatriculasComprador(@Param('id_aluno_comprador', ParseIntPipe) id_aluno_comprador: number) {
         return this.turmasService.getBonusMatriculasComprador(id_aluno_comprador);
     }
 
     @Get('aluno/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getAlunoTurmaById(@Param('id') id: string): Promise<AlunoTurmaResponseDto> {
         console.log('Buscando aluno da turma ID:', id);
         try {
@@ -166,13 +180,15 @@ export class TurmasController {
     }
 
     @Get('alunos/:id_turma_aluno/logs')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getAlunoTurmaHistorico(@Param('id_turma_aluno') id_turma_aluno: string): Promise<AlunoTurmaHistoricoResponseDto> {
         return this.turmasService.getAlunoTurmaHistorico(id_turma_aluno);
     }
 
     @Post('alunos/:id_turma_aluno/logs')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'alunosNaTurma', action: 'edit' })
     async createAlunoTurmaHistorico(
         @Param('id_turma_aluno') id_turma_aluno: string,
         @Body() dto: CreateAlunoTurmaHistoricoDto,
@@ -185,14 +201,16 @@ export class TurmasController {
 
     /** Histórico (log de alterações) de uma turma/evento. */
     @Get(':id/logs')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getTurmaHistorico(@Param('id', ParseIntPipe) id: number): Promise<TurmaHistoricoResponseDto> {
         return this.turmasService.getTurmaHistorico(id);
     }
 
     /** Registra uma observação manual no histórico da turma/evento. */
     @Post(':id/logs')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'edit' })
     async createTurmaHistorico(
         @Param('id', ParseIntPipe) id: number,
         @Body() dto: CreateTurmaHistoricoDto,
@@ -204,32 +222,37 @@ export class TurmasController {
     }
 
     @Get('aluno/:id_aluno/historico-observacoes')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getHistoricoObservacoesAluno(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<AlunoHistoricoObservacoesResponseDto> {
         return this.turmasService.getHistoricoObservacoesAluno(id_aluno);
     }
 
     @Get('opcoes-transferencia/:id_turma_aluno')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getOpcoesTransferencia(@Param('id_turma_aluno') id_turma_aluno: string): Promise<OpcoesTransferenciaResponseDto> {
         return this.turmasService.getOpcoesTransferencia(id_turma_aluno);
     }
 
     @Post('transferir-aluno/:id_turma_aluno')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'alunosNaTurma', action: 'edit' })
     async transferirAluno(@Param('id_turma_aluno') id_turma_aluno: string, @Body() dto: TransferirAlunoDto, @Req() req: any): Promise<AlunoTurmaResponseDto> {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.transferirAluno(id_turma_aluno, dto.id_turma_destino, userId);
     }
 
     @Get('historico-transferencias/:id_aluno')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getHistoricoTransferencias(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<HistoricoTransferenciasResponseDto> {
         return this.turmasService.getHistoricoTransferencias(id_aluno);
     }
 
     @Get('aluno-trilha/:id_aluno')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getTrilhaAluno(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<
         {
             id_turma_aluno: string;
@@ -260,7 +283,8 @@ export class TurmasController {
     // CRUD de Turmas
 
     @Get()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async findAll(@Query() filters: GetTurmasDto): Promise<TurmasListResponseDto> {
         console.log('Buscando turmas com filtros:', filters);
         return await this.turmasService.findAll(filters);
@@ -293,7 +317,8 @@ export class TurmasController {
     }
 
     @Post('snapshot/congelar-lote')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async congelarSnapshotTurmasEmLote(
         @Query('incluir_em_andamento') incluirEmAndamentoParam: string,
         @Query('forcar_regeracao') forcarRegeracaoParam: string,
@@ -329,32 +354,37 @@ export class TurmasController {
     }
 
     @Get(':id/status-resumo')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getTurmaStatusResumo(@Param('id', ParseIntPipe) id: number): Promise<TurmaStatusResumoResponseDto> {
         return this.turmasService.getTurmaStatusResumo(id);
     }
 
     @Get(':id/status-resumo/alunos')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getTurmaStatusAlunos(@Param('id', ParseIntPipe) id: number, @Query('tipo') tipo: string): Promise<TurmaStatusAlunosResponseDto> {
         return this.turmasService.getTurmaStatusAlunos(id, tipo);
     }
 
     @Post(':id/snapshot/regerar')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async regerarSnapshotTurma(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<{ id_turma: number; snapshot_em: Date; message: string }> {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.regerarSnapshotMetricasTurma(id, userId);
     }
 
     @Get(':id/times')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getTimesTurma(@Param('id', ParseIntPipe) id: number): Promise<TurmaTimesResponseDto> {
         return this.turmasService.getTimesTurma(id);
     }
 
     @Put(':id/times')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'edit' })
     async updateTimesTurma(
         @Param('id', ParseIntPipe) id: number,
         @Body() updateTurmaTimesDto: UpdateTurmaTimesDto,
@@ -365,7 +395,8 @@ export class TurmasController {
     }
 
     @Post()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'create' })
     async create(@Body() createTurmaDto: CreateTurmaDto): Promise<TurmaResponseDto> {
         console.log('Criando nova turma:', createTurmaDto);
         return this.turmasService.create(createTurmaDto);
@@ -373,7 +404,8 @@ export class TurmasController {
 
     /** Atualiza somente o status do evento no calendário (cores da legenda). */
     @Put(':id/status-evento')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'calendario', action: 'edit' })
     async updateStatusEvento(
         @Param('id', ParseIntPipe) id: number,
         @Body() dto: UpdateStatusEventoDto,
@@ -384,14 +416,16 @@ export class TurmasController {
     }
 
     @Put(':id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'edit' })
     async update(@Param('id', ParseIntPipe) id: number, @Body() updateTurmaDto: UpdateTurmaDto): Promise<TurmaResponseDto> {
         console.log('Atualizando turma ID:', id, 'com dados:', updateTurmaDto);
         return this.turmasService.update(id, updateTurmaDto);
     }
 
     @Put(':id/soft-delete')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'delete' })
     async softDelete(@Param('id', ParseIntPipe) id: number, @Body() softDeleteDto: SoftDeleteTurmaDto): Promise<{ message: string }> {
         console.log('Soft delete da turma ID:', id, 'Dados:', softDeleteDto);
         await this.turmasService.softDelete(id, softDeleteDto);
@@ -399,7 +433,8 @@ export class TurmasController {
     }
 
     @Delete(':id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'delete' })
     async delete(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
         console.log('Deletando turma ID (hard delete):', id);
         await this.turmasService.delete(id);
@@ -426,7 +461,8 @@ export class TurmasController {
     }
 
     @Put(':id/acessora')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'acessoraTurma', action: 'edit' })
     async updateTurmaAcessora(
         @Param('id', ParseIntPipe) id_turma: number,
         @Body() dto: UpdateTurmaAcessoraDto,
@@ -437,7 +473,8 @@ export class TurmasController {
     }
 
     @Post(':id/alunos')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'alunosNaTurma', action: 'create' })
     async addAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Body() addAlunoDto: AddAlunoTurmaDto, @Req() req: any): Promise<AlunoTurmaResponseDto> {
         console.log('Adicionando aluno à turma:', id_turma, 'aluno:', addAlunoDto);
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
@@ -445,7 +482,8 @@ export class TurmasController {
     }
 
     @Put(':id/alunos/:id_turma_aluno')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'alunosNaTurma', action: 'edit' })
     async updateAlunoTurma(
         @Param('id', ParseIntPipe) id_turma: number,
         @Param('id_turma_aluno') id_turma_aluno: string,
@@ -458,7 +496,8 @@ export class TurmasController {
     }
 
     @Delete(':id/alunos/:id_turma_aluno')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'alunosNaTurma', action: 'delete' })
     async removeAlunoTurma(
         @Param('id', ParseIntPipe) id_turma: number,
         @Param('id_turma_aluno') id_turma_aluno: string,

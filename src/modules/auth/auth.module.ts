@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
@@ -10,7 +10,11 @@ import { ConfigModule as LocalConfigModule } from '../config/config.module';
 import { UnitOfWorkModule } from '../config/unit_of_work/uow.module';
 import { MailModule } from '../mail/mail.module';
 import { EncryptionService } from '../../common/services/encryption.service';
+import { AdminGuard } from './guards/admin.guard';
+import { PermissionsGuard } from './guards/permissions.guard';
+import { PermissionsMatrixService } from './permissions-matrix.service';
 
+@Global()
 @Module({
     imports: [
         ConfigModule.forRoot(),
@@ -26,7 +30,7 @@ import { EncryptionService } from '../../common/services/encryption.service';
         }),
     ],
     controllers: [AuthController],
-    providers: [AuthService, JwtStrategy, GoogleStrategy, EncryptionService],
-    exports: [AuthService, EncryptionService],
+    providers: [AuthService, JwtStrategy, GoogleStrategy, EncryptionService, AdminGuard, PermissionsGuard, PermissionsMatrixService],
+    exports: [AuthService, EncryptionService, PermissionsMatrixService, PermissionsGuard, AdminGuard],
 })
 export class AuthModule {}

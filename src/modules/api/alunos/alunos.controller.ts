@@ -13,8 +13,11 @@ import {
     AlunoEmpresaResponseDto,
 } from './dto/alunos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission({ module: 'alunos', action: 'view' })
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('alunos')
 export class AlunosController {
@@ -32,6 +35,7 @@ export class AlunosController {
     }
 
     @Put(':id/vinculos')
+    @RequirePermission({ module: 'alunos', action: 'edit' })
     async saveVinculos(@Param('id', ParseIntPipe) id: number, @Body() dto: SaveAlunoVinculosDto): Promise<AlunoVinculoResponseDto[]> {
         return this.alunosService.saveVinculos(id, dto);
     }
@@ -42,6 +46,7 @@ export class AlunosController {
     }
 
     @Put(':id/empresas')
+    @RequirePermission({ module: 'alunos', action: 'edit' })
     async saveEmpresas(@Param('id', ParseIntPipe) id: number, @Body() dto: SaveAlunoEmpresasDto): Promise<AlunoEmpresaResponseDto[]> {
         return this.alunosService.saveEmpresas(id, dto);
     }
@@ -53,18 +58,21 @@ export class AlunosController {
     }
 
     @Post()
+    @RequirePermission({ module: 'alunos', action: 'create' })
     async create(@Body() createAlunoDto: CreateAlunoDto): Promise<AlunoResponseDto> {
         console.log('Criando aluno:', createAlunoDto);
         return this.alunosService.create(createAlunoDto);
     }
 
     @Put(':id')
+    @RequirePermission({ module: 'alunos', action: 'edit' })
     async update(@Param('id', ParseIntPipe) id: number, @Body() updateAlunoDto: UpdateAlunoDto): Promise<AlunoResponseDto> {
         console.log('Atualizando aluno ID:', id, 'Dados:', updateAlunoDto);
         return this.alunosService.update(id, updateAlunoDto);
     }
 
     @Put(':id/soft-delete')
+    @RequirePermission({ module: 'alunos', action: 'delete' })
     async softDelete(@Param('id', ParseIntPipe) id: number, @Body() softDeleteDto: SoftDeleteAlunoDto): Promise<{ message: string }> {
         console.log('Soft delete do aluno ID:', id, 'Dados:', softDeleteDto);
         await this.alunosService.softDelete(id, softDeleteDto);
@@ -72,6 +80,7 @@ export class AlunosController {
     }
 
     @Delete(':id')
+    @RequirePermission({ module: 'alunos', action: 'delete' })
     async delete(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
         console.log('Excluindo aluno ID (hard delete):', id);
         await this.alunosService.delete(id);

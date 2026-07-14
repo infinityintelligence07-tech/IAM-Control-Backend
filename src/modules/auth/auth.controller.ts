@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Post, Put, Query, Req, Res, UseGuards, UseInterceptors, ClassSerializerInterceptor, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Req, Res, UseGuards, UseInterceptors, ClassSerializerInterceptor, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt.guard';
 import { GoogleAuthGuard } from './guards/google.guard';
+import { AdminGuard } from './guards/admin.guard';
+import { PermissionsMatrixService } from './permissions-matrix.service';
+import { SavePermissionsMatrixDto } from './dto/permissions-matrix.dto';
 import { Request } from 'express';
 import { SignupDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, ResetPasswordDirectDto } from '../../common/dto/auth.dto';
 import { ESetores, EFuncoes } from '../config/entities/enum';
@@ -9,7 +12,10 @@ import { ESetores, EFuncoes } from '../config/entities/enum';
 @Controller('auth')
 @UseInterceptors(ClassSerializerInterceptor)
 export class AuthController {
-    constructor(private readonly auth: AuthService) {}
+    constructor(
+        private readonly auth: AuthService,
+        private readonly permissionsMatrix: PermissionsMatrixService,
+    ) {}
 
     @Post('register')
     async register(@Body() body: any) {
@@ -131,6 +137,24 @@ export class AuthController {
     @Get('funcoes')
     getFuncoes() {
         return Object.values(EFuncoes);
+    }
+
+    @Get('permissions-matrix')
+    @UseGuards(JwtAuthGuard)
+    getPermissionsMatrix() {
+        return this.permissionsMatrix.getMatrix();
+    }
+
+    @Put('permissions-matrix')
+    @UseGuards(JwtAuthGuard, AdminGuard)
+    putPermissionsMatrix(@Body() body: SavePermissionsMatrixDto) {
+        return this.permissionsMatrix.saveMatrix(body);
+    }
+
+    @Post('permissions-matrix/reset')
+    @UseGuards(JwtAuthGuard, AdminGuard)
+    resetPermissionsMatrix() {
+        return this.permissionsMatrix.resetToDefaults();
     }
 
     @Put('profile')

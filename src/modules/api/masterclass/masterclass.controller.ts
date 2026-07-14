@@ -30,11 +30,14 @@ import {
     SoftDeleteMasterclassPreCadastroDto,
 } from './dto/masterclass.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 import { UseGuards } from '@nestjs/common';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('masterclass')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission({ module: 'credenciamento', action: 'view' })
 export class MasterclassController {
     constructor(private readonly masterclassService: MasterclassService) {}
 
@@ -130,6 +133,7 @@ export class MasterclassController {
      * Confirmar presença de um pré-cadastro
      */
     @Put('confirmar-presenca')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async confirmarPresenca(@Body() confirmarDto: ConfirmarPresencaDto): Promise<any> {
         console.log('Confirmando presença para pré-cadastro:', confirmarDto.id_pre_cadastro);
         return this.masterclassService.confirmarPresenca(confirmarDto);
@@ -139,6 +143,7 @@ export class MasterclassController {
      * Vincular pré-cadastro a um aluno existente
      */
     @Put('vincular-aluno')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async vincularAluno(@Body() vincularDto: VincularAlunoDto): Promise<any> {
         console.log('Vinculando aluno:', vincularDto.id_aluno, 'ao pré-cadastro:', vincularDto.id_pre_cadastro);
         return this.masterclassService.vincularAluno(vincularDto);
@@ -148,6 +153,7 @@ export class MasterclassController {
      * Alterar interesse de um pré-cadastro
      */
     @Put('alterar-interesse')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async alterarInteresse(@Body() alterarDto: AlterarInteresseDto): Promise<any> {
         console.log('Alterando interesse para pré-cadastro:', alterarDto.id_pre_cadastro, 'teve_interesse:', alterarDto.teve_interesse);
         return this.masterclassService.alterarInteresse(alterarDto);

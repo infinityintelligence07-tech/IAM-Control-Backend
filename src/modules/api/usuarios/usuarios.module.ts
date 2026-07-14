@@ -2,13 +2,11 @@ import { Module } from '@nestjs/common';
 import { UsuariosController } from './usuarios.controller';
 import { UsuariosService } from './usuarios.service';
 import { UnitOfWorkModule } from '../../config/unit_of_work/uow.module';
-import { AdminGuard } from '../../auth/guards/admin.guard';
-import { AdminOrLiderPuroGuard } from '../../auth/guards/admin-or-lider-puro.guard';
 
 @Module({
     imports: [UnitOfWorkModule],
     controllers: [UsuariosController],
-    providers: [UsuariosService, AdminGuard, AdminOrLiderPuroGuard],
+    providers: [UsuariosService],
     exports: [UsuariosService],
 })
 export class UsuariosModule {}

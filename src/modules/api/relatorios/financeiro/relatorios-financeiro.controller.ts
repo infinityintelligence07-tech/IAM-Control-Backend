@@ -1,10 +1,12 @@
 import { Controller, Get, UseGuards, UseInterceptors, ClassSerializerInterceptor } from '@nestjs/common';
 import { RelatoriosFinanceiroService } from './relatorios-financeiro.service';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
-import { AdminOrLiderGuard } from '@/modules/auth/guards/admin-or-lider.guard';
+import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 import { AlunosInadimplentesResponseDto } from './dto/relatorios-financeiro.dto';
 
-@UseGuards(JwtAuthGuard, AdminOrLiderGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermission({ module: 'relatorios', action: 'view' })
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('relatorios/financeiro')
 export class RelatoriosFinanceiroController {

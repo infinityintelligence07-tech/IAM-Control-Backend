@@ -273,6 +273,8 @@ export class PermissionsMatrixService {
             if (!normalized[setor][PADRAO_SETOR_KEY]) {
                 normalized[setor][PADRAO_SETOR_KEY] = createEmptyRolePermissions({
                     turmas: { view: true },
+                    treinamentos: { view: true },
+                    polos: { view: true },
                     vendas: { view: true },
                     credenciamento: { view: true },
                 });

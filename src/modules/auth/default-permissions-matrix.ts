@@ -45,6 +45,8 @@ function buildStaffPermissions(): RolePermissions {
     let role = createEmptyRolePermissions();
     role = grantModule(role, 'alunos', ['view']);
     role = grantModule(role, 'turmas', ['view']);
+    role = grantModule(role, 'treinamentos', ['view']);
+    role = grantModule(role, 'polos', ['view']);
     role = grantModule(role, 'vendas', ['view']);
     role = grantModule(role, 'credenciamento', ['view']);
     return role;
@@ -53,6 +55,10 @@ function buildStaffPermissions(): RolePermissions {
 function buildAuthenticatedBase(): RolePermissions {
     let role = createEmptyRolePermissions();
     role = grantModule(role, 'turmas', ['view']);
+    // Leitura de nomes de treinamentos/polos é pré-requisito dos filtros da tela
+    // de turmas (quem vê turmas precisa listar treinamentos e polos).
+    role = grantModule(role, 'treinamentos', ['view']);
+    role = grantModule(role, 'polos', ['view']);
     role = grantModule(role, 'vendas', ['view']);
     role = grantModule(role, 'credenciamento', ['view']);
     return role;

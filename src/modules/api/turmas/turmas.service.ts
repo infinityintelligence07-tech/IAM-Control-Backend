@@ -2,7 +2,17 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException,
 import { Cron } from '@nestjs/schedule';
 import { getRequestUserId } from '@/common/context/request-user.context';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
-import { EFuncoes, ESetores, EOrigemAlunos, EStatusAlunosTurmas, EPresencaTurmas, EStatusTurmas, EStatusAlunosGeral, EFormasPagamento, EStatusEventoCalendario } from '../../config/entities/enum';
+import {
+    EFuncoes,
+    ESetores,
+    EOrigemAlunos,
+    EStatusAlunosTurmas,
+    EPresencaTurmas,
+    EStatusTurmas,
+    EStatusAlunosGeral,
+    EFormasPagamento,
+    EStatusEventoCalendario,
+} from '../../config/entities/enum';
 import {
     GetTurmasDto,
     CreateTurmaDto,
@@ -755,7 +765,11 @@ export class TurmasService {
      * Chamadas internas do sistema (sem userId — ex.: cancelamento de contrato,
      * robô de transferências) não passam por esta validação.
      */
-    private async validarPermissaoGerenciarAlunosTurma(turma: { id_acessora?: number | null } | null | undefined, userId: number | undefined, acao: 'adicionar' | 'remover'): Promise<void> {
+    private async validarPermissaoGerenciarAlunosTurma(
+        turma: { id_acessora?: number | null } | null | undefined,
+        userId: number | undefined,
+        acao: 'adicionar' | 'remover',
+    ): Promise<void> {
         if (!userId) return; // chamada interna do sistema
 
         const usuario = await this.uow.usuariosRP.findOne({
@@ -786,7 +800,11 @@ export class TurmasService {
      * turma. Somente administradores ou líderes do Cuidado de Alunos podem definir;
      * a acessora escolhida precisa ser uma colaboradora do Cuidado de Alunos.
      */
-    async updateTurmaAcessora(id_turma: number, idAcessora: number | null, userId?: number): Promise<{ id_acessora: number | null; acessora: { id: number; nome: string } | null }> {
+    async updateTurmaAcessora(
+        id_turma: number,
+        idAcessora: number | null,
+        userId?: number,
+    ): Promise<{ id_acessora: number | null; acessora: { id: number; nome: string } | null }> {
         if (!userId) {
             throw new ForbiddenException('Não autorizado');
         }
@@ -1135,10 +1153,7 @@ export class TurmasService {
         this.snapshotEmGeracaoBackground.add(id_turma);
         void this.tentarCongelarTurmaSePassouDataFinal(id_turma)
             .catch((error) => {
-                this.logger.error(
-                    `snapshot.turma.bg | Falha ao congelar turma=${id_turma} em background`,
-                    error instanceof Error ? error.stack : undefined,
-                );
+                this.logger.error(`snapshot.turma.bg | Falha ao congelar turma=${id_turma} em background`, error instanceof Error ? error.stack : undefined);
             })
             .finally(() => {
                 this.snapshotEmGeracaoBackground.delete(id_turma);
@@ -4304,9 +4319,7 @@ export class TurmasService {
             const inicioDestino = new Date(`${String(turmaDestino.data_inicio).slice(0, 10)}T00:00:00`);
             inicioDestino.setHours(0, 0, 0, 0);
             if (inicioDestino <= hojeTransferencia) {
-                throw new BadRequestException(
-                    'Não é possível transferir para uma turma que já ocorreu ou está ocorrendo. Escolha uma turma futura.',
-                );
+                throw new BadRequestException('Não é possível transferir para uma turma que já ocorreu ou está ocorrendo. Escolha uma turma futura.');
             }
         }
 
@@ -4580,10 +4593,10 @@ export class TurmasService {
             // seleciona turmas específicas) OU turmas que tiveram movimentação dentro do período selecionado.
             if (turmaIds.length === 0) {
                 if (movimentadasIds.size > 0) {
-                    turmaQb.andWhere(
-                        `(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff OR t.id IN (:...movIds))`,
-                        { cutoff: cutoffStr, movIds: Array.from(movimentadasIds) },
-                    );
+                    turmaQb.andWhere(`(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff OR t.id IN (:...movIds))`, {
+                        cutoff: cutoffStr,
+                        movIds: Array.from(movimentadasIds),
+                    });
                 } else {
                     turmaQb.andWhere(`(COALESCE(t.data_final, t.data_inicio) IS NULL OR COALESCE(t.data_final, t.data_inicio) >= :cutoff)`, { cutoff: cutoffStr });
                 }
@@ -4934,17 +4947,40 @@ export class TurmasService {
                 .andWhere('h.deletado_em IS NULL')
                 .andWhere('h.criado_em >= :start', { start })
                 .andWhere('h.criado_em <= :end', { end: endInclusive })
-                .getRawMany<{ id_aluno: string; id_turma_de: number; id_turma_para: number; id_turma_aluno_de: string | null; id_turma_aluno_para: string | null; dia: string }>();
+                .getRawMany<{
+                    id_aluno: string;
+                    id_turma_de: number;
+                    id_turma_para: number;
+                    id_turma_aluno_de: string | null;
+                    id_turma_aluno_para: string | null;
+                    dia: string;
+                }>();
 
             for (const row of transferRows) {
                 const de = Number(row.id_turma_de);
                 const para = Number(row.id_turma_para);
                 if (para === id_turma) {
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : null, dia: row.dia, tipo: 'ENTRADA', categoria: 'Transferência', id_turma_de: de, id_turma_para: para });
+                    itens.push({
+                        id_aluno: Number(row.id_aluno),
+                        id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : null,
+                        dia: row.dia,
+                        tipo: 'ENTRADA',
+                        categoria: 'Transferência',
+                        id_turma_de: de,
+                        id_turma_para: para,
+                    });
                 }
                 // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
                 if (de === id_turma && !specialSet.has(para)) {
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null, dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência', id_turma_de: de, id_turma_para: para });
+                    itens.push({
+                        id_aluno: Number(row.id_aluno),
+                        id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null,
+                        dia: row.dia,
+                        tipo: 'SAIDA',
+                        categoria: 'Transferência',
+                        id_turma_de: de,
+                        id_turma_para: para,
+                    });
                 }
             }
 
@@ -4994,11 +5030,7 @@ export class TurmasService {
             const turmaLabelMap = new Map<number, string>();
             turmaLabelMap.set(turma.id, turma_label);
             const idsTurmasRef = Array.from(
-                new Set(
-                    itens
-                        .flatMap((i) => [i.id_turma_de, i.id_turma_para])
-                        .filter((n): n is number => Number.isFinite(n as number) && !turmaLabelMap.has(n as number)),
-                ),
+                new Set(itens.flatMap((i) => [i.id_turma_de, i.id_turma_para]).filter((n): n is number => Number.isFinite(n) && !turmaLabelMap.has(n))),
             );
             if (idsTurmasRef.length > 0) {
                 const turmasRef = await this.uow.turmasRP
@@ -5015,8 +5047,7 @@ export class TurmasService {
                     turmaLabelMap.set(Number(t.id), t.edicao_turma ? `${base} - ${t.edicao_turma}` : base);
                 }
             }
-            const labelTurma = (id?: number | null): string | null =>
-                id != null ? (turmaLabelMap.get(Number(id)) ?? `Turma ${id}`) : null;
+            const labelTurma = (id?: number | null): string | null => (id != null ? (turmaLabelMap.get(Number(id)) ?? `Turma ${id}`) : null);
 
             const alunos: MovimentacaoAlunoItemDto[] = itens.map((i) => ({
                 id_aluno: i.id_aluno,
@@ -5096,7 +5127,10 @@ export class TurmasService {
             const rows = await qb.getRawMany<{ id_turma_aluno: string; id_aluno: number; nome: string | null; email: string | null; dia_entrada: string | null }>();
 
             const idsTurmaAluno = rows.map((r) => String(r.id_turma_aluno));
-            const classif = idsTurmaAluno.length > 0 ? await this.getClassificacaoOrigemPorTurmaAluno(id_turma, idsTurmaAluno) : new Map<string, { canal: string; categoria: string }>();
+            const classif =
+                idsTurmaAluno.length > 0
+                    ? await this.getClassificacaoOrigemPorTurmaAluno(id_turma, idsTurmaAluno)
+                    : new Map<string, { canal: string; categoria: string }>();
 
             // Observações registradas para cada aluno (agregadas ao aluno, todas as turmas).
             const idsAlunos = Array.from(new Set(rows.map((r) => Number(r.id_aluno)).filter((n) => Number.isFinite(n))));
@@ -5180,7 +5214,17 @@ export class TurmasService {
 
             // Ordem fixa das estratégias (igual ao filtro de Origem da turma), com
             // canais desconhecidos ao final por total decrescente.
-            const ordemCanais = ['Demais Vendas', 'Masterclass', 'Time de Vendas', 'Transbordo', 'Liberty', 'Bônus', 'Cortesia/Sorteio', 'Transferência', 'Presente'];
+            const ordemCanais = [
+                'Demais Vendas',
+                'Masterclass',
+                'Time de Vendas',
+                'Transbordo',
+                'Liberty',
+                'Bônus',
+                'Cortesia/Sorteio',
+                'Transferência',
+                'Presente',
+            ];
             const canais: AlunosSaldoPeriodoCanalDto[] = Array.from(grupos.entries())
                 .map(([canal, alunos]) => ({
                     canal,
@@ -5481,17 +5525,14 @@ export class TurmasService {
                 atualizado_por: uid,
             });
         } catch (error) {
-            this.logger.warn(`turma.historico.registrar | Falha ao registrar log da turma id=${logData.id_turma}: ${error instanceof Error ? error.message : error}`);
+            this.logger.warn(
+                `turma.historico.registrar | Falha ao registrar log da turma id=${logData.id_turma}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
         }
     }
 
     /** Compara os campos-chave antes/depois e registra no histórico o que mudou. */
-    private async registrarLogAlteracaoTurma(
-        id_turma: number,
-        antes: Record<string, unknown>,
-        depois: Record<string, unknown>,
-        userId?: number,
-    ): Promise<void> {
+    private async registrarLogAlteracaoTurma(id_turma: number, antes: Record<string, unknown>, depois: Record<string, unknown>, userId?: number): Promise<void> {
         const labels: Record<string, string> = {
             id_polo: 'Polo',
             id_treinamento: 'Treinamento',
@@ -5510,7 +5551,7 @@ export class TurmasService {
             if (!(campo in depois) || depois[campo] === undefined) continue;
             const de = antes[campo];
             const para = depois[campo];
-            if (String(de ?? '') === String(para ?? '')) continue;
+            if (this.normalizeLogValue(de) === this.normalizeLogValue(para)) continue;
             mudancas.push(`${labels[campo]}: "${this.normalizeLogValue(de)}" → "${this.normalizeLogValue(para)}"`);
             detalhes[campo] = { de: de ?? null, para: para ?? null };
         }
@@ -6826,8 +6867,7 @@ export class TurmasService {
             // Edição manual das datas de assinatura da mentoria (início/encerramento).
             // As datas vivem em turmas_alunos_treinamentos; registramos no histórico do aluno
             // quem fez a alteração (userId).
-            const querEditarDatasMentoria =
-                updateAlunoDto.data_inicio_mentoria !== undefined || updateAlunoDto.data_fim_mentoria !== undefined;
+            const querEditarDatasMentoria = updateAlunoDto.data_inicio_mentoria !== undefined || updateAlunoDto.data_fim_mentoria !== undefined;
             if (querEditarDatasMentoria) {
                 const ehMentoria = turmaAluno.id_turma_fk?.id_treinamento_fk?.tipo_mentoria === true;
                 if (!ehMentoria) {
@@ -6902,10 +6942,8 @@ export class TurmasService {
                 };
                 const inicioAntigo = normalizarData(linhaMentoria.data_inicio_mentoria);
                 const fimAntigo = normalizarData(linhaMentoria.data_fim_mentoria);
-                const novoInicio =
-                    updateAlunoDto.data_inicio_mentoria !== undefined ? normalizarData(updateAlunoDto.data_inicio_mentoria) : inicioAntigo;
-                const novoFim =
-                    updateAlunoDto.data_fim_mentoria !== undefined ? normalizarData(updateAlunoDto.data_fim_mentoria) : fimAntigo;
+                const novoInicio = updateAlunoDto.data_inicio_mentoria !== undefined ? normalizarData(updateAlunoDto.data_inicio_mentoria) : inicioAntigo;
+                const novoFim = updateAlunoDto.data_fim_mentoria !== undefined ? normalizarData(updateAlunoDto.data_fim_mentoria) : fimAntigo;
 
                 if (novoInicio && novoFim && novoFim < novoInicio) {
                     throw new BadRequestException('A data de encerramento da assinatura não pode ser anterior à data de início.');

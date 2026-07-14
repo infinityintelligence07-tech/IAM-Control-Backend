@@ -266,11 +266,12 @@ export class PermissionsMatrixService {
 
     /**
      * Aplica upgrades de conteúdo entre versões da matriz persistida.
-     * v3: libera alunos.create onde o padrão do sistema já prevê create.
+     * v3: libera alunos.create onde o padrão já prevê create.
+     * v4: libera alunosNaTurma.create (inserir aluno na turma) onde o padrão prevê create.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
-        if (fromVersion >= 3) return next;
+        if (fromVersion >= PERMISSIONS_MATRIX_VERSION) return next;
 
         const defaults = this.getDefaultMatrix();
 
@@ -282,14 +283,27 @@ export class PermissionsMatrixService {
 
                 const defaultRole =
                     defaults[setor]?.[funcao] || defaults[setor]?.[PADRAO_SETOR_KEY] || null;
-                if (!defaultRole?.alunos?.create) continue;
+                if (!defaultRole) continue;
 
-                role.alunos = {
-                    view: true,
-                    create: true,
-                    edit: Boolean(role.alunos?.edit || defaultRole.alunos.edit),
-                    delete: Boolean(role.alunos?.delete || defaultRole.alunos.delete),
-                };
+                if (fromVersion < 3 && defaultRole.alunos?.create) {
+                    role.alunos = {
+                        view: true,
+                        create: true,
+                        edit: Boolean(role.alunos?.edit || defaultRole.alunos.edit),
+                        delete: Boolean(role.alunos?.delete || defaultRole.alunos.delete),
+                    };
+                }
+
+                if (fromVersion < 4 && defaultRole.alunosNaTurma?.create) {
+                    role.alunosNaTurma = {
+                        view: true,
+                        create: true,
+                        edit: Boolean(role.alunosNaTurma?.edit || defaultRole.alunosNaTurma.edit),
+                        delete: Boolean(
+                            role.alunosNaTurma?.delete || defaultRole.alunosNaTurma.delete,
+                        ),
+                    };
+                }
             }
         }
 

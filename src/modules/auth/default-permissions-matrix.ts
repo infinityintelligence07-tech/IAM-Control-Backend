@@ -32,7 +32,7 @@ function buildLiderPermissions(setor: ESetores): RolePermissions {
     role = grantModule(role, 'vendas', ['view', 'create', 'edit']);
     role = grantModule(role, 'usuarios', ['view', 'edit']);
     role = grantModule(role, 'relatorios', ['view']);
-    role = grantModule(role, 'alunosNaTurma', ['view', 'edit', 'delete']);
+    role = grantModule(role, 'alunosNaTurma', 'all');
 
     if (setor === ESetores.CUIDADO_DE_ALUNOS) {
         role = grantModule(role, 'acessoraTurma', ['view', 'edit']);
@@ -73,15 +73,16 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
 
         case ESetores.CD:
             role = grantModule(role, 'alunos', ['view', 'create', 'edit']);
+            role = grantModule(role, 'alunosNaTurma', ['view', 'create', 'edit', 'delete']);
             role = grantModule(role, 'turmas', ['view', 'create', 'edit']);
             role = grantModule(role, 'calendario', ['view', 'create', 'edit']);
             return role;
 
         case ESetores.CUIDADO_DE_ALUNOS:
-            // Operacional de alunos: precisa incluir create (cadastro novo).
+            // Operacional: cadastro de aluno + inserir/gerenciar na turma.
             role = grantModule(role, 'alunos', ['view', 'create', 'edit', 'delete']);
             role = grantModule(role, 'calendario', ['view']);
-            role = grantModule(role, 'alunosNaTurma', ['view', 'edit', 'delete']);
+            role = grantModule(role, 'alunosNaTurma', 'all');
             role = grantModule(role, 'turmas', ['view']);
             role = grantModule(role, 'credenciamento', ['view']);
             return role;
@@ -89,6 +90,7 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
         case ESetores.EVENTOS:
         case ESetores.EXPANSAO:
             role = grantModule(role, 'alunos', ['view', 'create', 'edit']);
+            role = grantModule(role, 'alunosNaTurma', ['view', 'create', 'edit', 'delete']);
             role = grantModule(role, 'polos', ['view', 'create', 'edit']);
             role = grantModule(role, 'treinamentos', ['view', 'create', 'edit']);
             role = grantModule(role, 'enderecosEventos', ['view', 'create', 'edit']);
@@ -99,6 +101,7 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
         case ESetores.EXPANSAO_NEGOCIOS:
         case ESetores.COMERCIAL:
             role = grantModule(role, 'alunos', ['view', 'create', 'edit']);
+            role = grantModule(role, 'alunosNaTurma', ['view', 'create', 'edit']);
             return role;
 
         case ESetores.JURIDICO:

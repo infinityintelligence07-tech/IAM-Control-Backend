@@ -108,7 +108,7 @@ export const FUNCTION_PRIORITY: Record<string, number> = {
 };
 
 export const PERMISSIONS_MATRIX_CONFIG_KEY = 'permissions_matrix';
-export const PERMISSIONS_MATRIX_VERSION = 3;
+export const PERMISSIONS_MATRIX_VERSION = 4;
 export const PERMISSION_METADATA_KEY = 'required_permission';
 
 export function getFunctionPriority(funcao: string): number {

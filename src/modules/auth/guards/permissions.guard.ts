@@ -45,7 +45,10 @@ export class PermissionsGuard implements CanActivate {
         }
 
         const funcoes = (Array.isArray(usuario.funcao) ? usuario.funcao : []).map(String);
-        const isAdmin = funcoes.includes(EFuncoes.ADMINISTRADOR) || funcoes.includes('ADMINISTRADOR');
+        const isAdmin =
+            funcoes.includes(EFuncoes.ADMINISTRADOR) ||
+            funcoes.includes('ADMINISTRADOR') ||
+            String(usuario.setor || '').toUpperCase() === 'ADMINISTRADOR';
         if (isAdmin) {
             return true;
         }

@@ -43,9 +43,10 @@ export class PermissionsMatrixService {
     async getMatrix(): Promise<PermissionsMatrixPayload> {
         const fromDb = await this.loadStoredMatrix();
         if (fromDb) {
-            // Upgrade automático v1 → v2 quando necessário
+            // Upgrade automático (conteúdo + versão) quando a matriz salva está atrás.
             if (fromDb.version < PERMISSIONS_MATRIX_VERSION) {
-                const upgraded = await this.persistMatrix(fromDb.matrix, PERMISSIONS_MATRIX_VERSION);
+                const upgradedMatrix = this.upgradeMatrixContent(fromDb.matrix, fromDb.version);
+                const upgraded = await this.persistMatrix(upgradedMatrix, PERMISSIONS_MATRIX_VERSION);
                 this.setCache(upgraded.matrix);
                 return {
                     version: upgraded.version,
@@ -252,7 +253,47 @@ export class PermissionsMatrixService {
                 }
             }
         }
+
+        // Na matriz antiga, "alunos" liberava o módulo inteiro (inclui cadastro).
+        if (source.alunos === true) {
+            base.alunos.view = true;
+            base.alunos.create = true;
+            base.alunos.edit = true;
+        }
+
         return base;
+    }
+
+    /**
+     * Aplica upgrades de conteúdo entre versões da matriz persistida.
+     * v3: libera alunos.create onde o padrão do sistema já prevê create.
+     */
+    private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
+        const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
+        if (fromVersion >= 3) return next;
+
+        const defaults = this.getDefaultMatrix();
+
+        for (const [setor, funcoes] of Object.entries(next)) {
+            if (!funcoes || typeof funcoes !== 'object') continue;
+
+            for (const [funcao, role] of Object.entries(funcoes)) {
+                if (!role || typeof role !== 'object') continue;
+
+                const defaultRole =
+                    defaults[setor]?.[funcao] || defaults[setor]?.[PADRAO_SETOR_KEY] || null;
+                if (!defaultRole?.alunos?.create) continue;
+
+                role.alunos = {
+                    view: true,
+                    create: true,
+                    edit: Boolean(role.alunos?.edit || defaultRole.alunos.edit),
+                    delete: Boolean(role.alunos?.delete || defaultRole.alunos.delete),
+                };
+            }
+        }
+
+        return next;
     }
 
     private normalizeMatrix(raw: unknown): PermissionsMatrix | null {

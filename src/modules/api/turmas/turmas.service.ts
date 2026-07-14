@@ -1706,7 +1706,7 @@ export class TurmasService {
     }
 
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
-        const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final } = filters;
+        const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final, turma_aberta } = filters;
 
         try {
             const queryBuilder = this.uow.turmasRP
@@ -1732,6 +1732,12 @@ export class TurmasService {
 
             if (id_treinamento) {
                 queryBuilder.andWhere('turma.id_treinamento = :id_treinamento', { id_treinamento });
+            }
+
+            // Filtro do credenciamento: só turmas habilitadas, aplicado na query
+            // para não perder turmas abertas antigas por criado_em após o limit.
+            if (turma_aberta === true) {
+                queryBuilder.andWhere('turma.turma_aberta = true');
             }
 
             // Filtrar por tipo de treinamento NA QUERY (antes da paginação): com o

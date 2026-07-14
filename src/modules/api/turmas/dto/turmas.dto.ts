@@ -42,6 +42,14 @@ export class GetTurmasDto {
     @Transform(({ value }) => value?.trim())
     data_final?: string; // Formato: YYYY-MM-DD
 
+    // Filtra turmas habilitadas para credenciamento NA QUERY (antes da paginação):
+    // com o volume de masterclasses sincronizadas, turmas abertas antigas por
+    // criado_em ficavam fora do limit e sumiam do credenciamento.
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === true || value === 'true')
+    turma_aberta?: boolean;
+
     @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value))

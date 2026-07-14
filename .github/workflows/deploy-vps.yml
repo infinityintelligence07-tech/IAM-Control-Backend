@@ -29,6 +29,7 @@ jobs:
             set -e
             cd "${{ secrets.VPS_BACKEND_PATH }}"
             git fetch
+            git stash || true
             git pull origin main
             npm i --legacy-peer-deps
             npm run build

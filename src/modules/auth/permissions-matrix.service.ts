@@ -268,6 +268,7 @@ export class PermissionsMatrixService {
      * Aplica upgrades de conteúdo entre versões da matriz persistida.
      * v3: libera alunos.create onde o padrão já prevê create.
      * v4: libera alunosNaTurma.create (inserir aluno na turma) onde o padrão prevê create.
+     * v5: libera autorizacaoPendencia/assinarTestemunha onde o padrão prevê (Expansão de Negócios, colaborador+).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -303,6 +304,37 @@ export class PermissionsMatrixService {
                             role.alunosNaTurma?.delete || defaultRole.alunosNaTurma.delete,
                         ),
                     };
+                }
+
+                if (fromVersion < 5) {
+                    if (defaultRole.autorizacaoPendencia?.edit) {
+                        role.autorizacaoPendencia = {
+                            view: true,
+                            create: Boolean(
+                                role.autorizacaoPendencia?.create ||
+                                    defaultRole.autorizacaoPendencia.create,
+                            ),
+                            edit: true,
+                            delete: Boolean(
+                                role.autorizacaoPendencia?.delete ||
+                                    defaultRole.autorizacaoPendencia.delete,
+                            ),
+                        };
+                    }
+                    if (defaultRole.assinarTestemunha?.edit) {
+                        role.assinarTestemunha = {
+                            view: true,
+                            create: Boolean(
+                                role.assinarTestemunha?.create ||
+                                    defaultRole.assinarTestemunha.create,
+                            ),
+                            edit: true,
+                            delete: Boolean(
+                                role.assinarTestemunha?.delete ||
+                                    defaultRole.assinarTestemunha.delete,
+                            ),
+                        };
+                    }
                 }
             }
         }

@@ -18,6 +18,8 @@ export const MODULE_KEYS = [
     'relatorios',
     'alunosNaTurma',
     'acessoraTurma',
+    'autorizacaoPendencia',
+    'assinarTestemunha',
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -51,7 +53,9 @@ export type PermissionKey =
     | 'aprovarUsuarios'
     | 'relatorios'
     | 'gerenciarAlunosTurma'
-    | 'definirAcessoraTurma';
+    | 'definirAcessoraTurma'
+    | 'autorizarPendencia'
+    | 'assinarTestemunha';
 
 export const PERMISSION_KEY_MAP: Record<PermissionKey, { module: ModuleKey; action: ActionKey }> = {
     dashboard: { module: 'dashboard', action: 'view' },
@@ -72,6 +76,8 @@ export const PERMISSION_KEY_MAP: Record<PermissionKey, { module: ModuleKey; acti
     relatorios: { module: 'relatorios', action: 'view' },
     gerenciarAlunosTurma: { module: 'alunosNaTurma', action: 'delete' },
     definirAcessoraTurma: { module: 'acessoraTurma', action: 'edit' },
+    autorizarPendencia: { module: 'autorizacaoPendencia', action: 'edit' },
+    assinarTestemunha: { module: 'assinarTestemunha', action: 'edit' },
 };
 
 export const PERMISSION_KEYS = Object.keys(PERMISSION_KEY_MAP) as PermissionKey[];
@@ -108,7 +114,7 @@ export const FUNCTION_PRIORITY: Record<string, number> = {
 };
 
 export const PERMISSIONS_MATRIX_CONFIG_KEY = 'permissions_matrix';
-export const PERMISSIONS_MATRIX_VERSION = 4;
+export const PERMISSIONS_MATRIX_VERSION = 5;
 export const PERMISSION_METADATA_KEY = 'required_permission';
 
 export function getFunctionPriority(funcao: string): number {

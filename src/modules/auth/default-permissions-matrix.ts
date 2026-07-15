@@ -1,6 +1,8 @@
 import { EFuncoes, ESetores } from '../config/entities/enum';
 import {
     createEmptyRolePermissions,
+    FUNCTION_PRIORITY,
+    getFunctionPriority,
     grantFullAccess,
     grantModule,
     PADRAO_SETOR_KEY,
@@ -17,6 +19,22 @@ const LIDER_FUNCOES = [
     EFuncoes.LIDER_DE_MASTERCLASS,
     EFuncoes.LIDER_DE_CONFRONTO,
 ] as const;
+
+/** Colaborador e funções com prioridade maior (STAFF/estagiário ficam de fora). */
+const COLABORADOR_MIN_PRIORITY = FUNCTION_PRIORITY.COLABORADOR;
+
+/** Autorizar pendência de pagamento e assinar como testemunha. */
+function grantPendenciaETestemunha(role: RolePermissions): RolePermissions {
+    let next = grantModule(role, 'autorizacaoPendencia', ['view', 'edit']);
+    next = grantModule(next, 'assinarTestemunha', ['view', 'edit']);
+    return next;
+}
+
+function shouldGrantPendenciaETestemunha(setor: ESetores, funcao: string): boolean {
+    if (setor !== ESetores.EXPANSAO_NEGOCIOS) return false;
+    if (funcao === PADRAO_SETOR_KEY) return true;
+    return getFunctionPriority(funcao) >= COLABORADOR_MIN_PRIORITY;
+}
 
 function buildLiderPermissions(setor: ESetores): RolePermissions {
     let role = createEmptyRolePermissions();
@@ -160,6 +178,12 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
             }
 
             sectorRow[funcao] = buildSetorPadrao(setor);
+        }
+
+        for (const [funcao, role] of Object.entries(sectorRow)) {
+            if (shouldGrantPendenciaETestemunha(setor, funcao)) {
+                sectorRow[funcao] = grantPendenciaETestemunha(role);
+            }
         }
 
         matrix[setor] = sectorRow;

@@ -33,9 +33,10 @@ export class DocumentosController {
         return this.documentosService.createDocumento(createDocumentoDto, userId);
     }
 
+    // Leitura liberada a qualquer autenticado: a finalização da venda busca o
+    // template de contrato do produto aqui e qualquer usuário pode vender.
     @Get()
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async findAllDocumentos(
         @Query('page', ParseIntPipe) page: number = 1,
         @Query('limit', ParseIntPipe) limit: number = 10,
@@ -161,9 +162,10 @@ export class DocumentosController {
         return { message: 'Teste público funcionando!', timestamp: new Date().toISOString() };
     }
 
+    // Criação de contrato liberada a qualquer autenticado: qualquer usuário
+    // pode atuar como staff/vendedor no fluxo de venda.
     @Post('zapsign/criar-contrato')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'create' })
+    @UseGuards(JwtAuthGuard)
     async criarContratoZapSign(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
         try {
             console.log('=== CRIANDO CONTRATO NO ZAPSIGN ===');
@@ -194,8 +196,7 @@ export class DocumentosController {
 
     // Endpoint público para teste (TEMPORÁRIO)
     @Post('public/criar-contrato')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async criarContratoZapSignPublico(@Body() criarContratoDto: CriarContratoZapSignDto, @Req() req: Request): Promise<RespostaContratoZapSignDto> {
         console.log('Criando contrato no ZapSign para aluno (público):', criarContratoDto.id_aluno);
         const userId = (req.user as any)?.sub;
@@ -409,8 +410,7 @@ export class DocumentosController {
 
     // Endpoint para salvar assinatura (para compatibilidade com frontend)
     @Post('salvar-assinatura')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     salvarAssinatura(@Body() signatureData: any) {
         return this.documentosService.salvarAssinatura(signatureData);
     }
@@ -521,9 +521,10 @@ export class DocumentosController {
     }
 
     // Endpoint para enviar contrato por email
+    // Modal final da venda (enviar contrato por e-mail) funciona para qualquer
+    // usuário que esteja realizando a venda.
     @Post('enviar-email')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async enviarContratoPorEmail(@Body() body: { email: string; nomeSignatario: string; signingUrl: string }): Promise<{ message: string }> {
         try {
             await this.documentosService.enviarContratoPorEmail(body.email, body.nomeSignatario, body.signingUrl);
@@ -535,8 +536,7 @@ export class DocumentosController {
     }
 
     @Post('sincronizar-status-zapsign/:contratoId')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async sincronizarStatusZapSign(@Param('contratoId') contratoId: string): Promise<{
         message: string;
         status: string;

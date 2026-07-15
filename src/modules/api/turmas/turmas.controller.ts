@@ -186,9 +186,10 @@ export class TurmasController {
         return this.turmasService.getAlunoTurmaHistorico(id_turma_aluno);
     }
 
+    // Observações da venda (Histórico de Vendas) são gravadas no histórico do
+    // aluno por qualquer usuário que esteja vendendo — apenas JWT.
     @Post('alunos/:id_turma_aluno/logs')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'alunosNaTurma', action: 'edit' })
+    @UseGuards(JwtAuthGuard)
     async createAlunoTurmaHistorico(
         @Param('id_turma_aluno') id_turma_aluno: string,
         @Body() dto: CreateAlunoTurmaHistoricoDto,
@@ -472,18 +473,24 @@ export class TurmasController {
         return this.turmasService.updateTurmaAcessora(id_turma, dto?.id_acessora ?? null, userId);
     }
 
+    // ADICIONAR aluno a turma é liberado para QUALQUER usuário autenticado:
+    // o fluxo de venda (finalizar venda, inscrições adicionais, bônus e a
+    // edição de quantidade no Histórico de Vendas) matricula alunos e qualquer
+    // usuário pode atuar como staff/vendedor — sem exigência de permissão.
     @Post(':id/alunos')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'alunosNaTurma', action: 'create' })
+    @UseGuards(JwtAuthGuard)
     async addAlunoTurma(@Param('id', ParseIntPipe) id_turma: number, @Body() addAlunoDto: AddAlunoTurmaDto, @Req() req: any): Promise<AlunoTurmaResponseDto> {
         console.log('Adicionando aluno à turma:', id_turma, 'aluno:', addAlunoDto);
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.addAlunoTurma(id_turma, addAlunoDto, userId);
     }
 
+    // Atualização da matrícula liberada a qualquer autenticado: a edição de
+    // venda no Histórico grava quantidade de inscrições/outros clientes/
+    // pendência aqui. As regras de domínio (turma congelada, inadimplente,
+    // acessora) continuam validadas no service.
     @Put(':id/alunos/:id_turma_aluno')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'alunosNaTurma', action: 'edit' })
+    @UseGuards(JwtAuthGuard)
     async updateAlunoTurma(
         @Param('id', ParseIntPipe) id_turma: number,
         @Param('id_turma_aluno') id_turma_aluno: string,

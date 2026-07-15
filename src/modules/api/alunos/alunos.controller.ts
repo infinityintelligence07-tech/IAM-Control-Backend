@@ -16,8 +16,11 @@ import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
 import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 
+// Leitura, criação e edição de alunos ficam liberadas a qualquer autenticado:
+// o fluxo de venda (aberto a todos — qualquer um pode ser staff) usa o
+// autocomplete de alunos, cria réplicas/bônus e completa dados faltantes.
+// Apenas exclusão/soft delete e vínculos/empresas seguem na matriz de permissões.
 @UseGuards(JwtAuthGuard, PermissionsGuard)
-@RequirePermission({ module: 'alunos', action: 'view' })
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('alunos')
 export class AlunosController {
@@ -58,14 +61,12 @@ export class AlunosController {
     }
 
     @Post()
-    @RequirePermission({ module: 'alunos', action: 'create' })
     async create(@Body() createAlunoDto: CreateAlunoDto): Promise<AlunoResponseDto> {
         console.log('Criando aluno:', createAlunoDto);
         return this.alunosService.create(createAlunoDto);
     }
 
     @Put(':id')
-    @RequirePermission({ module: 'alunos', action: 'edit' })
     async update(@Param('id', ParseIntPipe) id: number, @Body() updateAlunoDto: UpdateAlunoDto): Promise<AlunoResponseDto> {
         console.log('Atualizando aluno ID:', id, 'Dados:', updateAlunoDto);
         return this.alunosService.update(id, updateAlunoDto);

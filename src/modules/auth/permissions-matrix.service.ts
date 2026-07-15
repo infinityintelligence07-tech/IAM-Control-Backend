@@ -269,6 +269,8 @@ export class PermissionsMatrixService {
      * v3: libera alunos.create onde o padrão já prevê create.
      * v4: libera alunosNaTurma.create (inserir aluno na turma) onde o padrão prevê create.
      * v5: libera autorizacaoPendencia/assinarTestemunha onde o padrão prevê (Expansão de Negócios, colaborador+).
+     * v6: quem pode criar vendas ganha documentos view/create/edit (finalizar a venda
+     *     busca o template em GET /documentos e emite o contrato em POST zapsign/criar-contrato).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -336,10 +338,29 @@ export class PermissionsMatrixService {
                         };
                     }
                 }
+
+                if (fromVersion < 6) {
+                    this.aplicarInvarianteVendasDocumentos(role);
+                }
             }
         }
 
         return next;
+    }
+
+    /**
+     * Invariante de consistência: vendas.create ⇒ documentos view/create/edit.
+     * Sem documentos, o vendedor consegue preencher toda a venda mas o finalizar
+     * falha com 403 (GET /documentos exige view; criar-contrato exige create).
+     */
+    private aplicarInvarianteVendasDocumentos(role: RolePermissions): void {
+        if (!role.vendas?.create) return;
+        role.documentos = {
+            view: true,
+            create: true,
+            edit: true,
+            delete: Boolean(role.documentos?.delete),
+        };
     }
 
     private normalizeMatrix(raw: unknown): PermissionsMatrix | null {
@@ -354,7 +375,9 @@ export class PermissionsMatrixService {
 
             for (const [funcao, role] of Object.entries(funcoes)) {
                 if (!funcao) continue;
-                normalized[setor][funcao] = this.normalizeRole(role);
+                const normalizedRole = this.normalizeRole(role);
+                this.aplicarInvarianteVendasDocumentos(normalizedRole);
+                normalized[setor][funcao] = normalizedRole;
             }
 
             if (!normalized[setor][PADRAO_SETOR_KEY]) {

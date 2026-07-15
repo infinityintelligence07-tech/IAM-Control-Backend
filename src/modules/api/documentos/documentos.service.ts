@@ -40,14 +40,70 @@ const parsePositiveIntEnv = (value: string | undefined, fallback: number): numbe
     return Math.floor(parsed);
 };
 
+type ResumoHistoricoVendas = {
+    total_inscricoes_vendidas: number;
+    total_inscricoes_bonus: number;
+    total_com_pendencia: number;
+    receita_total: number;
+    ranking_staff_lider: Array<{
+        lider_id: string;
+        lider_nome: string;
+        total_inscricoes: number;
+        total_vendas: number;
+        times: string[];
+        vendedores: Array<{
+            id: string;
+            nome: string;
+            total_inscricoes: number;
+            total_vendas: number;
+        }>;
+    }>;
+    inscricoes_sem_lider: {
+        total_inscricoes: number;
+        total_vendas: number;
+        vendedores: Array<{
+            vendedor_id: string;
+            vendedor_nome: string;
+            total_inscricoes: number;
+            total_vendas: number;
+        }>;
+    };
+};
+
+type LinhaHistoricoVendasResumo = {
+    id: string;
+    criado_em?: string | Date | null;
+    dados_contrato?: unknown;
+    criado_por_contrato?: string | number | null;
+    criado_por_tat?: string | number | null;
+    criado_por_ta?: string | number | null;
+    quantidade_inscricoes?: string | number;
+    outros_clientes?: unknown;
+    pendencia_pagamento?: string | boolean;
+    id_turma?: string | number | null;
+    id_turma_destino?: string | number | null;
+    hist_qtd_inscricoes?: string | number | null;
+    hist_qtd_bonus?: string | number | null;
+    hist_pendencia_pagamento?: string | boolean | null;
+    hist_receita_total?: string | number | null;
+    hist_vendedor_id?: string | number | null;
+};
+
 @Injectable()
 export class DocumentosService {
     private readonly logger = new Logger(DocumentosService.name);
     private readonly estiloPadraoClausulas = "font-size: 11px; font-family: 'Times New Roman', Times, serif; margin: 0; padding: 0;";
     private readonly opcoesOrigemCacheTtlMs = 60000;
     private readonly opcoesOrigemCacheMaxEntradas = 200;
-    private readonly contratosBancoCacheTtlMs = 15000;
-    private readonly contratosBancoCacheMaxEntradas = 40;
+    // Listagem: TTL maior porque mutações já invalidam o cache; 15s quase não hitava.
+    private readonly contratosBancoCacheTtlMs = 60000;
+    private readonly contratosBancoCacheMaxEntradas = 80;
+    // Resumo/ranking: custo alto (full-scan). Cache separado da paginação e TTL maior.
+    private readonly resumoHistoricoCacheTtlMs = 180000;
+    private readonly resumoHistoricoCacheMaxEntradas = 60;
+    // Versão local: evita 2× MAX(atualizado_em) full-table a cada request.
+    // Mutações do histórico incrementam a versão (e o admin/cache/clear também).
+    private historicoVendasCacheVersao = 0;
     // Valor sentinela usado pelo filtro "Staff Líder" para agrupar as vendas
     // que não se vinculam a nenhum líder de time de Imersão Prosperar
     // (ex.: vendas de Masterclass sem time/líder definido).
@@ -78,36 +134,15 @@ export class DocumentosService {
                 page: number;
                 limit: number;
                 totalPages: number;
-                resumo: {
-                    total_inscricoes_vendidas: number;
-                    total_inscricoes_bonus: number;
-                    total_com_pendencia: number;
-                    receita_total: number;
-                    ranking_staff_lider: Array<{
-                        lider_id: string;
-                        lider_nome: string;
-                        total_inscricoes: number;
-                        total_vendas: number;
-                        times: string[];
-                        vendedores: Array<{
-                            id: string;
-                            nome: string;
-                            total_inscricoes: number;
-                            total_vendas: number;
-                        }>;
-                    }>;
-                    inscricoes_sem_lider: {
-                        total_inscricoes: number;
-                        total_vendas: number;
-                        vendedores: Array<{
-                            vendedor_id: string;
-                            vendedor_nome: string;
-                            total_inscricoes: number;
-                            total_vendas: number;
-                        }>;
-                    };
-                };
+                resumo: ResumoHistoricoVendas | null;
             };
+        }
+    >();
+    private readonly resumoHistoricoCache = new Map<
+        string,
+        {
+            expiresAt: number;
+            value: ResumoHistoricoVendas;
         }
     >();
 
@@ -925,8 +960,10 @@ export class DocumentosService {
                 criado_por: userId,
                 atualizado_por: userId,
             });
+            Object.assign(contrato, this.montarColunasHistoricoVenda(contrato.dados_contrato, userId));
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
+            this.invalidarCachesHistoricoVendas();
 
             // Mapear signers com informações completas incluindo testemunhas
             const signersResponse = signers.map((signer, index) => {
@@ -2814,6 +2851,69 @@ export class DocumentosService {
         return 'EVENTOS';
     }
 
+    /**
+     * Deriva as colunas materializadas do Histórico de Vendas a partir do JSON
+     * `dados_contrato` (+ criado_por). Mantém listagem/resumo/filtros sem parse
+     * de blobs/cláusulas em runtime.
+     */
+    private montarColunasHistoricoVenda(
+        dadosContratoRaw: Record<string, any> | null | undefined,
+        criadoPor?: number | string | null,
+    ): {
+        hist_qtd_inscricoes: number;
+        hist_qtd_bonus: number;
+        hist_pendencia_pagamento: boolean;
+        hist_receita_total: number;
+        hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        hist_treinamento_origem: string | null;
+        hist_turma_origem: string | null;
+        hist_turma_destino: string | null;
+        hist_vendedor_id: number | null;
+    } {
+        const dadosContrato = dadosContratoRaw || {};
+        const contratoFake = { dados_contrato: dadosContrato };
+        const turmaAluno = dadosContrato?.turma_aluno || {};
+        const camposVariaveis = (dadosContrato?.campos_variaveis || {}) as Record<string, string>;
+        const contratoMapeado = {
+            turma_aluno: {
+                quantidade_inscricoes: Number(turmaAluno?.quantidade_inscricoes ?? 1) || 1,
+                outros_clientes: Array.isArray(turmaAluno?.outros_clientes) ? turmaAluno.outros_clientes : [],
+                pendencia_pagamento: Boolean(turmaAluno?.pendencia_pagamento),
+            },
+            dados_contrato: dadosContrato,
+        };
+        const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoFake) || '').trim();
+        const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoFake) || '').trim();
+        const turmaDestino = String(this.extrairTurmaDestinoServidor(contratoFake) || '').trim();
+        const criadoPorConfronto = dadosContrato?.criado_por_confronto || {};
+        const vendedorCandidatos = [
+            criadoPorConfronto?.consolidado,
+            criadoPor,
+            dadosContrato?.criado_por,
+            criadoPorConfronto?.contrato,
+        ];
+        let histVendedorId: number | null = null;
+        for (const candidato of vendedorCandidatos) {
+            const id = Number(candidato);
+            if (Number.isFinite(id) && id > 0) {
+                histVendedorId = id;
+                break;
+            }
+        }
+
+        return {
+            hist_qtd_inscricoes: this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado),
+            hist_qtd_bonus: this.obterQuantidadeInscricoesBonusResumoHistorico(contratoMapeado),
+            hist_pendencia_pagamento: Boolean(turmaAluno?.pendencia_pagamento),
+            hist_receita_total: this.obterValorTotalVendaResumo(dadosContrato),
+            hist_canal_venda: this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis),
+            hist_treinamento_origem: treinamentoOrigem ? treinamentoOrigem.slice(0, 255) : null,
+            hist_turma_origem: turmaOrigem ? turmaOrigem.slice(0, 255) : null,
+            hist_turma_destino: turmaDestino ? turmaDestino.slice(0, 255) : null,
+            hist_vendedor_id: histVendedorId,
+        };
+    }
+
     private extrairTreinamentoOrigemServidor(contrato: any): string {
         const dadosContrato = contrato?.dados_contrato || {};
         const camposVariaveis = contrato?.dados_contrato?.campos_variaveis || {};
@@ -3028,21 +3128,34 @@ export class DocumentosService {
         }
     }
 
+    private invalidarCachesHistoricoVendas(): void {
+        this.historicoVendasCacheVersao += 1;
+        this.contratosBancoCache.clear();
+        this.resumoHistoricoCache.clear();
+    }
+
     limparCachesHistorico(): {
         contratosBancoRemovidos: number;
         opcoesOrigemRemovidas: number;
+        resumoHistoricoRemovidos: number;
+        versao: number;
     } {
         const contratosBancoRemovidos = this.contratosBancoCache.size;
         const opcoesOrigemRemovidas = this.opcoesOrigemCache.size;
+        const resumoHistoricoRemovidos = this.resumoHistoricoCache.size;
 
-        this.contratosBancoCache.clear();
+        this.invalidarCachesHistoricoVendas();
         this.opcoesOrigemCache.clear();
 
-        this.logger.log(`contract.cache.clear | contratosBanco=${contratosBancoRemovidos} opcoesOrigem=${opcoesOrigemRemovidas}`);
+        this.logger.log(
+            `contract.cache.clear | contratosBanco=${contratosBancoRemovidos} opcoesOrigem=${opcoesOrigemRemovidas} resumo=${resumoHistoricoRemovidos} versao=${this.historicoVendasCacheVersao}`,
+        );
 
         return {
             contratosBancoRemovidos,
             opcoesOrigemRemovidas,
+            resumoHistoricoRemovidos,
+            versao: this.historicoVendasCacheVersao,
         };
     }
 
@@ -3093,8 +3206,9 @@ export class DocumentosService {
         dadosContrato.campos_variaveis = camposVariaveis;
         await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
             dados_contrato: dadosContrato,
+            ...this.montarColunasHistoricoVenda(dadosContrato, contrato.criado_por),
         });
-        this.contratosBancoCache.clear();
+        this.invalidarCachesHistoricoVendas();
 
         return { atualizado: true };
     }
@@ -3123,7 +3237,7 @@ export class DocumentosService {
         await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
             dados_contrato: dadosContrato,
         });
-        this.contratosBancoCache.clear();
+        this.invalidarCachesHistoricoVendas();
 
         return { atualizado: true };
     }
@@ -3151,7 +3265,7 @@ export class DocumentosService {
             comprovantes_pagamento: comprovantesArray.length > 0 ? comprovantesArray : null,
             dados_contrato: dadosContrato,
         });
-        this.contratosBancoCache.clear();
+        this.invalidarCachesHistoricoVendas();
 
         return { atualizado: true, total: comprovantesArray.length };
     }
@@ -3206,30 +3320,15 @@ export class DocumentosService {
         dadosContrato.campos_variaveis = camposVariaveis;
         await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
             dados_contrato: dadosContrato,
+            ...this.montarColunasHistoricoVenda(dadosContrato, contrato.criado_por),
         });
-        this.contratosBancoCache.clear();
+        this.invalidarCachesHistoricoVendas();
 
         return { atualizado: true };
     }
 
-    private async obterMarcadorAtualizacaoHistorico(): Promise<string> {
-        const [contratoRaw, turmaAlunoRaw] = await Promise.all([
-            this.uow.turmasAlunosTreinamentosContratosRP
-                .createQueryBuilder('contrato')
-                .select('COALESCE(MAX(contrato.atualizado_em), MAX(contrato.criado_em), NOW())', 'max_atualizacao')
-                .where('contrato.deletado_em IS NULL')
-                .getRawOne<{ max_atualizacao?: string | Date }>(),
-            this.uow.turmasAlunosRP
-                .createQueryBuilder('turma_aluno')
-                .select('COALESCE(MAX(turma_aluno.atualizado_em), MAX(turma_aluno.criado_em), NOW())', 'max_atualizacao')
-                .where('turma_aluno.deletado_em IS NULL')
-                .getRawOne<{ max_atualizacao?: string | Date }>(),
-        ]);
-
-        const marcadorContrato = contratoRaw?.max_atualizacao ? new Date(contratoRaw.max_atualizacao).toISOString() : '0';
-        const marcadorTurmaAluno = turmaAlunoRaw?.max_atualizacao ? new Date(turmaAlunoRaw.max_atualizacao).toISOString() : '0';
-
-        return `${marcadorContrato}|${marcadorTurmaAluno}`;
+    private obterMarcadorAtualizacaoHistorico(): string {
+        return String(this.historicoVendasCacheVersao);
     }
 
     async listarOpcoesFiltrosOrigem(filtros?: {
@@ -3269,49 +3368,6 @@ export class DocumentosService {
         const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
         const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
 
-        // Consulta enxuta via QueryBuilder: seleciona apenas as colunas usadas
-        // para montar as opções de filtro. O `find` com relações carregava a
-        // entidade completa do contrato (colunas TEXT pesadas como
-        // assinatura/foto base64) e do aluno (url_foto), o que estourava o
-        // timeout do frontend — especialmente no modo "turma" (sem período),
-        // que percorre TODOS os contratos.
-        const contratosQuery = this.uow.turmasAlunosTreinamentosContratosRP
-            .createQueryBuilder('contrato')
-            .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
-            .leftJoin('tat.id_turma_aluno_fk', 'turma_aluno')
-            .leftJoin('turma_aluno.id_aluno_fk', 'aluno')
-            .leftJoin('turma_aluno.id_turma_fk', 'turma_destino')
-            .leftJoin('turma_destino.id_treinamento_fk', 'treinamento_destino')
-            .select([
-                'contrato.id',
-                'contrato.dados_contrato',
-                'contrato.zapsign_document_status',
-                'contrato.criado_em',
-                'tat.id',
-                'tat.id_turma_destino',
-                'turma_aluno.id',
-                'turma_aluno.id_turma',
-                'turma_aluno.pendencia_pagamento',
-                'aluno.id',
-                'aluno.nome',
-                'aluno.email',
-                'turma_destino.id',
-                'turma_destino.edicao_turma',
-                'treinamento_destino.id',
-                'treinamento_destino.treinamento',
-            ])
-            .where('contrato.deletado_em IS NULL')
-            .orderBy('contrato.criado_em', 'DESC');
-
-        if (aplicarFiltroPeriodo) {
-            contratosQuery.andWhere('contrato.criado_em BETWEEN :dataInicioPeriodo AND :dataFimPeriodo', {
-                dataInicioPeriodo,
-                dataFimPeriodo,
-            });
-        }
-
-        const contratos = await contratosQuery.getMany();
-
         const termoBusca = this.normalizarTexto(filtros?.search);
         const treinamentoOrigemSelecionado = this.normalizarTexto(filtros?.treinamento_origem);
         const canalVendaFiltro = filtros?.canal_venda || '';
@@ -3328,91 +3384,55 @@ export class DocumentosService {
             const nome = normalizarComparacao(turma);
             return !nome || termosTurmaInvalidos.some((termo) => nome.includes(termo));
         };
-        const idsTurmaOrigemViaDadosContrato = Array.from(
-            new Set(
-                contratos
-                    .map((contrato) => {
-                        const dadosContrato = (contrato as any)?.dados_contrato || {};
-                        return Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0);
-                    })
-                    .filter((id) => Number.isFinite(id) && id > 0),
-            ),
-        );
-        const turmasOrigemPorId = new Map<
-            number,
-            {
-                treinamento: string;
-                turma: string;
-                data_inicio: Date | string | null;
-            }
-        >();
-        if (idsTurmaOrigemViaDadosContrato.length > 0) {
-            // `withDeleted` para resolver também turmas com soft delete: a query
-            // de listagem resolve o nome via join (que traz a turma removida),
-            // então as opções do filtro precisam bater com esse mesmo rótulo
-            // "Treinamento - Edição" — caso contrário a opção cairia no texto
-            // cru dos campos_variaveis (ex.: só o número da edição) e nunca
-            // casaria no filtro.
-            const turmasOrigemViaDadosContrato = await this.uow.turmasRP.find({
-                where: {
-                    id: In(idsTurmaOrigemViaDadosContrato),
-                },
-                relations: ['id_treinamento_fk'],
-                withDeleted: true,
-            });
-            turmasOrigemViaDadosContrato.forEach((turma) => {
-                const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
-                const edicao = String(turma?.edicao_turma || '').trim();
-                const turmaFormatada = this.formatarTurmaHistorico(treinamento, edicao);
-                turmasOrigemPorId.set(turma.id, {
-                    treinamento,
-                    turma: turmaFormatada,
-                    data_inicio: turma?.data_inicio ?? null,
-                });
+
+        // Path rápido: colunas materializadas (sem dados_contrato JSON).
+        const opcoesQb = this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('contrato')
+            .select('contrato.hist_treinamento_origem', 'treinamento_origem')
+            .addSelect('contrato.hist_turma_origem', 'turma_origem')
+            .addSelect('contrato.hist_turma_destino', 'turma_destino')
+            .addSelect('contrato.hist_canal_venda', 'canal_venda')
+            .addSelect('contrato.hist_pendencia_pagamento', 'pendencia_pagamento')
+            .addSelect(`LOWER(COALESCE(contrato.zapsign_document_status->>'status', ''))`, 'status_documento')
+            .where('contrato.deletado_em IS NULL');
+
+        if (aplicarFiltroPeriodo) {
+            opcoesQb.andWhere('contrato.criado_em BETWEEN :dataInicioPeriodo AND :dataFimPeriodo', {
+                dataInicioPeriodo,
+                dataFimPeriodo,
             });
         }
 
-        const idsTurmaDestinoViaDadosContrato = Array.from(
-            new Set(
-                contratos
-                    .map((contrato) => {
-                        const dadosContrato = (contrato as any)?.dados_contrato || {};
-                        const turmaAluno = (contrato as any)?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
-                        const idViaRelacao = Number(turmaAluno?.id_turma_fk?.id || turmaAluno?.id_turma || 0);
-                        const idViaTat = Number((contrato as any)?.id_turma_aluno_treinamento_fk?.id_turma_destino || 0);
-                        const idViaDados = Number(dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || dadosContrato?.turma?.id || 0);
-                        return idViaDados || idViaTat || idViaRelacao;
-                    })
-                    .filter((id) => Number.isFinite(id) && id > 0),
-            ),
-        );
-        const turmasDestinoPorId = new Map<
-            number,
-            {
-                treinamento: string;
-                turma: string;
-            }
-        >();
-        if (idsTurmaDestinoViaDadosContrato.length > 0) {
-            // `withDeleted` pelos mesmos motivos da resolução de origem: manter
-            // o rótulo "Treinamento - Edição" consistente com a query de
-            // listagem, evitando opções ("110") que não casam no filtro.
-            const turmasDestinoViaDadosContrato = await this.uow.turmasRP.find({
-                where: {
-                    id: In(idsTurmaDestinoViaDadosContrato),
-                },
-                relations: ['id_treinamento_fk'],
-                withDeleted: true,
-            });
-            turmasDestinoViaDadosContrato.forEach((turma) => {
-                const treinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
-                const edicao = String(turma?.edicao_turma || '').trim();
-                turmasDestinoPorId.set(turma.id, {
-                    treinamento,
-                    turma: this.formatarTurmaHistorico(treinamento, edicao),
-                });
-            });
+        if (termoBusca) {
+            opcoesQb
+                .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+                .leftJoin('tat.id_turma_aluno_fk', 'turma_aluno')
+                .leftJoin('turma_aluno.id_aluno_fk', 'aluno')
+                .addSelect('aluno.nome', 'aluno_nome')
+                .addSelect('aluno.email', 'aluno_email')
+                .addSelect(`contrato.dados_contrato->'aluno'->>'nome'`, 'aluno_nome_snapshot')
+                .addSelect(`contrato.dados_contrato->'aluno'->>'email'`, 'aluno_email_snapshot');
         }
+
+        if (canalVendaFiltro) {
+            opcoesQb.andWhere('contrato.hist_canal_venda = :canalVendaFiltro', { canalVendaFiltro });
+        }
+        if (somentePendenciaAtivo) {
+            opcoesQb.andWhere('contrato.hist_pendencia_pagamento = true');
+        }
+
+        const linhasOpcoes = await opcoesQb.getRawMany<{
+            treinamento_origem?: string | null;
+            turma_origem?: string | null;
+            turma_destino?: string | null;
+            canal_venda?: string | null;
+            pendencia_pagamento?: boolean | string | null;
+            status_documento?: string | null;
+            aluno_nome?: string | null;
+            aluno_email?: string | null;
+            aluno_nome_snapshot?: string | null;
+            aluno_email_snapshot?: string | null;
+        }>();
 
         const turmasCadastradas = await this.uow.turmasRP.find({
             where: {
@@ -3434,62 +3454,35 @@ export class DocumentosService {
         const treinamentos = new Set<string>();
         const turmasOrigem = new Set<string>();
         const turmasDestino = new Set<string>();
-        // Mapa origem -> destinos com vendas: usado para filtrar as turmas de
-        // destino conforme a(s) turma(s) de origem selecionada(s) no frontend.
         const turmasDestinoPorOrigem = new Map<string, Set<string>>();
 
-        contratos.forEach((contrato) => {
-            const contratoAny = contrato as any;
-            const turmaAluno = contratoAny?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
-            const alunoRelacao = turmaAluno?.id_aluno_fk;
-            const dadosContrato = contratoAny?.dados_contrato || {};
-            const camposVariaveis = dadosContrato?.campos_variaveis || {};
-            const idTurmaOrigemViaDadosContrato =
-                Number(dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0) || 0;
-            const fallbackOrigemViaId = turmasOrigemPorId.get(idTurmaOrigemViaDadosContrato);
-            const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoAny) || fallbackOrigemViaId?.treinamento || '').trim();
-            const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoAny) || fallbackOrigemViaId?.turma || '').trim();
-            const idTurmaDestinoViaDadosContrato =
-                Number(
-                    dadosContrato?.fluxo_evento_destino_id_turma ||
-                        dadosContrato?.id_turma_destino ||
-                        dadosContrato?.turma?.id ||
-                        turmaAluno?.id_turma_fk?.id ||
-                        turmaAluno?.id_turma ||
-                        contratoAny?.id_turma_aluno_treinamento_fk?.id_turma_destino ||
-                        0,
-                ) || 0;
-            const fallbackDestinoViaId = turmasDestinoPorId.get(idTurmaDestinoViaDadosContrato);
-            // A turma de destino é sempre listada como "Treinamento - Edição";
-            // por isso a resolução pela turma (id -> treinamento + edição) tem
-            // prioridade sobre os textos crus de campos_variaveis (que muitas
-            // vezes guardam só o número da edição).
-            const turmaDestino = String(fallbackDestinoViaId?.turma || this.extrairTurmaDestinoServidor(contratoAny) || '').trim();
-            const nomeAluno = this.normalizarTexto(alunoRelacao?.nome || dadosContrato?.aluno?.nome);
-            const emailAluno = this.normalizarTexto(alunoRelacao?.email || dadosContrato?.aluno?.email);
-            const pendenciaPagamento = Boolean(turmaAluno?.pendencia_pagamento || dadosContrato?.turma_aluno?.pendencia_pagamento);
-            const statusDocumento = contratoAny?.zapsign_document_status?.status || '';
+        linhasOpcoes.forEach((linha) => {
+            const treinamentoOrigem = String(linha.treinamento_origem || '').trim();
+            const turmaOrigem = String(linha.turma_origem || '').trim();
+            const turmaDestino = String(linha.turma_destino || '').trim();
+            const statusDocumento = String(linha.status_documento || '');
             const concluido = this.statusContratoEhConcluido(statusDocumento);
-            const canalVenda = this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis);
 
-            const matchBusca = !termoBusca || nomeAluno.includes(termoBusca) || emailAluno.includes(termoBusca);
-            const matchCanal = !canalVendaFiltro || canalVenda === canalVendaFiltro;
-            const matchPendencia = !somentePendenciaAtivo || pendenciaPagamento;
-            const matchStatus = !statusFiltro || statusFiltro === 'all' || (statusFiltro === 'completed' ? concluido : !concluido);
-            if (!(matchBusca && matchCanal && matchPendencia && matchStatus)) {
-                return;
+            if (termoBusca) {
+                const nomeAluno = this.normalizarTexto(linha.aluno_nome || linha.aluno_nome_snapshot);
+                const emailAluno = this.normalizarTexto(linha.aluno_email || linha.aluno_email_snapshot);
+                if (!nomeAluno.includes(termoBusca) && !emailAluno.includes(termoBusca)) {
+                    return;
+                }
             }
+
+            const matchStatus = !statusFiltro || statusFiltro === 'all' || (statusFiltro === 'completed' ? concluido : !concluido);
+            if (!matchStatus) return;
 
             if (treinamentoOrigem) {
                 treinamentos.add(treinamentoOrigem);
             }
 
-            const origemElegivelPorId = idTurmaOrigemViaDadosContrato > 0 ? this.turmaHistoricoOrigemElegivel(fallbackOrigemViaId?.data_inicio ?? null) : false;
             const origemElegivelPorNome = turmasOrigemElegiveisPorNome.has(this.normalizarTexto(turmaOrigem));
             if (
                 turmaOrigem &&
                 !turmaEhInvalida(turmaOrigem) &&
-                (origemElegivelPorId || origemElegivelPorNome) &&
+                (origemElegivelPorNome || Boolean(treinamentoOrigem)) &&
                 (!treinamentoOrigemSelecionado || this.normalizarTexto(treinamentoOrigem) === treinamentoOrigemSelecionado)
             ) {
                 turmasOrigem.add(turmaOrigem);
@@ -3497,7 +3490,6 @@ export class DocumentosService {
 
             if (turmaDestino && !turmaEhInvalida(turmaDestino)) {
                 turmasDestino.add(turmaDestino);
-
                 if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
                     const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
                     destinosDaOrigem.add(turmaDestino);
@@ -3505,11 +3497,6 @@ export class DocumentosService {
                 }
             }
         });
-
-        // A lista de turmas de origem deve conter SOMENTE as turmas que
-        // efetivamente tiveram venda (populadas no laço acima), não todas as
-        // turmas cadastradas/elegíveis. O mapa `turmasOrigemElegiveisPorNome`
-        // continua sendo usado apenas como filtro de elegibilidade das vendas.
 
         const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
         const turmasOrigemOrdenadas = this.ordenarListaTurmasHistorico(turmasOrigem);
@@ -3683,11 +3670,15 @@ export class DocumentosService {
     }
 
     private obterCriadoPorResumoHistorico(row: {
-        dados_contrato: unknown;
+        dados_contrato?: unknown;
         criado_por_contrato?: string | number | null;
         criado_por_tat?: string | number | null;
         criado_por_ta?: string | number | null;
+        hist_vendedor_id?: string | number | null;
     }): string {
+        const histVendedor = String(row.hist_vendedor_id ?? '').trim();
+        if (histVendedor) return histVendedor;
+
         const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
         const criadoPorConfronto = dadosContrato?.criado_por_confronto || {};
         const candidatos = [
@@ -3707,7 +3698,11 @@ export class DocumentosService {
         return '';
     }
 
-    private obterIdsTurmasResumoHistorico(row: { dados_contrato: unknown; id_turma?: string | number | null; id_turma_destino?: string | number | null }): number[] {
+    private obterIdsTurmasResumoHistorico(row: {
+        dados_contrato?: unknown;
+        id_turma?: string | number | null;
+        id_turma_destino?: string | number | null;
+    }): number[] {
         const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
         const candidatos = [
             row.id_turma,
@@ -3721,26 +3716,71 @@ export class DocumentosService {
         return Array.from(new Set(candidatos.map((valor) => Number(valor)).filter((valor) => Number.isFinite(valor) && valor > 0)));
     }
 
+    private obterMetricasLinhaHistorico(row: LinhaHistoricoVendasResumo): {
+        quantidadeInscricoes: number;
+        quantidadeBonus: number;
+        pendenciaPagamento: boolean;
+        valorTotalVenda: number;
+    } {
+        const histQtd = Number(row.hist_qtd_inscricoes);
+        const histBonus = Number(row.hist_qtd_bonus);
+        const histReceita = Number(row.hist_receita_total);
+        const temHist =
+            row.hist_qtd_inscricoes !== null &&
+            row.hist_qtd_inscricoes !== undefined &&
+            (Number.isFinite(histQtd) ||
+                Number.isFinite(histBonus) ||
+                row.hist_pendencia_pagamento !== null ||
+                Number.isFinite(histReceita));
+
+        if (temHist) {
+            return {
+                quantidadeInscricoes: Number.isFinite(histQtd) && histQtd > 0 ? histQtd : 1,
+                quantidadeBonus: Number.isFinite(histBonus) && histBonus > 0 ? histBonus : 0,
+                pendenciaPagamento:
+                    row.hist_pendencia_pagamento === true || String(row.hist_pendencia_pagamento).toLowerCase() === 'true',
+                valorTotalVenda: Number.isFinite(histReceita) && histReceita > 0 ? histReceita : 0,
+            };
+        }
+
+        // Fallback legado (pré-materialização).
+        const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
+        const turmaAlunoDados = dadosContrato?.turma_aluno || {};
+        const outrosClientesRaw = (turmaAlunoDados as { outros_clientes?: unknown })?.outros_clientes ?? row.outros_clientes;
+        const contratoMapeado = {
+            turma_aluno: {
+                quantidade_inscricoes:
+                    Number((turmaAlunoDados as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
+                pendencia_pagamento:
+                    row.pendencia_pagamento === true ||
+                    String(row.pendencia_pagamento).toLowerCase() === 'true' ||
+                    Boolean((turmaAlunoDados as { pendencia_pagamento?: boolean })?.pendencia_pagamento),
+                outros_clientes: Array.isArray(outrosClientesRaw) ? outrosClientesRaw : [],
+            },
+            dados_contrato: dadosContrato,
+        };
+        return {
+            quantidadeInscricoes: this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado),
+            quantidadeBonus: this.obterQuantidadeInscricoesBonusResumoHistorico(contratoMapeado),
+            pendenciaPagamento: Boolean(contratoMapeado.turma_aluno.pendencia_pagamento),
+            valorTotalVenda: this.obterValorTotalVendaResumo(dadosContrato),
+        };
+    }
+
     private async carregarLinhasHistoricoVendas(baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>): Promise<
-        Array<{
-            id: string;
-            criado_em?: string | Date | null;
-            dados_contrato: unknown;
-            criado_por_contrato?: string | number | null;
-            criado_por_tat?: string | number | null;
-            criado_por_ta?: string | number | null;
-            quantidade_inscricoes: string | number;
-            outros_clientes: unknown;
-            pendencia_pagamento: string | boolean;
-            id_turma?: string | number | null;
-            id_turma_destino?: string | number | null;
-        }>
+        LinhaHistoricoVendasResumo[]
     > {
+        // Preferência: colunas materializadas (sem JSON/blobs). Fallback de ids
+        // de turma ainda vem das FKs para resolver times/líder.
         const resumoRowsRaw = await baseQb
             .clone()
             .select('contrato.id', 'id')
             .addSelect('contrato.criado_em', 'criado_em')
-            .addSelect('contrato.dados_contrato', 'dados_contrato')
+            .addSelect('contrato.hist_qtd_inscricoes', 'hist_qtd_inscricoes')
+            .addSelect('contrato.hist_qtd_bonus', 'hist_qtd_bonus')
+            .addSelect('contrato.hist_pendencia_pagamento', 'hist_pendencia_pagamento')
+            .addSelect('contrato.hist_receita_total', 'hist_receita_total')
+            .addSelect('contrato.hist_vendedor_id', 'hist_vendedor_id')
             .addSelect('contrato.criado_por', 'criado_por_contrato')
             .addSelect('tat.criado_por', 'criado_por_tat')
             .addSelect('ta.criado_por', 'criado_por_ta')
@@ -3776,13 +3816,7 @@ export class DocumentosService {
         return siglaNorm === 'ipr' || nomeNorm.includes('imersao prosperar') || nomeNorm.includes('imersão prosperar');
     }
 
-    private async montarMapasTimesHistorico(
-        linhas: Array<{
-            dados_contrato: unknown;
-            id_turma?: string | number | null;
-            id_turma_destino?: string | number | null;
-        }>,
-    ): Promise<{
+    private async montarMapasTimesHistorico(linhas: LinhaHistoricoVendasResumo[]): Promise<{
         timesPorTurma: Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>;
         liderPorMembroGlobal: Map<string, string>;
     }> {
@@ -3830,14 +3864,7 @@ export class DocumentosService {
     }
 
     private resolverLiderIdLinhaHistorico(
-        row: {
-            dados_contrato: unknown;
-            criado_por_contrato?: string | number | null;
-            criado_por_tat?: string | number | null;
-            criado_por_ta?: string | number | null;
-            id_turma?: string | number | null;
-            id_turma_destino?: string | number | null;
-        },
+        row: LinhaHistoricoVendasResumo,
         timesPorTurma: Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>,
         liderPorMembroGlobal: Map<string, string>,
     ): string {
@@ -3851,37 +3878,9 @@ export class DocumentosService {
 
     private async calcularResumoHistoricoVendas(
         baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
-        options?: { staff_lider_id?: string },
-    ): Promise<{
-        total_inscricoes_vendidas: number;
-        total_inscricoes_bonus: number;
-        total_com_pendencia: number;
-        receita_total: number;
-        ranking_staff_lider: Array<{
-            lider_id: string;
-            lider_nome: string;
-            total_inscricoes: number;
-            total_vendas: number;
-            times: string[];
-            vendedores: Array<{
-                id: string;
-                nome: string;
-                total_inscricoes: number;
-                total_vendas: number;
-            }>;
-        }>;
-        inscricoes_sem_lider: {
-            total_inscricoes: number;
-            total_vendas: number;
-            vendedores: Array<{
-                vendedor_id: string;
-                vendedor_nome: string;
-                total_inscricoes: number;
-                total_vendas: number;
-            }>;
-        };
-    }> {
-        const resumoRows = await this.carregarLinhasHistoricoVendas(baseQb);
+        options?: { staff_lider_id?: string; linhasPreload?: LinhaHistoricoVendasResumo[] },
+    ): Promise<ResumoHistoricoVendas> {
+        const resumoRows = options?.linhasPreload ?? (await this.carregarLinhasHistoricoVendas(baseQb));
         const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
         const staffLiderId = String(options?.staff_lider_id || '').trim();
         // O sentinela "Sem Staff Líder Informado" filtra as vendas cujo vendedor
@@ -3896,37 +3895,14 @@ export class DocumentosService {
 
         const resumoBase = linhasAtivas.reduce(
             (acc, row) => {
-                const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
-                const turmaAlunoDados = dadosContrato?.turma_aluno || {};
-                // Snapshot da venda tem prioridade; row.* (matrícula de origem) só legado.
-                const outrosClientesRaw = (turmaAlunoDados as { outros_clientes?: unknown })?.outros_clientes ?? row.outros_clientes;
-                const contratoMapeado = {
-                    turma_aluno: {
-                        // Prioriza o snapshot da venda (dados_contrato.turma_aluno):
-                        // a matrícula vinculada é a da turma de ORIGEM e carrega a
-                        // quantidade de outra venda (row.* só para contratos legados).
-                        quantidade_inscricoes:
-                            Number((turmaAlunoDados as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
-                        // OR com o snapshot em dados_contrato.turma_aluno: a matrícula
-                        // vinculada (origem) costuma vir com pendência = false explícito.
-                        pendencia_pagamento:
-                            row.pendencia_pagamento === true ||
-                            String(row.pendencia_pagamento).toLowerCase() === 'true' ||
-                            Boolean((turmaAlunoDados as { pendencia_pagamento?: boolean })?.pendencia_pagamento),
-                        outros_clientes: Array.isArray(outrosClientesRaw) ? outrosClientesRaw : [],
-                    },
-                    dados_contrato: dadosContrato,
-                };
-                const quantidadeInscricoes = this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado);
-                const pendenciaPagamento = Boolean(contratoMapeado.turma_aluno.pendencia_pagamento);
-                const valorTotalVenda = this.obterValorTotalVendaResumo(dadosContrato);
+                const metricas = this.obterMetricasLinhaHistorico(row);
 
-                acc.total_inscricoes_vendidas += quantidadeInscricoes;
-                acc.total_inscricoes_bonus += this.obterQuantidadeInscricoesBonusResumoHistorico(contratoMapeado);
-                if (pendenciaPagamento) {
+                acc.total_inscricoes_vendidas += metricas.quantidadeInscricoes;
+                acc.total_inscricoes_bonus += metricas.quantidadeBonus;
+                if (metricas.pendenciaPagamento) {
                     acc.total_com_pendencia += 1;
                 }
-                acc.receita_total += valorTotalVenda;
+                acc.receita_total += metricas.valorTotalVenda;
                 return acc;
             },
             {
@@ -3984,20 +3960,8 @@ export class DocumentosService {
         linhasAtivas.forEach((row) => {
             const vendedorId = this.obterCriadoPorResumoHistorico(row) || 'Não informado';
             const vendedorNome = nomeUsuarioPorId.get(Number(vendedorId)) || `ID ${vendedorId}`;
-            const dadosContrato = this.parseJsonSeguroHistorico(row.dados_contrato);
-            const turmaAlunoDadosVenda = dadosContrato?.turma_aluno || {};
-            const outrosClientesVendaRaw = (turmaAlunoDadosVenda as { outros_clientes?: unknown })?.outros_clientes ?? row.outros_clientes;
-            const contratoMapeado = {
-                turma_aluno: {
-                    // Prioriza o snapshot da venda (dados_contrato.turma_aluno); a
-                    // matrícula vinculada é a da turma de ORIGEM (row.* só legado).
-                    quantidade_inscricoes:
-                        Number((turmaAlunoDadosVenda as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
-                    outros_clientes: Array.isArray(outrosClientesVendaRaw) ? outrosClientesVendaRaw : [],
-                },
-                dados_contrato: dadosContrato,
-            };
-            const inscricoesDaVenda = this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado);
+            const metricas = this.obterMetricasLinhaHistorico(row);
+            const inscricoesDaVenda = metricas.quantidadeInscricoes;
             const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
             const timesDaVenda = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
             const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorId || time.membrosIds.includes(vendedorId));
@@ -4086,6 +4050,34 @@ export class DocumentosService {
         };
     }
 
+    private armazenarCacheResumoHistorico(chave: string, value: ResumoHistoricoVendas): void {
+        this.resumoHistoricoCache.set(chave, {
+            expiresAt: Date.now() + this.resumoHistoricoCacheTtlMs,
+            value,
+        });
+        if (this.resumoHistoricoCache.size > this.resumoHistoricoCacheMaxEntradas) {
+            const chaveMaisAntiga = this.resumoHistoricoCache.keys().next().value;
+            if (chaveMaisAntiga) {
+                this.resumoHistoricoCache.delete(chaveMaisAntiga);
+            }
+        }
+    }
+
+    private async obterResumoHistoricoCacheado(
+        baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
+        chaveCacheResumo: string,
+        options?: { staff_lider_id?: string; linhasPreload?: LinhaHistoricoVendasResumo[] },
+    ): Promise<ResumoHistoricoVendas> {
+        const cacheExistente = this.resumoHistoricoCache.get(chaveCacheResumo);
+        if (cacheExistente && cacheExistente.expiresAt > Date.now()) {
+            return cacheExistente.value;
+        }
+
+        const resumo = await this.calcularResumoHistoricoVendas(baseQb, options);
+        this.armazenarCacheResumoHistorico(chaveCacheResumo, resumo);
+        return resumo;
+    }
+
     async listarContratosBanco(filtros?: {
         page?: number;
         limit?: number;
@@ -4106,16 +4098,19 @@ export class DocumentosService {
         // separados por "|" (ex.: "Bônus|Transbordo"). Filtra tanto a listagem
         // quanto o resumo consolidado (ambos derivam do mesmo baseQb).
         origem?: string;
-        // Modo "leve" (ex.: exportação): omite os comprovantes em base64 da
-        // resposta. Sem isso, páginas grandes estouram o limite de string do
-        // JSON.stringify (o mesmo blob se repete em vários campos por item).
+        // Listagem leve por padrão: omite comprovantes base64 (passe false para incluir).
         omitir_comprovantes?: boolean | string;
+        // Quando false, a listagem não calcula cards/ranking (use /resumo).
+        incluir_resumo?: boolean | string;
+        // Só calcula o resumo (pula paginação/hidratação da grade).
+        apenas_resumo?: boolean | string;
     }): Promise<{
         data: any[];
         total: number;
         page: number;
         limit: number;
         totalPages: number;
+        resumo: ResumoHistoricoVendas | null;
     }> {
         try {
             const page = filtros?.page || 1;
@@ -4143,13 +4138,23 @@ export class DocumentosService {
             const dataInicioPeriodo = this.converterDataFiltroParaDate(filtros?.data_inicio, false) || dataInicioPadrao;
             const dataFimPeriodo = this.converterDataFiltroParaDate(filtros?.data_fim, true) || dataFimPadrao;
             const staffLiderId = String(filtros?.staff_lider_id || '').trim() || undefined;
-            const omitirComprovantes = filtros?.omitir_comprovantes === true || filtros?.omitir_comprovantes === 'true' || filtros?.omitir_comprovantes === '1';
-            const marcadorAtualizacao = await this.obterMarcadorAtualizacaoHistorico();
-            const chaveCache = JSON.stringify({
-                page,
-                limit,
+            // Default TRUE: listagem do histórico nunca precisa dos blobs na grade.
+            // Opt-in explícito: omitir_comprovantes=false|0.
+            const incluirComprovantesExplicit =
+                filtros?.omitir_comprovantes === false ||
+                filtros?.omitir_comprovantes === 'false' ||
+                filtros?.omitir_comprovantes === '0';
+            const omitirComprovantes = !incluirComprovantesExplicit;
+            const apenasResumo =
+                filtros?.apenas_resumo === true || filtros?.apenas_resumo === 'true' || filtros?.apenas_resumo === '1';
+            // Default TRUE para compatibilidade com o front atual. Passe false e
+            // chame GET .../resumo em paralelo para liberar a tabela mais cedo.
+            const omitirResumoExplicit =
+                filtros?.incluir_resumo === false || filtros?.incluir_resumo === 'false' || filtros?.incluir_resumo === '0';
+            const incluirResumo = apenasResumo || !omitirResumoExplicit;
+            const marcadorAtualizacao = this.obterMarcadorAtualizacaoHistorico();
+            const chaveFiltrosResumo = {
                 marcadorAtualizacao,
-                omitir_comprovantes: omitirComprovantes,
                 id_aluno: filtros?.id_aluno || null,
                 id_treinamento: filtros?.id_treinamento || null,
                 status: filtros?.status || null,
@@ -4164,6 +4169,14 @@ export class DocumentosService {
                 turma_destino: filtros?.turma_destino || null,
                 staff_lider_id: staffLiderId || null,
                 origem: filtros?.origem || null,
+            };
+            const chaveCacheResumo = JSON.stringify(chaveFiltrosResumo);
+            const chaveCache = JSON.stringify({
+                page,
+                limit,
+                omitir_comprovantes: omitirComprovantes,
+                incluir_resumo: incluirResumo,
+                ...chaveFiltrosResumo,
             });
             const cacheExistente = this.contratosBancoCache.get(chaveCache);
 
@@ -4395,7 +4408,7 @@ export class DocumentosService {
             }
 
             if (somentePendenciaAtivo) {
-                baseQb.andWhere(`(COALESCE(ta.pendencia_pagamento, false) = true OR ${pendenciaJsonSql} = true)`);
+                baseQb.andWhere(`contrato.hist_pendencia_pagamento = true`);
             }
 
             if (statusFiltro && statusFiltro !== 'all') {
@@ -4411,41 +4424,44 @@ export class DocumentosService {
             }
 
             if (filtroTurmaAtivo && treinamentoOrigemFiltro) {
-                baseQb.andWhere(`${treinamentoOrigemSql} = :treinamentoOrigemFiltro`, {
-                    treinamentoOrigemFiltro,
-                });
+                baseQb.andWhere(
+                    `LOWER(TRIM(COALESCE(NULLIF(contrato.hist_treinamento_origem, ''), ${treinamentoOrigemSql}))) = :treinamentoOrigemFiltro`,
+                    {
+                        treinamentoOrigemFiltro,
+                    },
+                );
             }
 
             if (filtroTurmaAtivo && turmasOrigemFiltro.length > 0) {
-                baseQb.andWhere(`${turmaOrigemSql} IN (:...turmasOrigemFiltro)`, {
-                    turmasOrigemFiltro,
-                });
+                baseQb.andWhere(
+                    `LOWER(TRIM(COALESCE(NULLIF(contrato.hist_turma_origem, ''), ${turmaOrigemSql}))) IN (:...turmasOrigemFiltro)`,
+                    {
+                        turmasOrigemFiltro,
+                    },
+                );
             }
 
             if (filtroTurmaAtivo && turmasDestinoFiltro.length > 0) {
-                baseQb.andWhere(`${turmaDestinoSql} IN (:...turmasDestinoFiltro)`, {
-                    turmasDestinoFiltro,
-                });
+                baseQb.andWhere(
+                    `LOWER(TRIM(COALESCE(NULLIF(contrato.hist_turma_destino, ''), ${turmaDestinoSql}))) IN (:...turmasDestinoFiltro)`,
+                    {
+                        turmasDestinoFiltro,
+                    },
+                );
             }
 
             if (filtros?.canal_venda === 'MASTERCLASS') {
-                baseQb.andWhere(`${canalTextoSql} LIKE :canalMasterclass`, {
-                    canalMasterclass: '%masterclass%',
+                baseQb.andWhere(`contrato.hist_canal_venda = :canalMasterclass`, {
+                    canalMasterclass: 'MASTERCLASS',
                 });
             } else if (filtros?.canal_venda === 'TIME_VENDAS') {
-                baseQb.andWhere(`(${canalTextoSql} LIKE :canalTimeVendas OR ${canalTextoSql} LIKE :canalVendasIam)`, {
-                    canalTimeVendas: '%time de vendas%',
-                    canalVendasIam: '%vendas iam%',
+                baseQb.andWhere(`contrato.hist_canal_venda = :canalTimeVendas`, {
+                    canalTimeVendas: 'TIME_VENDAS',
                 });
             } else if (filtros?.canal_venda === 'EVENTOS') {
-                baseQb.andWhere(
-                    `(${canalTextoSql} NOT LIKE :canalMasterclass AND ${canalTextoSql} NOT LIKE :canalTimeVendas AND ${canalTextoSql} NOT LIKE :canalVendasIam)`,
-                    {
-                        canalMasterclass: '%masterclass%',
-                        canalTimeVendas: '%time de vendas%',
-                        canalVendasIam: '%vendas iam%',
-                    },
-                );
+                baseQb.andWhere(`contrato.hist_canal_venda = :canalEventos`, {
+                    canalEventos: 'EVENTOS',
+                });
             }
 
             // Filtro por origem do aluno (multi-seleção). Aplicado ao baseQb, portanto
@@ -4456,15 +4472,31 @@ export class DocumentosService {
                 });
             }
 
+            if (apenasResumo) {
+                const resumoIsolado = await this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
+                    staff_lider_id: staffLiderId,
+                });
+                return {
+                    data: [],
+                    total: 0,
+                    page: 1,
+                    limit: 0,
+                    totalPages: 0,
+                    resumo: resumoIsolado,
+                };
+            }
+
             let total: number;
             let totalPages: number;
             let idsPagina: string[];
+            let linhasHistoricoPreload: LinhaHistoricoVendasResumo[] | undefined;
+            let resumo: ResumoHistoricoVendas | null = null;
 
             if (staffLiderId) {
-                const linhasHistorico = await this.carregarLinhasHistoricoVendas(baseQb);
-                const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(linhasHistorico);
+                linhasHistoricoPreload = await this.carregarLinhasHistoricoVendas(baseQb);
+                const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(linhasHistoricoPreload);
                 const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
-                const idsOrdenados = linhasHistorico
+                const idsOrdenados = linhasHistoricoPreload
                     .filter((row) => {
                         const liderResolvido = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
                         return filtrandoSemLider ? !liderResolvido : liderResolvido === staffLiderId;
@@ -4474,27 +4506,45 @@ export class DocumentosService {
                 total = idsOrdenados.length;
                 totalPages = Math.max(1, Math.ceil(total / limit));
                 idsPagina = idsOrdenados.slice(offset, offset + limit);
+                if (incluirResumo) {
+                    resumo = await this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
+                        staff_lider_id: staffLiderId,
+                        linhasPreload: linhasHistoricoPreload,
+                    });
+                }
             } else {
-                // Contagem por contrato distinto: os múltiplos LEFT JOINs (turma de
-                // origem/destino, treinamentos, etc.) podem multiplicar as linhas e
-                // inflar o getCount(), gerando páginas a mais. COUNT(DISTINCT) garante
-                // o total real de vendas (alinhado ao resumo).
-                const totalRow = await baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>();
-                total = Number(totalRow?.total ?? 0);
-                totalPages = Math.max(1, Math.ceil(total / limit));
-                const idsPaginaRaw = await baseQb
-                    .clone()
-                    .select('contrato.id', 'id')
-                    .addSelect('MAX(contrato.criado_em)', 'ordem_criado_em')
-                    .groupBy('contrato.id')
-                    .orderBy('MAX(contrato.criado_em)', 'DESC')
-                    .offset(offset)
-                    .limit(limit)
-                    .getRawMany<{ id: string }>();
-                idsPagina = idsPaginaRaw.map((item) => String(item.id));
-            }
+                // Contagem + página + resumo em paralelo (antes eram sequenciais).
+                const paginacaoPromise = (async () => {
+                    const totalRow = await baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>();
+                    const totalLocal = Number(totalRow?.total ?? 0);
+                    const totalPagesLocal = Math.max(1, Math.ceil(totalLocal / limit));
+                    const idsPaginaRaw = await baseQb
+                        .clone()
+                        .select('contrato.id', 'id')
+                        .addSelect('MAX(contrato.criado_em)', 'ordem_criado_em')
+                        .groupBy('contrato.id')
+                        .orderBy('MAX(contrato.criado_em)', 'DESC')
+                        .offset(offset)
+                        .limit(limit)
+                        .getRawMany<{ id: string }>();
+                    return {
+                        total: totalLocal,
+                        totalPages: totalPagesLocal,
+                        idsPagina: idsPaginaRaw.map((item) => String(item.id)),
+                    };
+                })();
 
-            const resumo = await this.calcularResumoHistoricoVendas(baseQb, { staff_lider_id: staffLiderId });
+                const [paginacao, resumoParalelo] = await Promise.all([
+                    paginacaoPromise,
+                    incluirResumo
+                        ? this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, { staff_lider_id: staffLiderId })
+                        : Promise.resolve(null),
+                ]);
+                total = paginacao.total;
+                totalPages = paginacao.totalPages;
+                idsPagina = paginacao.idsPagina;
+                resumo = resumoParalelo;
+            }
 
             if (idsPagina.length === 0) {
                 const resultadoVazio = {
@@ -4512,111 +4562,114 @@ export class DocumentosService {
                 return resultadoVazio;
             }
 
+            const selectContrato: Record<string, any> = {
+                id: true,
+                id_turma_aluno_treinamento: true,
+                status_ass_aluno: true,
+                status_ass_test_um: true,
+                status_ass_test_dois: true,
+                data_ass_aluno: true,
+                data_ass_test_um: true,
+                data_ass_test_dois: true,
+                criado_em: true,
+                atualizado_em: true,
+                criado_por: true,
+                dados_contrato: true,
+                zapsign_document_id: true,
+                zapsign_signers_data: true,
+                zapsign_document_status: true,
+                id_turma_aluno_treinamento_fk: {
+                    id: true,
+                    id_turma_aluno: true,
+                    id_treinamento: true,
+                    id_turma_destino: true,
+                    criado_por: true,
+                    id_turma_aluno_fk: {
+                        id: true,
+                        id_turma: true,
+                        id_aluno: true,
+                        pendencia_pagamento: true,
+                        quantidade_inscricoes: true,
+                        outros_clientes: true,
+                        criado_por: true,
+                        id_turma_transferencia_de: true,
+                        id_turma_transferencia_para: true,
+                        id_aluno_fk: {
+                            id: true,
+                            nome: true,
+                            cpf: true,
+                            email: true,
+                            data_nascimento: true,
+                            telefone_um: true,
+                            logradouro: true,
+                            numero: true,
+                            complemento: true,
+                            bairro: true,
+                            cidade: true,
+                            estado: true,
+                            cep: true,
+                            id_polo_fk: {
+                                id: true,
+                                cidade: true,
+                                estado: true,
+                            },
+                        },
+                        id_turma_fk: {
+                            id: true,
+                            id_treinamento: true,
+                            edicao_turma: true,
+                            turmas_ipr_relacionadas: true,
+                            id_treinamento_fk: {
+                                id: true,
+                                treinamento: true,
+                                sigla_treinamento: true,
+                            },
+                        },
+                        id_turma_transferencia_de_fk: {
+                            id: true,
+                            id_treinamento: true,
+                            edicao_turma: true,
+                            id_treinamento_fk: {
+                                id: true,
+                                treinamento: true,
+                                sigla_treinamento: true,
+                            },
+                        },
+                        id_turma_transferencia_para_fk: {
+                            id: true,
+                            id_treinamento: true,
+                            edicao_turma: true,
+                            id_treinamento_fk: {
+                                id: true,
+                                treinamento: true,
+                                sigla_treinamento: true,
+                            },
+                        },
+                    },
+                    id_treinamento_fk: {
+                        id: true,
+                        treinamento: true,
+                        sigla_treinamento: true,
+                        preco_treinamento: true,
+                        url_logo_treinamento: true,
+                    },
+                },
+                id_documento_fk: {
+                    id: true,
+                    documento: true,
+                },
+            };
+            if (!omitirComprovantes) {
+                selectContrato.comprovantes_pagamento = true;
+                selectContrato.id_turma_aluno_treinamento_fk.id_turma_aluno_fk.comprovante_pagamento_base64 = true;
+            }
+
             const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
                 where: {
                     id: In(idsPagina),
                     deletado_em: null,
                 },
-                select: {
-                    id: true,
-                    id_turma_aluno_treinamento: true,
-                    status_ass_aluno: true,
-                    status_ass_test_um: true,
-                    status_ass_test_dois: true,
-                    data_ass_aluno: true,
-                    data_ass_test_um: true,
-                    data_ass_test_dois: true,
-                    criado_em: true,
-                    atualizado_em: true,
-                    criado_por: true,
-                    dados_contrato: true,
-                    comprovantes_pagamento: true,
-                    zapsign_document_id: true,
-                    zapsign_signers_data: true,
-                    zapsign_document_status: true,
-                    id_turma_aluno_treinamento_fk: {
-                        id: true,
-                        id_turma_aluno: true,
-                        id_treinamento: true,
-                        id_turma_destino: true,
-                        criado_por: true,
-                        id_turma_aluno_fk: {
-                            id: true,
-                            id_turma: true,
-                            id_aluno: true,
-                            pendencia_pagamento: true,
-                            quantidade_inscricoes: true,
-                            outros_clientes: true,
-                            comprovante_pagamento_base64: true,
-                            criado_por: true,
-                            id_turma_transferencia_de: true,
-                            id_turma_transferencia_para: true,
-                            id_aluno_fk: {
-                                id: true,
-                                nome: true,
-                                cpf: true,
-                                email: true,
-                                data_nascimento: true,
-                                telefone_um: true,
-                                logradouro: true,
-                                numero: true,
-                                complemento: true,
-                                bairro: true,
-                                cidade: true,
-                                estado: true,
-                                cep: true,
-                                id_polo_fk: {
-                                    id: true,
-                                    cidade: true,
-                                    estado: true,
-                                },
-                            },
-                            id_turma_fk: {
-                                id: true,
-                                id_treinamento: true,
-                                edicao_turma: true,
-                                turmas_ipr_relacionadas: true,
-                                id_treinamento_fk: {
-                                    id: true,
-                                    treinamento: true,
-                                    sigla_treinamento: true,
-                                },
-                            },
-                            id_turma_transferencia_de_fk: {
-                                id: true,
-                                id_treinamento: true,
-                                edicao_turma: true,
-                                id_treinamento_fk: {
-                                    id: true,
-                                    treinamento: true,
-                                    sigla_treinamento: true,
-                                },
-                            },
-                            id_turma_transferencia_para_fk: {
-                                id: true,
-                                id_treinamento: true,
-                                edicao_turma: true,
-                                id_treinamento_fk: {
-                                    id: true,
-                                    treinamento: true,
-                                    sigla_treinamento: true,
-                                },
-                            },
-                        },
-                        id_treinamento_fk: {
-                            id: true,
-                            treinamento: true,
-                            sigla_treinamento: true,
-                            preco_treinamento: true,
-                            url_logo_treinamento: true,
-                        },
-                    },
-                    id_documento_fk: {
-                        id: true,
-                        documento: true,
-                        clausulas: true,
-                    },
-                },
+                select: selectContrato,
                 relations: [
                     'id_turma_aluno_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
@@ -4638,15 +4691,34 @@ export class DocumentosService {
             // Identifica quais contratos da página foram anexados manualmente
             // (contrato escrito à mão) sem trafegar o base64 da(s) foto(s)/PDF.
             const idsContratoManual = new Set<string>();
+            const idsComComprovantes = new Set<string>();
             if (idsPagina.length > 0) {
-                const idsManuscritoRows = await this.uow.turmasAlunosTreinamentosContratosRP
-                    .createQueryBuilder('contrato')
-                    .select('contrato.id', 'id')
-                    .where('contrato.id IN (:...idsPagina)', { idsPagina })
-                    .andWhere('contrato.foto_documento_aluno_base64 IS NOT NULL')
-                    .andWhere("COALESCE(contrato.foto_documento_aluno_base64, '') <> ''")
-                    .getRawMany<{ id: string }>();
+                const [idsManuscritoRows, idsComprovantesRows] = await Promise.all([
+                    this.uow.turmasAlunosTreinamentosContratosRP
+                        .createQueryBuilder('contrato')
+                        .select('contrato.id', 'id')
+                        .where('contrato.id IN (:...idsPagina)', { idsPagina })
+                        .andWhere('contrato.foto_documento_aluno_base64 IS NOT NULL')
+                        .andWhere("COALESCE(contrato.foto_documento_aluno_base64, '') <> ''")
+                        .getRawMany<{ id: string }>(),
+                    omitirComprovantes
+                        ? this.uow.turmasAlunosTreinamentosContratosRP
+                              .createQueryBuilder('contrato')
+                              .select('contrato.id', 'id')
+                              .where('contrato.id IN (:...idsPagina)', { idsPagina })
+                              .andWhere(
+                                  `(
+                                    (jsonb_typeof(contrato.comprovantes_pagamento) = 'array' AND jsonb_array_length(contrato.comprovantes_pagamento) > 0)
+                                    OR COALESCE(contrato.dados_contrato->'turma_aluno'->>'comprovante_pagamento_base64', '') <> ''
+                                    OR (jsonb_typeof(contrato.dados_contrato->'turma_aluno'->'comprovantes_pagamento') = 'array'
+                                        AND jsonb_array_length(contrato.dados_contrato->'turma_aluno'->'comprovantes_pagamento') > 0)
+                                  )`,
+                              )
+                              .getRawMany<{ id: string }>()
+                        : Promise.resolve([] as Array<{ id: string }>),
+                ]);
                 idsManuscritoRows.forEach((row) => idsContratoManual.add(String(row.id)));
+                idsComprovantesRows.forEach((row) => idsComComprovantes.add(String(row.id)));
             }
 
             // Mapear dados para o formato esperado pelo frontend
@@ -5119,8 +5191,12 @@ export class DocumentosService {
                     // No modo omitir_comprovantes os base64 saem vazios (a mesma string
                     // se repetiria em vários campos por item e estoura o JSON.stringify
                     // em páginas grandes); possui_comprovantes preserva o indicador.
-                    const comprovantesPagamentoCompletos = this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
-                    const possuiComprovantes = comprovantesPagamentoCompletos.length > 0;
+                    const comprovantesPagamentoCompletos = omitirComprovantes
+                        ? []
+                        : this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
+                    const possuiComprovantes = omitirComprovantes
+                        ? idsComComprovantes.has(String(contrato.id))
+                        : comprovantesPagamentoCompletos.length > 0;
                     const comprovantesPagamento = omitirComprovantes ? [] : comprovantesPagamentoCompletos;
                     const comprovantePagamentoBase64 = omitirComprovantes ? '' : this.serializarComprovantes(comprovantesPagamento);
                     const criadoPorContrato = contrato?.criado_por ?? null;
@@ -5230,7 +5306,9 @@ export class DocumentosService {
                             template: {
                                 id: documento?.id,
                                 nome: documento?.documento,
-                                clausulas: documento?.clausulas,
+                                // Cláusulas (HTML grande) nunca vão na listagem —
+                                // o detalhe do contrato usa GET contrato/:id.
+                                clausulas: '',
                             },
                             pagamento: {
                                 forma_pagamento: dadosContrato.pagamento?.forma_pagamento || dadosContrato.forma_pagamento || 'A_VISTA',

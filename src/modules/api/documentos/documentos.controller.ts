@@ -222,6 +222,7 @@ export class DocumentosController {
         @Query('staff_lider_id') staff_lider_id?: string,
         @Query('origem') origem?: string,
         @Query('omitir_comprovantes') omitir_comprovantes?: string,
+        @Query('incluir_resumo') incluir_resumo?: string,
     ) {
         const filtros = {
             page: page ? parseInt(page) : 1,
@@ -241,6 +242,7 @@ export class DocumentosController {
             staff_lider_id,
             origem,
             omitir_comprovantes,
+            incluir_resumo,
         };
 
         try {
@@ -251,6 +253,47 @@ export class DocumentosController {
             this.logger.error('contract.public.list | Erro ao listar contratos do banco', error instanceof Error ? error.stack : undefined);
             throw error;
         }
+    }
+
+    // Resumo/ranking isolado do Histórico de Vendas — carregar em paralelo à listagem
+    // com incluir_resumo=false para liberar a grade mais cedo.
+    @Get('public/contratos-banco/resumo')
+    async listarResumoContratosBancoPublico(
+        @Query('id_aluno') id_aluno?: string,
+        @Query('id_treinamento') id_treinamento?: string,
+        @Query('status') status?: string,
+        @Query('data_inicio') data_inicio?: string,
+        @Query('data_fim') data_fim?: string,
+        @Query('search') search?: string,
+        @Query('canal_venda') canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS',
+        @Query('somente_com_pendencia') somente_com_pendencia?: string,
+        @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma',
+        @Query('treinamento_origem') treinamento_origem?: string,
+        @Query('turma_origem') turma_origem?: string,
+        @Query('turma_destino') turma_destino?: string,
+        @Query('staff_lider_id') staff_lider_id?: string,
+        @Query('origem') origem?: string,
+    ) {
+        const resultado = await this.documentosService.listarContratosBanco({
+            id_aluno,
+            id_treinamento,
+            status,
+            data_inicio,
+            data_fim,
+            search,
+            canal_venda,
+            somente_com_pendencia,
+            tipo_filtro_busca,
+            treinamento_origem,
+            turma_origem,
+            turma_destino,
+            staff_lider_id,
+            origem,
+            apenas_resumo: true,
+            omitir_comprovantes: true,
+            incluir_resumo: true,
+        });
+        return { resumo: resultado.resumo };
     }
 
     @Get('public/contratos-banco/opcoes-origem')

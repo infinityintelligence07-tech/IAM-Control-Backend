@@ -66,6 +66,34 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     @Column({ type: 'jsonb', name: 'dados_contrato', nullable: true })
     dados_contrato: any;
 
+    // --- Colunas materializadas do Histórico de Vendas (evitam parse de JSON) ---
+    @Column({ type: 'int', name: 'hist_qtd_inscricoes', nullable: false, default: 1 })
+    hist_qtd_inscricoes: number;
+
+    @Column({ type: 'int', name: 'hist_qtd_bonus', nullable: false, default: 0 })
+    hist_qtd_bonus: number;
+
+    @Column({ type: 'boolean', name: 'hist_pendencia_pagamento', nullable: false, default: false })
+    hist_pendencia_pagamento: boolean;
+
+    @Column({ type: 'numeric', precision: 14, scale: 2, name: 'hist_receita_total', nullable: false, default: 0 })
+    hist_receita_total: string | number;
+
+    @Column({ type: 'varchar', length: 32, name: 'hist_canal_venda', nullable: true })
+    hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | string | null;
+
+    @Column({ type: 'varchar', length: 255, name: 'hist_treinamento_origem', nullable: true })
+    hist_treinamento_origem: string | null;
+
+    @Column({ type: 'varchar', length: 255, name: 'hist_turma_origem', nullable: true })
+    hist_turma_origem: string | null;
+
+    @Column({ type: 'varchar', length: 255, name: 'hist_turma_destino', nullable: true })
+    hist_turma_destino: string | null;
+
+    @Column({ type: 'int', name: 'hist_vendedor_id', nullable: true })
+    hist_vendedor_id: number | null;
+
     // Comprovante(s) de pagamento desta venda/contrato. É um ARRAY porque cada
     // pagamento pode ter um ou múltiplos comprovantes (imagens e/ou PDFs em
     // data URL base64). Fica vinculado ao CONTRATO (e não ao turma_aluno

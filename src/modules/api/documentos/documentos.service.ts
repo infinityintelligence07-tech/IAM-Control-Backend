@@ -3144,6 +3144,88 @@ export class DocumentosService {
         return tipo === 'treinamento' || tipo === 'turma';
     }
 
+    /**
+     * Expressões SQL COMPARTILHADAS entre a listagem (`listarContratosBanco`) e
+     * as opções de filtro (`listarOpcoesFiltrosOrigem`). Opções e filtro DEVEM
+     * usar exatamente a mesma expressão, senão o rótulo exibido nunca casa com
+     * o valor comparado e o filtro volta vazio.
+     *
+     * Requerem os joins: turma_origem_evento/treinamento_origem_evento,
+     * turma_destino_evento/treinamento_destino_evento, turma_destino_tat/
+     * treinamento_destino_tat, tat, ta e turma_destino/treinamento_destino.
+     */
+    private get sqlIdTurmaOrigemHistorico(): string {
+        return `NULLIF(COALESCE(
+            contrato.dados_contrato->>'fluxo_evento_origem_id_turma',
+            contrato.dados_contrato->>'id_turma_origem',
+            contrato.dados_contrato->'turma_origem'->>'id',
+            ''
+        ), '')::int`;
+    }
+
+    private get sqlIdTurmaDestinoHistorico(): string {
+        return `NULLIF(COALESCE(
+            contrato.dados_contrato->>'fluxo_evento_destino_id_turma',
+            contrato.dados_contrato->>'id_turma_destino',
+            contrato.dados_contrato->'turma'->>'id',
+            tat.id_turma_destino::text,
+            ta.id_turma::text,
+            ''
+        ), '')::int`;
+    }
+
+    /** Treinamento de origem: resolve pela relação antes dos textos crus. */
+    private get sqlTreinamentoOrigemHistoricoDisplay(): string {
+        return `TRIM(COALESCE(
+            NULLIF(treinamento_origem_evento.treinamento, ''),
+            NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_treinamento', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Origem', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento Origem', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Entrada', ''),
+            ''
+        ))`;
+    }
+
+    /**
+     * Turma de origem normalizada "Treinamento - Edição": resolve pela relação
+     * (id do dados_contrato) com prioridade sobre os textos crus, igual à turma
+     * de destino — senão a opção exibiria só o nº da edição.
+     */
+    private get sqlTurmaOrigemHistoricoDisplay(): string {
+        return `TRIM(COALESCE(
+            CASE
+                WHEN treinamento_origem_evento.treinamento IS NOT NULL AND turma_origem_evento.edicao_turma IS NOT NULL
+                    THEN CONCAT(treinamento_origem_evento.treinamento, ' - ', turma_origem_evento.edicao_turma)
+                ELSE NULL
+            END,
+            NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_turma', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Origem', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Origem', ''),
+            NULLIF(treinamento_origem_evento.treinamento, ''),
+            ''
+        ))`;
+    }
+
+    /** Turma de destino normalizada "Treinamento - Edição" (relação primeiro). */
+    private get sqlTurmaDestinoHistoricoDisplay(): string {
+        return `TRIM(COALESCE(
+            CASE
+                WHEN treinamento_destino_evento.treinamento IS NOT NULL AND turma_destino_evento.edicao_turma IS NOT NULL
+                    THEN CONCAT(treinamento_destino_evento.treinamento, ' - ', turma_destino_evento.edicao_turma)
+                WHEN treinamento_destino_tat.treinamento IS NOT NULL AND turma_destino_tat.edicao_turma IS NOT NULL
+                    THEN CONCAT(treinamento_destino_tat.treinamento, ' - ', turma_destino_tat.edicao_turma)
+                WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
+                    THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
+                ELSE NULL
+            END,
+            NULLIF(contrato.dados_contrato->>'fluxo_evento_destino_turma', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Destino', ''),
+            NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Destino', ''),
+            COALESCE(treinamento_destino_evento.treinamento, treinamento_destino_tat.treinamento, treinamento_destino.treinamento, ''),
+            ''
+        ))`;
+    }
+
     private turmaHistoricoOrigemElegivel(dataInicio?: Date | string | null): boolean {
         if (!dataInicio) return false;
         const inicio = dataInicio instanceof Date ? dataInicio : new Date(dataInicio);
@@ -3568,14 +3650,27 @@ export class DocumentosService {
             return !nome || termosTurmaInvalidos.some((termo) => nome.includes(termo));
         };
 
-        // Path rápido: colunas materializadas (sem dados_contrato JSON).
+        // Rótulos resolvidos "Treinamento - Edição" pelas MESMAS expressões da
+        // listagem (relação via ids do dados_contrato antes dos textos crus).
+        // As colunas materializadas hist_* guardam texto cru (ex.: só o nº da
+        // edição) e podem estar vazias em registros antigos — usá-las aqui
+        // deixava a lista de origem vazia e a de destino com números soltos.
         const opcoesQb = this.uow.turmasAlunosTreinamentosContratosRP
             .createQueryBuilder('contrato')
-            .select('contrato.hist_treinamento_origem', 'treinamento_origem')
-            .addSelect('contrato.hist_turma_origem', 'turma_origem')
-            .addSelect('contrato.hist_turma_destino', 'turma_destino')
+            .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+            .leftJoin('tat.id_turma_aluno_fk', 'ta')
+            .leftJoin('ta.id_turma_fk', 'turma_destino')
+            .leftJoin('turma_destino.id_treinamento_fk', 'treinamento_destino')
+            .leftJoin(Turmas, 'turma_origem_evento', `turma_origem_evento.id = ${this.sqlIdTurmaOrigemHistorico}`)
+            .leftJoin('turma_origem_evento.id_treinamento_fk', 'treinamento_origem_evento')
+            .leftJoin(Turmas, 'turma_destino_evento', `turma_destino_evento.id = ${this.sqlIdTurmaDestinoHistorico}`)
+            .leftJoin('turma_destino_evento.id_treinamento_fk', 'treinamento_destino_evento')
+            .leftJoin(Turmas, 'turma_destino_tat', 'turma_destino_tat.id = tat.id_turma_destino')
+            .leftJoin('turma_destino_tat.id_treinamento_fk', 'treinamento_destino_tat')
+            .select(this.sqlTreinamentoOrigemHistoricoDisplay, 'treinamento_origem')
+            .addSelect(this.sqlTurmaOrigemHistoricoDisplay, 'turma_origem')
+            .addSelect(this.sqlTurmaDestinoHistoricoDisplay, 'turma_destino')
             .addSelect('contrato.hist_canal_venda', 'canal_venda')
-            .addSelect('contrato.hist_pendencia_pagamento', 'pendencia_pagamento')
             .addSelect(`LOWER(COALESCE(contrato.zapsign_document_status->>'status', ''))`, 'status_documento')
             .where('contrato.deletado_em IS NULL');
 
@@ -3588,9 +3683,7 @@ export class DocumentosService {
 
         if (termoBusca) {
             opcoesQb
-                .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
-                .leftJoin('tat.id_turma_aluno_fk', 'turma_aluno')
-                .leftJoin('turma_aluno.id_aluno_fk', 'aluno')
+                .leftJoin('ta.id_aluno_fk', 'aluno')
                 .addSelect('aluno.nome', 'aluno_nome')
                 .addSelect('aluno.email', 'aluno_email')
                 .addSelect(`contrato.dados_contrato->'aluno'->>'nome'`, 'aluno_nome_snapshot')
@@ -3609,7 +3702,6 @@ export class DocumentosService {
             turma_origem?: string | null;
             turma_destino?: string | null;
             canal_venda?: string | null;
-            pendencia_pagamento?: boolean | string | null;
             status_documento?: string | null;
             aluno_nome?: string | null;
             aluno_email?: string | null;
@@ -4526,59 +4618,15 @@ export class DocumentosService {
             const filtroTurmaAtivo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
-            const idTurmaOrigemDadosContratoSql = `NULLIF(COALESCE(
-                contrato.dados_contrato->>'fluxo_evento_origem_id_turma',
-                contrato.dados_contrato->>'id_turma_origem',
-                contrato.dados_contrato->'turma_origem'->>'id',
-                ''
-            ), '')::int`;
+            const idTurmaOrigemDadosContratoSql = this.sqlIdTurmaOrigemHistorico;
 
-            const treinamentoOrigemSql = `LOWER(TRIM(COALESCE(
-                NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_treinamento', ''),
-                NULLIF(treinamento_origem_evento.treinamento, ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Origem', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento Origem', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Treinamento de Entrada', ''),
-                ''
-            )))`;
-            const turmaOrigemSql = `LOWER(TRIM(COALESCE(
-                NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_turma', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Origem', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Origem', ''),
-                CASE
-                    WHEN treinamento_origem_evento.treinamento IS NOT NULL AND turma_origem_evento.edicao_turma IS NOT NULL
-                        THEN CONCAT(treinamento_origem_evento.treinamento, ' - ', turma_origem_evento.edicao_turma)
-                    ELSE treinamento_origem_evento.treinamento
-                END,
-                ''
-            )))`;
-            const idTurmaDestinoDadosContratoSql = `NULLIF(COALESCE(
-                contrato.dados_contrato->>'fluxo_evento_destino_id_turma',
-                contrato.dados_contrato->>'id_turma_destino',
-                contrato.dados_contrato->'turma'->>'id',
-                tat.id_turma_destino::text,
-                ta.id_turma::text,
-                ''
-            ), '')::int`;
-            // A turma de destino é sempre normalizada como "Treinamento - Edição"
-            // (resolvendo pela turma), com prioridade sobre os textos crus de
-            // campos_variaveis. Mantém a lista de opções e o filtro consistentes.
-            const turmaDestinoSql = `LOWER(TRIM(COALESCE(
-                CASE
-                    WHEN treinamento_destino_evento.treinamento IS NOT NULL AND turma_destino_evento.edicao_turma IS NOT NULL
-                        THEN CONCAT(treinamento_destino_evento.treinamento, ' - ', turma_destino_evento.edicao_turma)
-                    WHEN treinamento_destino_tat.treinamento IS NOT NULL AND turma_destino_tat.edicao_turma IS NOT NULL
-                        THEN CONCAT(treinamento_destino_tat.treinamento, ' - ', turma_destino_tat.edicao_turma)
-                    WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
-                        THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
-                    ELSE NULL
-                END,
-                NULLIF(contrato.dados_contrato->>'fluxo_evento_destino_turma', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Destino', ''),
-                NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Destino', ''),
-                COALESCE(treinamento_destino_evento.treinamento, treinamento_destino_tat.treinamento, treinamento_destino.treinamento, ''),
-                ''
-            )))`;
+            // Expressões compartilhadas com listarOpcoesFiltrosOrigem: o rótulo
+            // exibido nas opções e o valor comparado no filtro são idênticos
+            // ("Treinamento - Edição" resolvido pela relação antes do texto cru).
+            const treinamentoOrigemSql = `LOWER(${this.sqlTreinamentoOrigemHistoricoDisplay})`;
+            const turmaOrigemSql = `LOWER(${this.sqlTurmaOrigemHistoricoDisplay})`;
+            const idTurmaDestinoDadosContratoSql = this.sqlIdTurmaDestinoHistorico;
+            const turmaDestinoSql = `LOWER(${this.sqlTurmaDestinoHistoricoDisplay})`;
             const canalTextoSql = `LOWER(CONCAT_WS(' ',
                 ${treinamentoOrigemSql},
                 ${turmaOrigemSql},
@@ -4750,31 +4798,25 @@ export class DocumentosService {
                 }
             }
 
+            // O filtro compara o MESMO rótulo resolvido exibido nas opções (não
+            // usar hist_* cru aqui: pode estar vazio/só com o nº da edição e
+            // nunca casaria com a opção "Treinamento - Edição").
             if (filtroTurmaAtivo && treinamentoOrigemFiltro) {
-                baseQb.andWhere(
-                    `LOWER(TRIM(COALESCE(NULLIF(contrato.hist_treinamento_origem, ''), ${treinamentoOrigemSql}))) = :treinamentoOrigemFiltro`,
-                    {
-                        treinamentoOrigemFiltro,
-                    },
-                );
+                baseQb.andWhere(`${treinamentoOrigemSql} = :treinamentoOrigemFiltro`, {
+                    treinamentoOrigemFiltro,
+                });
             }
 
             if (filtroTurmaAtivo && turmasOrigemFiltro.length > 0) {
-                baseQb.andWhere(
-                    `LOWER(TRIM(COALESCE(NULLIF(contrato.hist_turma_origem, ''), ${turmaOrigemSql}))) IN (:...turmasOrigemFiltro)`,
-                    {
-                        turmasOrigemFiltro,
-                    },
-                );
+                baseQb.andWhere(`${turmaOrigemSql} IN (:...turmasOrigemFiltro)`, {
+                    turmasOrigemFiltro,
+                });
             }
 
             if (filtroTurmaAtivo && turmasDestinoFiltro.length > 0) {
-                baseQb.andWhere(
-                    `LOWER(TRIM(COALESCE(NULLIF(contrato.hist_turma_destino, ''), ${turmaDestinoSql}))) IN (:...turmasDestinoFiltro)`,
-                    {
-                        turmasDestinoFiltro,
-                    },
-                );
+                baseQb.andWhere(`${turmaDestinoSql} IN (:...turmasDestinoFiltro)`, {
+                    turmasDestinoFiltro,
+                });
             }
 
             if (filtros?.canal_venda === 'MASTERCLASS') {

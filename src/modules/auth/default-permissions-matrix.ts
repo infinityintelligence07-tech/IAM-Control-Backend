@@ -91,6 +91,9 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
         case ESetores.EXPANSAO:
             role = grantModule(role, 'alunos', ['view', 'create', 'edit']);
             role = grantModule(role, 'alunosNaTurma', ['view', 'create', 'edit', 'delete']);
+            // Fluxo de vendas (criar contrato + editar quantidade no histórico).
+            role = grantModule(role, 'vendas', ['view', 'create', 'edit']);
+            role = grantModule(role, 'documentos', ['view', 'create', 'edit']);
             role = grantModule(role, 'polos', ['view', 'create', 'edit']);
             role = grantModule(role, 'treinamentos', ['view', 'create', 'edit']);
             role = grantModule(role, 'enderecosEventos', ['view', 'create', 'edit']);
@@ -144,7 +147,15 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
             }
 
             if (funcao === EFuncoes.STAFF) {
-                sectorRow[funcao] = buildStaffPermissions();
+                let staff = buildStaffPermissions();
+                // STAFF de Eventos/Expansão opera vendas no evento (1→N inscrições).
+                if (setor === ESetores.EVENTOS || setor === ESetores.EXPANSAO) {
+                    staff = grantModule(staff, 'alunos', ['view', 'create', 'edit']);
+                    staff = grantModule(staff, 'alunosNaTurma', ['view', 'create', 'edit']);
+                    staff = grantModule(staff, 'vendas', ['view', 'create', 'edit']);
+                    staff = grantModule(staff, 'documentos', ['view', 'create', 'edit']);
+                }
+                sectorRow[funcao] = staff;
                 continue;
             }
 

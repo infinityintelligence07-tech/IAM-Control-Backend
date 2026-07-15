@@ -326,8 +326,12 @@ export const calcularMetricasDashboard = (contratos: ContratoDashboardLinha[], d
     const cartaoLink = valorFatia(formas, ['Cartão', 'Link']);
     const boleto = valorFatia(formas, ['Boleto']);
     const pendencia = valorFatia(formas, ['Pendência']);
-    const liqBruto = Math.max(0, fatBruto - pendencia);
-    const liquidezLiq = liqBruto;
+    // Fat bruto = soma dos valores dos contratos
+    // Liq. bruto = Pix + Cartão + Link
+    // Liquidez liq = (Cartão + Link) × 0,88 + Pix
+    // Percentual = Liquidez liq ÷ Fat bruto
+    const liqBruto = pix + cartaoLink;
+    const liquidezLiq = cartaoLink * 0.88 + pix;
     const percentualLiquidez = fatBruto > 0 ? (liquidezLiq / fatBruto) * 100 : 0;
 
     return {

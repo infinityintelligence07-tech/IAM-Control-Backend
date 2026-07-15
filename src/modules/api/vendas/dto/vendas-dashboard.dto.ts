@@ -61,9 +61,13 @@ export class MetricasDashboardVendasDto {
     inscricoes: number;
     vendas: number;
     ticketMedio: number;
+    /** Soma dos valores dos contratos. */
     fatBruto: number;
+    /** Pix + Cartão + Link. */
     liqBruto: number;
+    /** (Cartão + Link) × 0,88 + Pix. */
     liquidezLiq: number;
+    /** Liquidez liq ÷ Fat bruto (× 100). */
     percentualLiquidez: number;
     vendasComPendencia: number;
     vendasFechadas: number;

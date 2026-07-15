@@ -15,6 +15,7 @@ import { UploadModule } from './upload/upload.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
 import { NotificacoesModule } from './notificacoes/notificacoes.module';
+import { VendasModule } from './vendas/vendas.module';
 
 @Module({
     imports: [
@@ -34,6 +35,7 @@ import { NotificacoesModule } from './notificacoes/notificacoes.module';
         WebhooksModule,
         ConfiguracoesModule,
         NotificacoesModule,
+        VendasModule,
     ],
 })
 export class ApiModule {}

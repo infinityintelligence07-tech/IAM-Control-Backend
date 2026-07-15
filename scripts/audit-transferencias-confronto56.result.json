@@ -1,0 +1,451 @@
+{
+  "gerado_em": "2026-07-14T18:48:45.678Z",
+  "turmas_confronto": [
+    {
+      "id": 89,
+      "edicao_turma": "56",
+      "data_inicio": "2026-07-09T03:00:00.000Z",
+      "data_final": "2026-07-14T03:00:00.000Z",
+      "status_turma": "INSCRICOES_ABERTAS",
+      "reaberta_manualmente": true,
+      "sigla_treinamento": "CONF",
+      "treinamento": "Confronto",
+      "polo": "Americana"
+    },
+    {
+      "id": 90,
+      "edicao_turma": "57",
+      "data_inicio": "2026-08-20T03:00:00.000Z",
+      "data_final": "2026-08-23T03:00:00.000Z",
+      "status_turma": "AGUARDANDO_LIBERACAO",
+      "reaberta_manualmente": false,
+      "sigla_treinamento": "CONF",
+      "treinamento": "Confronto",
+      "polo": "Americana"
+    }
+  ],
+  "turma_56": {
+    "id": 89,
+    "edicao_turma": "56",
+    "data_inicio": "2026-07-09T03:00:00.000Z",
+    "data_final": "2026-07-14T03:00:00.000Z",
+    "status_turma": "INSCRICOES_ABERTAS",
+    "reaberta_manualmente": true,
+    "sigla_treinamento": "CONF",
+    "treinamento": "Confronto",
+    "polo": "Americana"
+  },
+  "turma_57": {
+    "id": 90,
+    "edicao_turma": "57",
+    "data_inicio": "2026-08-20T03:00:00.000Z",
+    "data_final": "2026-08-23T03:00:00.000Z",
+    "status_turma": "AGUARDANDO_LIBERACAO",
+    "reaberta_manualmente": false,
+    "sigla_treinamento": "CONF",
+    "treinamento": "Confronto",
+    "polo": "Americana"
+  },
+  "total_transferencias_pos_evento": 0,
+  "transferencias": [],
+  "problemas": [],
+  "alunos_alvo": {
+    "Tânia Marilda Ferreira Pagliarini": [],
+    "Adriana Maria Schena": [
+      {
+        "aluno": {
+          "id": 14252,
+          "nome": "ADRIANA MARIA SCHENA",
+          "email": "laura.marchetto@universo.univates.br",
+          "telefone_um": "51 97449815"
+        },
+        "vinculos_56_57": [
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "edicao_turma": "56",
+            "sigla_treinamento": "CONF",
+            "origem_aluno": "COMPROU_INGRESSO",
+            "presenca_turma": null,
+            "status_aluno_turma": "FALTA_ENVIAR_LINK_CONFIRMACAO",
+            "id_turma_transferencia_para": 90,
+            "id_turma_transferencia_de": null,
+            "criado_em": "2026-06-27T23:46:37.239Z",
+            "deletado_em": "2026-07-14T12:03:44.759Z",
+            "atualizado_em": "2026-07-14T12:03:44.761Z",
+            "atualizado_por": 498,
+            "atualizado_por_nome": "Yasmin Passos"
+          },
+          {
+            "id_turma_aluno": "37051",
+            "id_turma": 90,
+            "edicao_turma": "57",
+            "sigla_treinamento": "CONF",
+            "origem_aluno": "TRANSFERENCIA",
+            "presenca_turma": null,
+            "status_aluno_turma": "FALTA_ENVIAR_LINK_CONFIRMACAO",
+            "id_turma_transferencia_para": null,
+            "id_turma_transferencia_de": 89,
+            "criado_em": "2026-07-14T12:03:44.740Z",
+            "deletado_em": null,
+            "atualizado_em": "2026-07-14T12:03:44.740Z",
+            "atualizado_por": 498,
+            "atualizado_por_nome": "Yasmin Passos"
+          }
+        ],
+        "historico_transferencias": [
+          {
+            "id": "4989",
+            "id_turma_de": 89,
+            "id_turma_para": 90,
+            "id_turma_aluno_de": "35965",
+            "id_turma_aluno_para": "37051",
+            "criado_em": "2026-07-14T12:03:44.748Z"
+          }
+        ],
+        "logs": [
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "tipo_acao": "CRIACAO",
+            "titulo": "Aluno inscrito na turma",
+            "descricao": "Matrícula criada com sucesso.",
+            "template_key": null,
+            "data_acao": "2026-06-27T23:46:37.253Z",
+            "criado_por": 531,
+            "criado_por_nome": "Jeisy Calsoni"
+          },
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "tipo_acao": "OBSERVACAO",
+            "titulo": "Observação registrada",
+            "descricao": "NÃO ATENDEU, MANDEI UM ÁUDIO DE CONFIRMAÇÃO.",
+            "template_key": null,
+            "data_acao": "2026-06-29T13:51:19.169Z",
+            "criado_por": 434,
+            "criado_por_nome": "Maria Climeni"
+          },
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "tipo_acao": "OBSERVACAO",
+            "titulo": "Observação registrada",
+            "descricao": "NÃO ATENDE, MANDEI UMA MENSAGEM.",
+            "template_key": null,
+            "data_acao": "2026-06-30T13:19:57.571Z",
+            "criado_por": 434,
+            "criado_por_nome": "Maria Climeni"
+          },
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "tipo_acao": "OBSERVACAO",
+            "titulo": "Observação registrada",
+            "descricao": "NÃO RESPONDEU MEUS CONTATOS E BLOQUEOU NO WHATS.",
+            "template_key": null,
+            "data_acao": "2026-07-08T18:45:04.310Z",
+            "criado_por": 434,
+            "criado_por_nome": "Maria Climeni"
+          },
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "tipo_acao": "OBSERVACAO",
+            "titulo": "Aluno transferiu de turma",
+            "descricao": "Aluna de venda, não compareceu na data do confronto 56 e por esta razão está sendo transferida para o confronto 57",
+            "template_key": "ALUNO_TRANSFERIU_TURMA",
+            "data_acao": "2026-07-14T12:03:37.047Z",
+            "criado_por": 498,
+            "criado_por_nome": "Yasmin Passos"
+          },
+          {
+            "id_turma_aluno": "35965",
+            "id_turma": 89,
+            "tipo_acao": "TRANSFERENCIA",
+            "titulo": "Aluno transferido para outra turma",
+            "descricao": "Transferência da turma 56 para 57.",
+            "template_key": null,
+            "data_acao": "2026-07-14T12:03:44.752Z",
+            "criado_por": 498,
+            "criado_por_nome": "Yasmin Passos"
+          },
+          {
+            "id_turma_aluno": "37051",
+            "id_turma": 90,
+            "tipo_acao": "TRANSFERENCIA",
+            "titulo": "Aluno recebido por transferência",
+            "descricao": "Recebido da turma 56.",
+            "template_key": null,
+            "data_acao": "2026-07-14T12:03:44.755Z",
+            "criado_por": 498,
+            "criado_por_nome": "Yasmin Passos"
+          },
+          {
+            "id_turma_aluno": "37051",
+            "id_turma": 90,
+            "tipo_acao": "OBSERVACAO",
+            "titulo": "Observação registrada",
+            "descricao": "NOSHOW no CONF 56, compra de ingresso transf. \n\nEnviei msg pra entender o que aconteceu e como posso apoiar",
+            "template_key": null,
+            "data_acao": "2026-07-14T17:52:54.462Z",
+            "criado_por": 418,
+            "criado_por_nome": "LILLIAN KAREN DA SILVA BULLA DE SÁ"
+          }
+        ]
+      }
+    ],
+    "Wellington Gomes Scheffler": []
+  },
+  "ipr223_quem_removeu": {
+    "registros": [
+      {
+        "id_turma_aluno": "32182",
+        "nome": "Lidiana Nogueira de Oliveira",
+        "deletado_em": null,
+        "atualizado_em": "2026-07-13T18:24:25.730Z",
+        "atualizado_por": 285,
+        "atualizado_por_nome": "Vitoria Cristina Borges da Cruz",
+        "atualizado_por_email": "vitorialins.iam@gmail.com"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "nome": "Fabiana Stroppa",
+        "deletado_em": null,
+        "atualizado_em": "2026-07-13T18:17:50.289Z",
+        "atualizado_por": 285,
+        "atualizado_por_nome": "Vitoria Cristina Borges da Cruz",
+        "atualizado_por_email": "vitorialins.iam@gmail.com"
+      },
+      {
+        "id_turma_aluno": "32634",
+        "nome": "Carlos Júnior Mendes",
+        "deletado_em": null,
+        "atualizado_em": "2026-07-13T18:16:46.557Z",
+        "atualizado_por": 285,
+        "atualizado_por_nome": "Vitoria Cristina Borges da Cruz",
+        "atualizado_por_email": "vitorialins.iam@gmail.com"
+      },
+      {
+        "id_turma_aluno": "35987",
+        "nome": "Amanda Barboza Mascarenhas",
+        "deletado_em": null,
+        "atualizado_em": "2026-07-13T18:15:38.006Z",
+        "atualizado_por": 285,
+        "atualizado_por_nome": "Vitoria Cristina Borges da Cruz",
+        "atualizado_por_email": "vitorialins.iam@gmail.com"
+      }
+    ],
+    "logs": [
+      {
+        "id_turma_aluno": "32182",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno recebido por transferência",
+        "descricao": "Recebido da turma 221.",
+        "template_key": null,
+        "data_acao": "2026-06-08T21:48:26.973Z",
+        "criado_por": 434,
+        "criado_por_nome": "Maria Climeni"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno recebido por transferência",
+        "descricao": "Recebido da turma 221.",
+        "template_key": null,
+        "data_acao": "2026-06-08T21:48:35.285Z",
+        "criado_por": 434,
+        "criado_por_nome": "Maria Climeni"
+      },
+      {
+        "id_turma_aluno": "32634",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno recebido por transferência",
+        "descricao": "Recebido da turma 221.",
+        "template_key": null,
+        "data_acao": "2026-06-10T18:11:05.196Z",
+        "criado_por": 434,
+        "criado_por_nome": "Maria Climeni"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "id_turma": 68,
+        "tipo_acao": "OBSERVACAO",
+        "titulo": "Observação registrada",
+        "descricao": "ENVIADA TEMPALTE DE CONFIRMAÇÃO.",
+        "template_key": null,
+        "data_acao": "2026-06-17T18:09:08.810Z",
+        "criado_por": 434,
+        "criado_por_nome": "Maria Climeni"
+      },
+      {
+        "id_turma_aluno": "32634",
+        "id_turma": 68,
+        "tipo_acao": "OBSERVACAO",
+        "titulo": "Observação registrada",
+        "descricao": "Liguei dia 18/06 e não atendeu",
+        "template_key": null,
+        "data_acao": "2026-06-18T18:08:38.454Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "id_turma": 68,
+        "tipo_acao": "ATUALIZACAO",
+        "titulo": "Dados do aluno na turma atualizados",
+        "descricao": "Status na turma: CHECKIN_REALIZADO -> AGUARDANDO_CHECKIN | Check-in realizado: Sim -> Não",
+        "template_key": null,
+        "data_acao": "2026-06-24T17:10:01.462Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "35987",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno recebido por transferência",
+        "descricao": "Recebido da turma 222.",
+        "template_key": null,
+        "data_acao": "2026-06-28T03:27:34.256Z",
+        "criado_por": 1,
+        "criado_por_nome": "Rubens Junior"
+      },
+      {
+        "id_turma_aluno": "35987",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Transferido por robô (no-show IPR)",
+        "descricao": "Aluno transferido automaticamente pelo robô para a próxima turma do mesmo polo após no-show em IPR (turma de origem congelada).",
+        "template_key": "AUTO_TRANSFERENCIA_NO_SHOW_IPR",
+        "data_acao": "2026-06-28T03:27:34.291Z",
+        "criado_por": 1,
+        "criado_por_nome": "Rubens Junior"
+      },
+      {
+        "id_turma_aluno": "32634",
+        "id_turma": 68,
+        "tipo_acao": "OBSERVACAO",
+        "titulo": "Observação registrada",
+        "descricao": "Ligação não atendida",
+        "template_key": null,
+        "data_acao": "2026-06-30T19:45:08.724Z",
+        "criado_por": 418,
+        "criado_por_nome": "LILLIAN KAREN DA SILVA BULLA DE SÁ"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "id_turma": 68,
+        "tipo_acao": "ATUALIZACAO",
+        "titulo": "Dados do aluno na turma atualizados",
+        "descricao": "Status na turma: CHECKIN_REALIZADO -> FALTA_ENVIAR_LINK_CONFIRMACAO | Confirmação realizada: Sim -> Não | Check-in realizado: Sim -> Não",
+        "template_key": null,
+        "data_acao": "2026-07-02T13:16:46.716Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32182",
+        "id_turma": 68,
+        "tipo_acao": "ATUALIZACAO",
+        "titulo": "Dados do aluno na turma atualizados",
+        "descricao": "Status na turma: CHECKIN_REALIZADO -> FALTA_ENVIAR_LINK_CONFIRMACAO | Confirmação realizada: Sim -> Não | Check-in realizado: Sim -> Não",
+        "template_key": null,
+        "data_acao": "2026-07-02T13:18:03.267Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "35987",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno transferido para outra turma",
+        "descricao": "Transferência da turma 223 para 226.",
+        "template_key": null,
+        "data_acao": "2026-07-07T19:48:26.660Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32634",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno transferido para outra turma",
+        "descricao": "Transferência da turma 223 para 226.",
+        "template_key": null,
+        "data_acao": "2026-07-07T19:59:59.589Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno transferido para outra turma",
+        "descricao": "Transferência da turma 223 para 226.",
+        "template_key": null,
+        "data_acao": "2026-07-08T18:44:48.195Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32182",
+        "id_turma": 68,
+        "tipo_acao": "TRANSFERENCIA",
+        "titulo": "Aluno transferido para outra turma",
+        "descricao": "Transferência da turma 223 para 226.",
+        "template_key": null,
+        "data_acao": "2026-07-08T18:47:41.394Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "35987",
+        "id_turma": 68,
+        "tipo_acao": "REMOCAO",
+        "titulo": "Aluno removido da turma",
+        "descricao": "Motivo: VEIO TRANSFERIDO DE OUTRA TURMA E NÃO UTILIZOU",
+        "template_key": null,
+        "data_acao": "2026-07-13T18:15:37.917Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32634",
+        "id_turma": 68,
+        "tipo_acao": "REMOCAO",
+        "titulo": "Aluno removido da turma",
+        "descricao": "Motivo: VEIO TRANSFERIDO DE OUTRA TURMA E NÃO UTILIZOU",
+        "template_key": null,
+        "data_acao": "2026-07-13T18:16:46.527Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32183",
+        "id_turma": 68,
+        "tipo_acao": "REMOCAO",
+        "titulo": "Aluno removido da turma",
+        "descricao": "Motivo: ALUNA FOI TRANSFERIDA PARA 226",
+        "template_key": null,
+        "data_acao": "2026-07-13T18:17:50.258Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      },
+      {
+        "id_turma_aluno": "32182",
+        "id_turma": 68,
+        "tipo_acao": "REMOCAO",
+        "titulo": "Aluno removido da turma",
+        "descricao": "Motivo: VEIO TRABSFERIDO DE OUTRA TURMA E NÃO UTILIZOU",
+        "template_key": null,
+        "data_acao": "2026-07-13T18:24:25.578Z",
+        "criado_por": 285,
+        "criado_por_nome": "Vitoria Cristina Borges da Cruz"
+      }
+    ]
+  }
+}

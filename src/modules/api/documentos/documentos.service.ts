@@ -3070,8 +3070,22 @@ export class DocumentosService {
             delete camposVariaveis['Turmas do IPR'];
         } else {
             camposVariaveis['Quantidade de Inscrições do Imersão Prosperar'] = String(total);
+            // A edição NUNCA pode sair vazia (gravaria "Turma 1:  (19 ...)" e o
+            // frontend perderia o vínculo turma↔bônus): quando o payload não
+            // trouxer a edição (ex.: turma fora da lista carregada na tela),
+            // resolve pelo banco; em último caso usa o próprio id da turma.
+            const edicoesResolvidas = new Map<number, string>();
+            for (const linha of linhasValidas) {
+                const edicaoPayload = String(linha.edicao_turma || '').trim();
+                if (edicaoPayload) {
+                    edicoesResolvidas.set(linha.id_turma, edicaoPayload);
+                    continue;
+                }
+                const turma = await this.uow.turmasRP.findOne({ where: { id: linha.id_turma }, withDeleted: true });
+                edicoesResolvidas.set(linha.id_turma, String(turma?.edicao_turma || '').trim() || String(linha.id_turma));
+            }
             const partes = linhasValidas.map(
-                (linha, index) => `Turma ${index + 1}: ${String(linha.edicao_turma || '').trim()} (${linha.quantidade} inscrição(ões))`,
+                (linha, index) => `Turma ${index + 1}: ${edicoesResolvidas.get(linha.id_turma)} (${linha.quantidade} inscrição(ões))`,
             );
             camposVariaveis['Turmas do Imersão Prosperar'] = partes.join('|');
         }
@@ -3506,14 +3520,22 @@ export class DocumentosService {
         const descricaoTurmasIpr = String(
             camposVariaveis?.['Turmas do Imersão Prosperar'] || camposVariaveis?.['Turmas do Imersao Prosperar'] || camposVariaveis?.['Turmas do IPR'] || '',
         );
-        const quantidadesPorTurmaIpr = descricaoTurmasIpr
+        const entradasTurmasIpr = descricaoTurmasIpr
             .split('|')
             .map((entrada) => entrada.trim())
-            .filter(Boolean)
+            .filter(Boolean);
+        // Entradas sem edição (ex.: "Turma 1:  (19 inscrição(ões))") são registros
+        // corrompidos: sem a edição não há turma de bônus vinculável a esta venda,
+        // então não contam (mesma regra do frontend).
+        const quantidadesPorTurmaIpr = entradasTurmasIpr
+            .filter((entrada) => /Turma\s+\d+:\s*\d{2,4}/i.test(entrada))
             .map((entrada) => {
                 const parsed = Number.parseInt(entrada.match(/(\d+)\s*inscri[cç][aã]o/i)?.[1] || '', 10);
                 return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
             });
+        if (entradasTurmasIpr.length > 0 && quantidadesPorTurmaIpr.length === 0) {
+            return 0;
+        }
         const somaQuantidadesIpr = quantidadesPorTurmaIpr.reduce((acc, valor) => acc + valor, 0);
         const quantidadeViaCampoIpr = Number.parseInt(
             String(camposVariaveis?.['Quantidade de Inscrições do Imersão Prosperar'] || camposVariaveis?.['Quantidade de Inscricoes do Imersao Prosperar'] || ''),
@@ -3529,10 +3551,11 @@ export class DocumentosService {
             return quantidadeIpr;
         }
 
-        const bonusMatriculasQuantidade = Number((contratoMapeado as { bonus_ipr_inscricoes_quantidade?: number }).bonus_ipr_inscricoes_quantidade || 0);
-        if (bonusMatriculasQuantidade > 0) {
-            return bonusMatriculasQuantidade;
-        }
+        // NÃO usar bonus_ipr_inscricoes_quantidade como fallback: esse valor é
+        // contado por COMPRADOR (matrículas ALUNO_BONUS de todas as vendas) e
+        // atribuía o bônus de outra venda a contratos sem bônus, inflando o
+        // total consolidado. O bônus do resumo é sempre por venda
+        // (campos_variaveis do próprio contrato).
 
         const quantidadeBonusDiretaKeys = [
             'Quantidade de Inscrições Bônus',

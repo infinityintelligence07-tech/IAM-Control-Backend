@@ -293,7 +293,11 @@ export class DocumentosController {
             omitir_comprovantes: true,
             incluir_resumo: true,
         });
-        return { resumo: resultado.resumo };
+        return {
+            resumo: resultado.resumo,
+            total: resultado.total,
+            totalPages: resultado.totalPages,
+        };
     }
 
     @Get('public/contratos-banco/opcoes-origem')
@@ -381,6 +385,17 @@ export class DocumentosController {
         const resultado = this.documentosService.limparCachesHistorico();
         return {
             message: 'Caches do histórico invalidados com sucesso.',
+            ...resultado,
+        };
+    }
+
+    @Post('admin/historico/recalcular-staff-lider')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'edit' })
+    async recalcularHistStaffLider() {
+        const resultado = await this.documentosService.recalcularHistStaffLiderContratos();
+        return {
+            message: 'Staff líder do histórico recalculado com sucesso.',
             ...resultado,
         };
     }

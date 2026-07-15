@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
@@ -87,6 +87,7 @@ type LinhaHistoricoVendasResumo = {
     hist_pendencia_pagamento?: string | boolean | null;
     hist_receita_total?: string | number | null;
     hist_vendedor_id?: string | number | null;
+    hist_staff_lider_id?: string | number | null;
 };
 
 @Injectable()
@@ -110,6 +111,14 @@ export class DocumentosService {
     private readonly staffLiderSemVinculoSentinela = '__SEM_STAFF_LIDER__';
     private readonly janelaCronSincronizacaoDias = 7;
     private sincronizacaoStatusCronEmExecucao = false;
+    /** Cache curto do mapa global membro→líder IPR (invalidado com caches do histórico). */
+    private mapaLiderIprCache: {
+        expiresAt: number;
+        timesPorTurma: Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>;
+        liderPorMembroGlobal: Map<string, string>;
+        timesPorLider: Map<string, Set<string>>;
+    } | null = null;
+    private readonly mapaLiderIprCacheTtlMs = 120000;
     private readonly zapsignCronMaxTentativas = parsePositiveIntEnv(process.env.ZAPSIGN_CRON_MAX_TENTATIVAS, 2);
     private readonly zapsignCronRetryDelayMs = parsePositiveIntEnv(process.env.ZAPSIGN_CRON_RETRY_DELAY_MS, 2000);
     private readonly opcoesOrigemCache = new Map<
@@ -152,6 +161,7 @@ export class DocumentosService {
         private readonly contractTemplateService: ContractTemplateService,
         private readonly termTemplateService: TermTemplateService,
         private readonly mailService: MailService,
+        @Inject(forwardRef(() => TurmasService))
         private readonly turmasService: TurmasService,
         private readonly notificacoesService: NotificacoesService,
     ) {}
@@ -960,7 +970,10 @@ export class DocumentosService {
                 criado_por: userId,
                 atualizado_por: userId,
             });
-            Object.assign(contrato, this.montarColunasHistoricoVenda(contrato.dados_contrato, userId));
+            Object.assign(contrato, await this.montarColunasHistoricoVendaCompletas(contrato.dados_contrato, userId, [
+                idTurmaOrigemContrato,
+                criarContratoDto.id_turma_destino,
+            ]));
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
             this.invalidarCachesHistoricoVendas();
@@ -2914,6 +2927,175 @@ export class DocumentosService {
         };
     }
 
+    private obterIdsTurmasParaStaffLider(dadosContratoRaw: Record<string, any> | null | undefined, extras: Array<string | number | null | undefined> = []): number[] {
+        const dadosContrato = dadosContratoRaw || {};
+        const candidatos = [
+            ...extras,
+            dadosContrato?.fluxo_evento_origem_id_turma,
+            dadosContrato?.id_turma_origem,
+            dadosContrato?.turma_origem?.id,
+            dadosContrato?.fluxo_evento_destino_id_turma,
+            dadosContrato?.id_turma_destino,
+            dadosContrato?.turma?.id,
+        ];
+        return Array.from(new Set(candidatos.map((valor) => Number(valor)).filter((valor) => Number.isFinite(valor) && valor > 0)));
+    }
+
+    private async obterMapaLiderIprCacheado(): Promise<{
+        timesPorTurma: Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>;
+        liderPorMembroGlobal: Map<string, string>;
+        timesPorLider: Map<string, Set<string>>;
+    }> {
+        if (this.mapaLiderIprCache && this.mapaLiderIprCache.expiresAt > Date.now()) {
+            return this.mapaLiderIprCache;
+        }
+
+        const turmas = await this.uow.turmasRP.find({
+            where: { deletado_em: IsNull() },
+            relations: ['id_treinamento_fk'],
+        });
+
+        const timesPorTurma = new Map<number, Array<{ id: string; nome: string; liderId: string; membrosIds: string[] }>>();
+        const liderPorMembroGlobal = new Map<string, string>();
+        const timesPorLider = new Map<string, Set<string>>();
+
+        turmas.forEach((turma) => {
+            const ehIpr = this.turmaEhImersaoProsperarHistorico(turma?.id_treinamento_fk?.sigla_treinamento, turma?.id_treinamento_fk?.treinamento);
+            if (!ehIpr) {
+                timesPorTurma.set(turma.id, []);
+                return;
+            }
+            const times = Array.isArray(turma.times_equipes) ? turma.times_equipes : [];
+            const timesNorm = times.map((time) => ({
+                id: String(time.id || ''),
+                nome: String(time.nome || ''),
+                liderId: String(time.liderId || '').trim(),
+                membrosIds: Array.isArray(time.membrosIds) ? time.membrosIds.map((id) => String(id).trim()) : [],
+            }));
+            timesPorTurma.set(turma.id, timesNorm);
+            timesNorm.forEach((time) => {
+                if (!time.liderId) return;
+                liderPorMembroGlobal.set(time.liderId, time.liderId);
+                if (time.nome) {
+                    const set = timesPorLider.get(time.liderId) || new Set<string>();
+                    set.add(time.nome);
+                    timesPorLider.set(time.liderId, set);
+                }
+                time.membrosIds.forEach((membroId) => {
+                    if (membroId) liderPorMembroGlobal.set(membroId, time.liderId);
+                });
+            });
+        });
+
+        this.mapaLiderIprCache = {
+            expiresAt: Date.now() + this.mapaLiderIprCacheTtlMs,
+            timesPorTurma,
+            liderPorMembroGlobal,
+            timesPorLider,
+        };
+        return this.mapaLiderIprCache;
+    }
+
+    private async resolverHistStaffLiderId(
+        vendedorId: number | null,
+        idsTurmas: number[],
+    ): Promise<number | null> {
+        if (!vendedorId) return null;
+        const vendedorKey = String(vendedorId);
+        const { timesPorTurma, liderPorMembroGlobal } = await this.obterMapaLiderIprCacheado();
+        const timesDaVenda = idsTurmas.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
+        const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorKey || time.membrosIds.includes(vendedorKey));
+        const liderId = timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorKey) || '';
+        const parsed = Number(liderId);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    private async montarColunasHistoricoVendaCompletas(
+        dadosContratoRaw: Record<string, any> | null | undefined,
+        criadoPor?: number | string | null,
+        idsTurmasExtras: Array<string | number | null | undefined> = [],
+    ): Promise<{
+        hist_qtd_inscricoes: number;
+        hist_qtd_bonus: number;
+        hist_pendencia_pagamento: boolean;
+        hist_receita_total: number;
+        hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        hist_treinamento_origem: string | null;
+        hist_turma_origem: string | null;
+        hist_turma_destino: string | null;
+        hist_vendedor_id: number | null;
+        hist_staff_lider_id: number | null;
+    }> {
+        const base = this.montarColunasHistoricoVenda(dadosContratoRaw, criadoPor);
+        const idsTurmas = this.obterIdsTurmasParaStaffLider(dadosContratoRaw, idsTurmasExtras);
+        const hist_staff_lider_id = await this.resolverHistStaffLiderId(base.hist_vendedor_id, idsTurmas);
+        return { ...base, hist_staff_lider_id };
+    }
+
+    /**
+     * Recalcula hist_staff_lider_id de todos os contratos ativos (ex.: após editar times IPR).
+     */
+    async recalcularHistStaffLiderContratos(): Promise<{ atualizados: number }> {
+        const { timesPorTurma, liderPorMembroGlobal } = await this.obterMapaLiderIprCacheado();
+        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('contrato')
+            .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+            .leftJoin('tat.id_turma_aluno_fk', 'ta')
+            .select('contrato.id', 'id')
+            .addSelect('contrato.hist_vendedor_id', 'hist_vendedor_id')
+            .addSelect('contrato.hist_staff_lider_id', 'hist_staff_lider_id')
+            .addSelect('ta.id_turma', 'id_turma')
+            .addSelect('tat.id_turma_destino', 'id_turma_destino')
+            .addSelect(`contrato.dados_contrato->>'fluxo_evento_origem_id_turma'`, 'origem_id')
+            .addSelect(`contrato.dados_contrato->>'fluxo_evento_destino_id_turma'`, 'destino_id')
+            .where('contrato.deletado_em IS NULL')
+            .getRawMany<{
+                id: string;
+                hist_vendedor_id?: string | number | null;
+                hist_staff_lider_id?: string | number | null;
+                id_turma?: string | number | null;
+                id_turma_destino?: string | number | null;
+                origem_id?: string | number | null;
+                destino_id?: string | number | null;
+            }>();
+
+        let atualizados = 0;
+        const chunkSize = 200;
+        for (let i = 0; i < contratos.length; i += chunkSize) {
+            const chunk = contratos.slice(i, i + chunkSize);
+            await Promise.all(
+                chunk.map(async (row) => {
+                    const vendedorId = Number(row.hist_vendedor_id);
+                    if (!Number.isFinite(vendedorId) || vendedorId <= 0) {
+                        if (row.hist_staff_lider_id !== null && row.hist_staff_lider_id !== undefined) {
+                            await this.uow.turmasAlunosTreinamentosContratosRP.update(row.id, { hist_staff_lider_id: null });
+                            atualizados += 1;
+                        }
+                        return;
+                    }
+                    const vendedorKey = String(vendedorId);
+                    const idsTurmas = [row.id_turma, row.id_turma_destino, row.origem_id, row.destino_id]
+                        .map((v) => Number(v))
+                        .filter((v) => Number.isFinite(v) && v > 0);
+                    const timesDaVenda = idsTurmas.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
+                    const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorKey || time.membrosIds.includes(vendedorKey));
+                    const liderStr = timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorKey) || '';
+                    const liderId = Number(liderStr);
+                    const novo = Number.isFinite(liderId) && liderId > 0 ? liderId : null;
+                    const atual = row.hist_staff_lider_id === null || row.hist_staff_lider_id === undefined ? null : Number(row.hist_staff_lider_id);
+                    if (atual !== novo) {
+                        await this.uow.turmasAlunosTreinamentosContratosRP.update(row.id, { hist_staff_lider_id: novo });
+                        atualizados += 1;
+                    }
+                }),
+            );
+        }
+
+        this.invalidarCachesHistoricoVendas();
+        this.logger.log(`contract.historico.staffLider.recalc | atualizados=${atualizados} total=${contratos.length}`);
+        return { atualizados };
+    }
+
     private extrairTreinamentoOrigemServidor(contrato: any): string {
         const dadosContrato = contrato?.dados_contrato || {};
         const camposVariaveis = contrato?.dados_contrato?.campos_variaveis || {};
@@ -3132,6 +3314,7 @@ export class DocumentosService {
         this.historicoVendasCacheVersao += 1;
         this.contratosBancoCache.clear();
         this.resumoHistoricoCache.clear();
+        this.mapaLiderIprCache = null;
     }
 
     limparCachesHistorico(): {
@@ -3206,7 +3389,7 @@ export class DocumentosService {
         dadosContrato.campos_variaveis = camposVariaveis;
         await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
             dados_contrato: dadosContrato,
-            ...this.montarColunasHistoricoVenda(dadosContrato, contrato.criado_por),
+            ...(await this.montarColunasHistoricoVendaCompletas(dadosContrato, contrato.criado_por)),
         });
         this.invalidarCachesHistoricoVendas();
 
@@ -3320,7 +3503,7 @@ export class DocumentosService {
         dadosContrato.campos_variaveis = camposVariaveis;
         await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
             dados_contrato: dadosContrato,
-            ...this.montarColunasHistoricoVenda(dadosContrato, contrato.criado_por),
+            ...(await this.montarColunasHistoricoVendaCompletas(dadosContrato, contrato.criado_por)),
         });
         this.invalidarCachesHistoricoVendas();
 
@@ -3781,6 +3964,7 @@ export class DocumentosService {
             .addSelect('contrato.hist_pendencia_pagamento', 'hist_pendencia_pagamento')
             .addSelect('contrato.hist_receita_total', 'hist_receita_total')
             .addSelect('contrato.hist_vendedor_id', 'hist_vendedor_id')
+            .addSelect('contrato.hist_staff_lider_id', 'hist_staff_lider_id')
             .addSelect('contrato.criado_por', 'criado_por_contrato')
             .addSelect('tat.criado_por', 'criado_por_tat')
             .addSelect('ta.criado_por', 'criado_por_ta')
@@ -3876,52 +4060,90 @@ export class DocumentosService {
         return timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorId) || '';
     }
 
+    private aplicarFiltroStaffLiderNoQb(
+        qb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
+        staffLiderId?: string,
+    ): void {
+        const valor = String(staffLiderId || '').trim();
+        if (!valor) return;
+        if (valor === this.staffLiderSemVinculoSentinela) {
+            qb.andWhere('contrato.hist_staff_lider_id IS NULL');
+            return;
+        }
+        const liderNumerico = Number(valor);
+        if (Number.isFinite(liderNumerico) && liderNumerico > 0) {
+            qb.andWhere('contrato.hist_staff_lider_id = :staffLiderFiltroHist', { staffLiderFiltroHist: liderNumerico });
+        }
+    }
+
     private async calcularResumoHistoricoVendas(
         baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
         options?: { staff_lider_id?: string; linhasPreload?: LinhaHistoricoVendasResumo[] },
     ): Promise<ResumoHistoricoVendas> {
-        const resumoRows = options?.linhasPreload ?? (await this.carregarLinhasHistoricoVendas(baseQb));
-        const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
+        // Path SQL: agrega sobre contratos distintos (hist_*), sem carregar JSON.
+        // linhasPreload fica só como fallback legado (pré-materialização staff).
         const staffLiderId = String(options?.staff_lider_id || '').trim();
-        // O sentinela "Sem Staff Líder Informado" filtra as vendas cujo vendedor
-        // não pertence a nenhum time de líder de IPR (líder resolvido vazio).
-        const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
-        const linhasAtivas = staffLiderId
-            ? resumoRows.filter((row) => {
-                  const liderResolvido = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
-                  return filtrandoSemLider ? !liderResolvido : liderResolvido === staffLiderId;
-              })
-            : resumoRows;
+        if (options?.linhasPreload && options.linhasPreload.length > 0 && !options.linhasPreload.some((r) => r.hist_staff_lider_id !== undefined)) {
+            return this.calcularResumoHistoricoVendasEmMemoria(options.linhasPreload, staffLiderId);
+        }
 
-        const resumoBase = linhasAtivas.reduce(
-            (acc, row) => {
-                const metricas = this.obterMetricasLinhaHistorico(row);
+        const qb = baseQb.clone();
+        this.aplicarFiltroStaffLiderNoQb(qb, staffLiderId);
 
-                acc.total_inscricoes_vendidas += metricas.quantidadeInscricoes;
-                acc.total_inscricoes_bonus += metricas.quantidadeBonus;
-                if (metricas.pendenciaPagamento) {
-                    acc.total_com_pendencia += 1;
-                }
-                acc.receita_total += metricas.valorTotalVenda;
-                return acc;
-            },
-            {
-                total_inscricoes_vendidas: 0,
-                total_inscricoes_bonus: 0,
-                total_com_pendencia: 0,
-                receita_total: 0,
-            },
-        );
+        const distinctQb = qb
+            .clone()
+            .select('contrato.id', 'id')
+            .addSelect('MAX(contrato.hist_qtd_inscricoes)', 'hist_qtd_inscricoes')
+            .addSelect('MAX(contrato.hist_qtd_bonus)', 'hist_qtd_bonus')
+            .addSelect('BOOL_OR(contrato.hist_pendencia_pagamento)', 'hist_pendencia_pagamento')
+            .addSelect('MAX(contrato.hist_receita_total)', 'hist_receita_total')
+            .addSelect('MAX(contrato.hist_staff_lider_id)', 'hist_staff_lider_id')
+            .addSelect('MAX(COALESCE(contrato.hist_vendedor_id, contrato.criado_por))', 'hist_vendedor_id')
+            .groupBy('contrato.id');
 
+        const [subSql, subParams] = distinctQb.getQueryAndParameters();
+        const manager = this.uow.turmasAlunosTreinamentosContratosRP.manager;
+
+        const [totaisRow] = (await manager.query(
+            `
+            SELECT
+                COALESCE(SUM(q.hist_qtd_inscricoes), 0)::float AS total_inscricoes_vendidas,
+                COALESCE(SUM(q.hist_qtd_bonus), 0)::float AS total_inscricoes_bonus,
+                COALESCE(SUM(CASE WHEN q.hist_pendencia_pagamento THEN 1 ELSE 0 END), 0)::int AS total_com_pendencia,
+                COALESCE(SUM(q.hist_receita_total), 0)::float AS receita_total
+            FROM (${subSql}) q
+            `,
+            subParams,
+        )) as Array<{
+            total_inscricoes_vendidas: number;
+            total_inscricoes_bonus: number;
+            total_com_pendencia: number;
+            receita_total: number;
+        }>;
+
+        const rankingRows = (await manager.query(
+            `
+            SELECT
+                q.hist_staff_lider_id AS lider_id,
+                q.hist_vendedor_id AS vendedor_id,
+                COALESCE(SUM(q.hist_qtd_inscricoes), 0)::float AS total_inscricoes,
+                COUNT(*)::int AS total_vendas
+            FROM (${subSql}) q
+            GROUP BY q.hist_staff_lider_id, q.hist_vendedor_id
+            `,
+            subParams,
+        )) as Array<{
+            lider_id: string | number | null;
+            vendedor_id: string | number | null;
+            total_inscricoes: number;
+            total_vendas: number;
+        }>;
+
+        const { timesPorLider } = await this.obterMapaLiderIprCacheado();
         const idsUsuarios = Array.from(
             new Set(
-                linhasAtivas
-                    .flatMap((row) => {
-                        const vendedorId = this.obterCriadoPorResumoHistorico(row);
-                        const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
-                        const lideres = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []).map((time) => time.liderId);
-                        return [vendedorId, ...lideres].filter(Boolean);
-                    })
+                rankingRows
+                    .flatMap((row) => [row.lider_id, row.vendedor_id])
                     .map((id) => Number(id))
                     .filter((id) => Number.isFinite(id) && id > 0),
             ),
@@ -3938,12 +4160,7 @@ export class DocumentosService {
             });
         }
 
-        type TVendedorAgrupado = {
-            id: string;
-            nome: string;
-            totalInscricoes: number;
-            totalVendas: number;
-        };
+        type TVendedorAgrupado = { id: string; nome: string; totalInscricoes: number; totalVendas: number };
         type TLiderAgrupado = {
             liderId: string;
             liderNome: string;
@@ -3957,25 +4174,18 @@ export class DocumentosService {
         const mapaSemLider = new Map<string, { vendedorNome: string; totalInscricoes: number; totalVendas: number }>();
         let totalInscricoesSemLider = 0;
 
-        linhasAtivas.forEach((row) => {
-            const vendedorId = this.obterCriadoPorResumoHistorico(row) || 'Não informado';
+        rankingRows.forEach((row) => {
+            const vendedorId = String(row.vendedor_id || '').trim() || 'Não informado';
             const vendedorNome = nomeUsuarioPorId.get(Number(vendedorId)) || `ID ${vendedorId}`;
-            const metricas = this.obterMetricasLinhaHistorico(row);
-            const inscricoesDaVenda = metricas.quantidadeInscricoes;
-            const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
-            const timesDaVenda = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
-            const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorId || time.membrosIds.includes(vendedorId));
-            const liderId = timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorId) || '';
+            const inscricoes = Number(row.total_inscricoes) || 0;
+            const vendas = Number(row.total_vendas) || 0;
+            const liderId = row.lider_id === null || row.lider_id === undefined || String(row.lider_id).trim() === '' ? '' : String(row.lider_id);
 
             if (!liderId) {
-                totalInscricoesSemLider += inscricoesDaVenda;
-                const atual = mapaSemLider.get(vendedorId) || {
-                    vendedorNome,
-                    totalInscricoes: 0,
-                    totalVendas: 0,
-                };
-                atual.totalInscricoes += inscricoesDaVenda;
-                atual.totalVendas += 1;
+                totalInscricoesSemLider += inscricoes;
+                const atual = mapaSemLider.get(vendedorId) || { vendedorNome, totalInscricoes: 0, totalVendas: 0 };
+                atual.totalInscricoes += inscricoes;
+                atual.totalVendas += vendas;
                 mapaSemLider.set(vendedorId, atual);
                 return;
             }
@@ -3989,25 +4199,16 @@ export class DocumentosService {
                     totalInscricoes: 0,
                     totalVendas: 0,
                     vendedores: {},
-                    times: new Set<string>(),
+                    times: new Set<string>(Array.from(timesPorLider.get(liderId) || [])),
                 } as TLiderAgrupado);
 
-            registroLider.totalInscricoes += inscricoesDaVenda;
-            registroLider.totalVendas += 1;
-            if (timeDoVendedor?.nome) {
-                registroLider.times.add(timeDoVendedor.nome);
-            }
-
+            registroLider.totalInscricoes += inscricoes;
+            registroLider.totalVendas += vendas;
             const vendedorAtual =
                 registroLider.vendedores[vendedorId] ||
-                ({
-                    id: vendedorId,
-                    nome: vendedorNome,
-                    totalInscricoes: 0,
-                    totalVendas: 0,
-                } as TVendedorAgrupado);
-            vendedorAtual.totalInscricoes += inscricoesDaVenda;
-            vendedorAtual.totalVendas += 1;
+                ({ id: vendedorId, nome: vendedorNome, totalInscricoes: 0, totalVendas: 0 } as TVendedorAgrupado);
+            vendedorAtual.totalInscricoes += inscricoes;
+            vendedorAtual.totalVendas += vendas;
             registroLider.vendedores[vendedorId] = vendedorAtual;
             mapaLider.set(liderId, registroLider);
         });
@@ -4040,12 +4241,138 @@ export class DocumentosService {
             .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR'));
 
         return {
-            ...resumoBase,
+            total_inscricoes_vendidas: Number(totaisRow?.total_inscricoes_vendidas || 0),
+            total_inscricoes_bonus: Number(totaisRow?.total_inscricoes_bonus || 0),
+            total_com_pendencia: Number(totaisRow?.total_com_pendencia || 0),
+            receita_total: Number(totaisRow?.receita_total || 0),
             ranking_staff_lider: rankingStaffLider,
             inscricoes_sem_lider: {
                 total_inscricoes: totalInscricoesSemLider,
                 total_vendas: vendedoresSemLider.reduce((acc, item) => acc + item.total_vendas, 0),
                 vendedores: vendedoresSemLider,
+            },
+        };
+    }
+
+    /** Fallback legado quando hist_staff_lider_id ainda não está disponível nas linhas. */
+    private async calcularResumoHistoricoVendasEmMemoria(
+        resumoRows: LinhaHistoricoVendasResumo[],
+        staffLiderId: string,
+    ): Promise<ResumoHistoricoVendas> {
+        const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
+        const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
+        const linhasAtivas = staffLiderId
+            ? resumoRows.filter((row) => {
+                  const liderResolvido = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
+                  return filtrandoSemLider ? !liderResolvido : liderResolvido === staffLiderId;
+              })
+            : resumoRows;
+
+        const resumoBase = linhasAtivas.reduce(
+            (acc, row) => {
+                const metricas = this.obterMetricasLinhaHistorico(row);
+                acc.total_inscricoes_vendidas += metricas.quantidadeInscricoes;
+                acc.total_inscricoes_bonus += metricas.quantidadeBonus;
+                if (metricas.pendenciaPagamento) acc.total_com_pendencia += 1;
+                acc.receita_total += metricas.valorTotalVenda;
+                return acc;
+            },
+            { total_inscricoes_vendidas: 0, total_inscricoes_bonus: 0, total_com_pendencia: 0, receita_total: 0 },
+        );
+
+        const idsUsuarios = Array.from(
+            new Set(
+                linhasAtivas
+                    .flatMap((row) => {
+                        const vendedorId = this.obterCriadoPorResumoHistorico(row);
+                        const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
+                        const lideres = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []).map((time) => time.liderId);
+                        return [vendedorId, ...lideres].filter(Boolean);
+                    })
+                    .map((id) => Number(id))
+                    .filter((id) => Number.isFinite(id) && id > 0),
+            ),
+        );
+        const nomeUsuarioPorId = new Map<number, string>();
+        if (idsUsuarios.length > 0) {
+            const usuarios = await this.uow.usuariosRP.find({
+                where: { id: In(idsUsuarios), deletado_em: IsNull() },
+                select: { id: true, nome: true, primeiro_nome: true, sobrenome: true },
+            });
+            usuarios.forEach((usuario) => {
+                nomeUsuarioPorId.set(usuario.id, usuario.nome || `${usuario.primeiro_nome || ''} ${usuario.sobrenome || ''}`.trim() || `Usuário ${usuario.id}`);
+            });
+        }
+
+        type TVendedorAgrupado = { id: string; nome: string; totalInscricoes: number; totalVendas: number };
+        type TLiderAgrupado = {
+            liderId: string;
+            liderNome: string;
+            totalInscricoes: number;
+            totalVendas: number;
+            vendedores: Record<string, TVendedorAgrupado>;
+            times: Set<string>;
+        };
+        const mapaLider = new Map<string, TLiderAgrupado>();
+        const mapaSemLider = new Map<string, { vendedorNome: string; totalInscricoes: number; totalVendas: number }>();
+        let totalInscricoesSemLider = 0;
+
+        linhasAtivas.forEach((row) => {
+            const vendedorId = this.obterCriadoPorResumoHistorico(row) || 'Não informado';
+            const vendedorNome = nomeUsuarioPorId.get(Number(vendedorId)) || `ID ${vendedorId}`;
+            const inscricoesDaVenda = this.obterMetricasLinhaHistorico(row).quantidadeInscricoes;
+            const liderId = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
+            if (!liderId) {
+                totalInscricoesSemLider += inscricoesDaVenda;
+                const atual = mapaSemLider.get(vendedorId) || { vendedorNome, totalInscricoes: 0, totalVendas: 0 };
+                atual.totalInscricoes += inscricoesDaVenda;
+                atual.totalVendas += 1;
+                mapaSemLider.set(vendedorId, atual);
+                return;
+            }
+            const liderNome = nomeUsuarioPorId.get(Number(liderId)) || (liderId === vendedorId ? vendedorNome : `Líder ID ${liderId}`);
+            const registroLider =
+                mapaLider.get(liderId) ||
+                ({ liderId, liderNome, totalInscricoes: 0, totalVendas: 0, vendedores: {}, times: new Set<string>() } as TLiderAgrupado);
+            registroLider.totalInscricoes += inscricoesDaVenda;
+            registroLider.totalVendas += 1;
+            const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
+            const timesDaVenda = idsTurmaDaVenda.flatMap((idTurma) => timesPorTurma.get(idTurma) || []);
+            const timeDoVendedor = timesDaVenda.find((time) => time.liderId === vendedorId || time.membrosIds.includes(vendedorId));
+            if (timeDoVendedor?.nome) registroLider.times.add(timeDoVendedor.nome);
+            const vendedorAtual =
+                registroLider.vendedores[vendedorId] || ({ id: vendedorId, nome: vendedorNome, totalInscricoes: 0, totalVendas: 0 } as TVendedorAgrupado);
+            vendedorAtual.totalInscricoes += inscricoesDaVenda;
+            vendedorAtual.totalVendas += 1;
+            registroLider.vendedores[vendedorId] = vendedorAtual;
+            mapaLider.set(liderId, registroLider);
+        });
+
+        return {
+            ...resumoBase,
+            ranking_staff_lider: Array.from(mapaLider.values())
+                .map((item) => ({
+                    lider_id: item.liderId,
+                    lider_nome: item.liderNome,
+                    total_inscricoes: item.totalInscricoes,
+                    total_vendas: item.totalVendas,
+                    times: Array.from(item.times),
+                    vendedores: Object.values(item.vendedores)
+                        .map((v) => ({ id: v.id, nome: v.nome, total_inscricoes: v.totalInscricoes, total_vendas: v.totalVendas }))
+                        .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.nome.localeCompare(b.nome, 'pt-BR')),
+                }))
+                .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.lider_nome.localeCompare(b.lider_nome, 'pt-BR')),
+            inscricoes_sem_lider: {
+                total_inscricoes: totalInscricoesSemLider,
+                total_vendas: Array.from(mapaSemLider.values()).reduce((acc, item) => acc + item.totalVendas, 0),
+                vendedores: Array.from(mapaSemLider.entries())
+                    .map(([vendedor_id, dados]) => ({
+                        vendedor_id,
+                        vendedor_nome: dados.vendedorNome,
+                        total_inscricoes: dados.totalInscricoes,
+                        total_vendas: dados.totalVendas,
+                    }))
+                    .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR')),
             },
         };
     }
@@ -4473,15 +4800,19 @@ export class DocumentosService {
             }
 
             if (apenasResumo) {
-                const resumoIsolado = await this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
-                    staff_lider_id: staffLiderId,
-                });
+                const [resumoIsolado, totalRow] = await Promise.all([
+                    this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
+                        staff_lider_id: staffLiderId,
+                    }),
+                    baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>(),
+                ]);
+                const totalResumo = Number(totalRow?.total ?? 0);
                 return {
                     data: [],
-                    total: 0,
+                    total: totalResumo,
                     page: 1,
                     limit: 0,
-                    totalPages: 0,
+                    totalPages: Math.max(1, Math.ceil(totalResumo / 10)),
                     resumo: resumoIsolado,
                 };
             }
@@ -4489,31 +4820,12 @@ export class DocumentosService {
             let total: number;
             let totalPages: number;
             let idsPagina: string[];
-            let linhasHistoricoPreload: LinhaHistoricoVendasResumo[] | undefined;
             let resumo: ResumoHistoricoVendas | null = null;
 
-            if (staffLiderId) {
-                linhasHistoricoPreload = await this.carregarLinhasHistoricoVendas(baseQb);
-                const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(linhasHistoricoPreload);
-                const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
-                const idsOrdenados = linhasHistoricoPreload
-                    .filter((row) => {
-                        const liderResolvido = this.resolverLiderIdLinhaHistorico(row, timesPorTurma, liderPorMembroGlobal);
-                        return filtrandoSemLider ? !liderResolvido : liderResolvido === staffLiderId;
-                    })
-                    .sort((a, b) => new Date(String(b.criado_em || 0)).getTime() - new Date(String(a.criado_em || 0)).getTime())
-                    .map((row) => String(row.id));
-                total = idsOrdenados.length;
-                totalPages = Math.max(1, Math.ceil(total / limit));
-                idsPagina = idsOrdenados.slice(offset, offset + limit);
-                if (incluirResumo) {
-                    resumo = await this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
-                        staff_lider_id: staffLiderId,
-                        linhasPreload: linhasHistoricoPreload,
-                    });
-                }
-            } else {
-                // Contagem + página + resumo em paralelo (antes eram sequenciais).
+            // Staff líder agora filtra no SQL via hist_staff_lider_id (sem full-scan em Node).
+            this.aplicarFiltroStaffLiderNoQb(baseQb, staffLiderId);
+
+            {
                 const paginacaoPromise = (async () => {
                     const totalRow = await baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>();
                     const totalLocal = Number(totalRow?.total ?? 0);

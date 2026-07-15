@@ -94,6 +94,10 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     @Column({ type: 'int', name: 'hist_vendedor_id', nullable: true })
     hist_vendedor_id: number | null;
 
+    /** Staff líder IPR resolvido para a venda (null = sem vínculo / "Sem Staff Líder"). */
+    @Column({ type: 'int', name: 'hist_staff_lider_id', nullable: true })
+    hist_staff_lider_id: number | null;
+
     // Comprovante(s) de pagamento desta venda/contrato. É um ARRAY porque cada
     // pagamento pode ter um ou múltiplos comprovantes (imagens e/ou PDFs em
     // data URL base64). Fica vinculado ao CONTRATO (e não ao turma_aluno

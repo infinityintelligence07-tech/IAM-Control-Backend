@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { getRequestUserId } from '@/common/context/request-user.context';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
@@ -59,6 +59,7 @@ import {
 } from './dto/turmas.dto';
 import { FindOptionsSelect, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
+import { DocumentosService } from '../documentos/documentos.service';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
 import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
@@ -154,6 +155,8 @@ export class TurmasService {
     constructor(
         private readonly uow: UnitOfWorkService,
         private readonly whatsappService: WhatsAppService,
+        @Inject(forwardRef(() => DocumentosService))
+        private readonly documentosService: DocumentosService,
     ) {}
 
     async getPresentesSorteio(): Promise<PresentesSorteio[]> {
@@ -1713,6 +1716,13 @@ export class TurmasService {
         turma.atualizado_em = new Date();
 
         await this.uow.turmasRP.save(turma);
+
+        // Times IPR mudam o vínculo membro→líder: recalcula hist_staff_lider_id em background.
+        void this.documentosService.recalcularHistStaffLiderContratos().catch((error) => {
+            this.logger.warn(
+                `historico.staffLider.recalc | falha após updateTimesTurma: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        });
 
         return {
             id_turma: turma.id,

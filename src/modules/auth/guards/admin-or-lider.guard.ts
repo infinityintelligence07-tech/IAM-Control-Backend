@@ -18,23 +18,30 @@ export class AdminOrLiderGuard implements CanActivate {
             // Buscar o usuário completo do banco para verificar as funções
             const usuario = await this.uow.usuariosRP.findOne({
                 where: { id: user.sub },
-                select: ['id', 'funcao'] as any,
+                select: ['id', 'funcao', 'setor'] as any,
             });
 
             if (!usuario) {
                 throw new ForbiddenException('Usuário não encontrado');
             }
 
-            if (!usuario.funcao || !Array.isArray(usuario.funcao)) {
-                throw new ForbiddenException('Acesso negado. Apenas administradores ou líderes podem acessar esta rota.');
-            }
+            const funcoes: string[] = Array.isArray(usuario.funcao) ? usuario.funcao.map(String) : [];
+            const isAdmin =
+                funcoes.includes(String(EFuncoes.ADMINISTRADOR)) ||
+                funcoes.includes('ADMINISTRADOR') ||
+                String(usuario.setor || '').toUpperCase() === 'ADMINISTRADOR';
 
-            // Verificar se o usuário tem a função ADMINISTRADOR
-            const isAdmin = usuario.funcao.includes(EFuncoes.ADMINISTRADOR);
-
-            // Verificar se o usuário tem alguma função de LÍDER
-            const liderFunctions = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
-            const isLider = liderFunctions.some((liderFunc) => usuario.funcao.includes(liderFunc));
+            const liderFunctions: string[] = [
+                String(EFuncoes.LIDER),
+                String(EFuncoes.LIDER_DE_EVENTOS),
+                String(EFuncoes.LIDER_DE_MASTERCLASS),
+                String(EFuncoes.LIDER_DE_CONFRONTO),
+                'LIDER',
+                'LIDER_DE_EVENTOS',
+                'LIDER_DE_MASTERCLASS',
+                'LIDER_DE_CONFRONTO',
+            ];
+            const isLider = liderFunctions.some((liderFunc) => funcoes.includes(liderFunc));
 
             if (!isAdmin && !isLider) {
                 throw new ForbiddenException('Acesso negado. Apenas administradores ou líderes podem acessar esta rota.');

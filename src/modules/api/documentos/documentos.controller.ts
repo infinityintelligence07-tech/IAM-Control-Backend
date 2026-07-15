@@ -203,8 +203,9 @@ export class DocumentosController {
         return this.documentosService.criarContratoZapSign(criarContratoDto, userId);
     }
 
-    // Endpoint público para listar contratos do banco (para compatibilidade com frontend)
+    // Listagem do Histórico de Vendas: qualquer usuário autenticado (sem matriz).
     @Get('public/contratos-banco')
+    @UseGuards(JwtAuthGuard)
     async listarContratosBancoPublico(
         @Query('page') page?: string,
         @Query('limit') limit?: string,
@@ -259,6 +260,7 @@ export class DocumentosController {
     // Resumo/ranking isolado do Histórico de Vendas — carregar em paralelo à listagem
     // com incluir_resumo=false para liberar a grade mais cedo.
     @Get('public/contratos-banco/resumo')
+    @UseGuards(JwtAuthGuard)
     async listarResumoContratosBancoPublico(
         @Query('id_aluno') id_aluno?: string,
         @Query('id_treinamento') id_treinamento?: string,
@@ -302,6 +304,7 @@ export class DocumentosController {
     }
 
     @Get('public/contratos-banco/opcoes-origem')
+    @UseGuards(JwtAuthGuard)
     async listarOpcoesOrigemPublico(
         @Query('data_inicio') data_inicio?: string,
         @Query('data_fim') data_fim?: string,
@@ -325,6 +328,7 @@ export class DocumentosController {
     }
 
     @Post('public/contratos-banco/:id/sincronizar-bonus-ipr')
+    @UseGuards(JwtAuthGuard)
     sincronizarBonusIprContratoHistorico(
         @Param('id') id: string,
         @Body()
@@ -338,6 +342,7 @@ export class DocumentosController {
     // Atualiza apenas as observações internas (uso do sistema) da venda, sem
     // alterar as observações do contrato propriamente dito.
     @Post('public/contratos-banco/:id/observacoes-sistema')
+    @UseGuards(JwtAuthGuard)
     atualizarObservacoesSistemaContrato(
         @Param('id') id: string,
         @Body()
@@ -352,6 +357,7 @@ export class DocumentosController {
     // pendência) no snapshot por venda dados_contrato.turma_aluno — fonte que a
     // listagem do histórico prioriza sobre a matrícula compartilhada de origem.
     @Post('public/contratos-banco/:id/dados-venda')
+    @UseGuards(JwtAuthGuard)
     atualizarDadosVendaContrato(
         @Param('id') id: string,
         @Body()
@@ -367,6 +373,7 @@ export class DocumentosController {
     // Atualiza os comprovantes de pagamento da VENDA (contrato). Recebe um array
     // de data URLs base64 (imagens/PDF) ou a forma serializada usada pelo frontend.
     @Post('public/contratos-banco/:id/comprovantes')
+    @UseGuards(JwtAuthGuard)
     atualizarComprovantesContrato(
         @Param('id') id: string,
         @Body()
@@ -486,10 +493,9 @@ export class DocumentosController {
         }
     }
 
-    // Endpoint para cancelar documento do ZapSign e fazer soft delete
+    // Cancelar documento ZapSign: qualquer usuário autenticado (fluxo de vendas).
     @Delete('zapsign/documento/:documentoId/cancelar')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'delete' })
+    @UseGuards(JwtAuthGuard)
     async cancelarDocumentoZapSign(@Param('documentoId') documentoId: string, @Req() req: Request): Promise<{ message: string }> {
         try {
             console.log('=== CANCELANDO DOCUMENTO ZAPSIGN ===');
@@ -503,10 +509,9 @@ export class DocumentosController {
         }
     }
 
-    // Endpoint para excluir contrato (soft delete + remoção na Zapsign)
+    // Excluir venda/contrato: qualquer usuário autenticado (CRUD de vendas sem matriz).
     @Delete('excluir-zapsign/:contratoId')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'delete' })
+    @UseGuards(JwtAuthGuard)
     async excluirDocumentoZapSign(@Param('contratoId') contratoId: string, @Req() req: Request): Promise<{ message: string }> {
         try {
             console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');

@@ -1,7 +1,6 @@
 import { Controller, Get, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor } from '@nestjs/common';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
-import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
-import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
+import { AdminOrLiderGuard } from '@/modules/auth/guards/admin-or-lider.guard';
 import { VendasDashboardService } from './vendas-dashboard.service';
 import {
     VendasDashboardFiltrosResponseDto,
@@ -12,11 +11,10 @@ import {
 /**
  * Dashboard consolidado de vendas.
  *
- * O frontend deve consumir estas rotas em vez de paginar contratos-banco
- * + N chamadas de status-resumo por turma.
+ * Restrito a administradores e líderes (inclui Líder de Eventos / Masterclass / Confronto).
+ * O fluxo de venda e o histórico NÃO passam por este controller.
  */
-@UseGuards(JwtAuthGuard, PermissionsGuard)
-@RequirePermission({ module: 'vendas', action: 'view' })
+@UseGuards(JwtAuthGuard, AdminOrLiderGuard)
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('vendas')
 export class VendasController {

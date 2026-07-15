@@ -11,6 +11,7 @@ import { UnitOfWorkModule } from '../config/unit_of_work/uow.module';
 import { MailModule } from '../mail/mail.module';
 import { EncryptionService } from '../../common/services/encryption.service';
 import { AdminGuard } from './guards/admin.guard';
+import { AdminOrLiderGuard } from './guards/admin-or-lider.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { PermissionsMatrixService } from './permissions-matrix.service';
 
@@ -30,7 +31,23 @@ import { PermissionsMatrixService } from './permissions-matrix.service';
         }),
     ],
     controllers: [AuthController],
-    providers: [AuthService, JwtStrategy, GoogleStrategy, EncryptionService, AdminGuard, PermissionsGuard, PermissionsMatrixService],
-    exports: [AuthService, EncryptionService, PermissionsMatrixService, PermissionsGuard, AdminGuard],
+    providers: [
+        AuthService,
+        JwtStrategy,
+        GoogleStrategy,
+        EncryptionService,
+        AdminGuard,
+        AdminOrLiderGuard,
+        PermissionsGuard,
+        PermissionsMatrixService,
+    ],
+    exports: [
+        AuthService,
+        EncryptionService,
+        PermissionsMatrixService,
+        PermissionsGuard,
+        AdminGuard,
+        AdminOrLiderGuard,
+    ],
 })
 export class AuthModule {}

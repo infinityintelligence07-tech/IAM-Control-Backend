@@ -3156,6 +3156,62 @@ export class DocumentosService {
         return { atualizado: true, total: comprovantesArray.length };
     }
 
+    // Atualiza os dados DA VENDA (quantidade de inscrições, outros clientes e
+    // pendência) no snapshot por venda `dados_contrato.turma_aluno` e nos
+    // campos variáveis do contrato. A listagem do histórico prioriza esse
+    // snapshot sobre a matrícula compartilhada da turma de origem (que carrega
+    // valores de outras vendas), então editar SÓ a matrícula não altera o que
+    // é exibido — este método é o que faz a edição da venda refletir na tela.
+    async atualizarDadosVendaContratoHistorico(
+        contratoId: string,
+        dados: {
+            quantidade_inscricoes?: number;
+            outros_clientes?: Array<{ id?: string; nome?: string; email?: string; telefone?: string }>;
+            pendencia_pagamento?: boolean;
+        },
+    ): Promise<{ atualizado: boolean }> {
+        const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+            where: { id: contratoId, deletado_em: IsNull() },
+        });
+        if (!contrato) {
+            throw new NotFoundException('Contrato não encontrado');
+        }
+
+        const dadosContrato = { ...(contrato.dados_contrato || {}) };
+        const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
+        const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
+
+        if (dados.quantidade_inscricoes !== undefined) {
+            const quantidade = Math.max(1, Math.trunc(Number(dados.quantidade_inscricoes) || 1));
+            turmaAlunoSnapshot.quantidade_inscricoes = quantidade;
+            // O frontend/resumo calculam max(snapshot, campos variáveis, outros
+            // clientes + 1); sem sincronizar os campos variáveis, uma redução de
+            // quantidade nunca refletiria na tela.
+            camposVariaveis['Quantidade de Inscrições'] = String(quantidade);
+            delete camposVariaveis['Quantidade de Inscricoes'];
+        }
+        if (dados.outros_clientes !== undefined) {
+            turmaAlunoSnapshot.outros_clientes = Array.isArray(dados.outros_clientes) ? dados.outros_clientes : [];
+            // O snapshot por venda tem prioridade sobre compradores_adicionais na
+            // exibição; manter os dois coerentes evita listas divergentes.
+            if (Array.isArray(dadosContrato.compradores_adicionais)) {
+                dadosContrato.compradores_adicionais = turmaAlunoSnapshot.outros_clientes;
+            }
+        }
+        if (dados.pendencia_pagamento !== undefined) {
+            turmaAlunoSnapshot.pendencia_pagamento = Boolean(dados.pendencia_pagamento);
+        }
+
+        dadosContrato.turma_aluno = turmaAlunoSnapshot;
+        dadosContrato.campos_variaveis = camposVariaveis;
+        await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
+            dados_contrato: dadosContrato,
+        });
+        this.contratosBancoCache.clear();
+
+        return { atualizado: true };
+    }
+
     private async obterMarcadorAtualizacaoHistorico(): Promise<string> {
         const [contratoRaw, turmaAlunoRaw] = await Promise.all([
             this.uow.turmasAlunosTreinamentosContratosRP

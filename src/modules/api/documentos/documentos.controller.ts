@@ -300,6 +300,22 @@ export class DocumentosController {
         return this.documentosService.atualizarObservacoesSistemaContratoHistorico(id, body?.observacoes ?? '');
     }
 
+    // Atualiza os dados DA VENDA (quantidade de inscrições, outros clientes e
+    // pendência) no snapshot por venda dados_contrato.turma_aluno — fonte que a
+    // listagem do histórico prioriza sobre a matrícula compartilhada de origem.
+    @Post('public/contratos-banco/:id/dados-venda')
+    atualizarDadosVendaContrato(
+        @Param('id') id: string,
+        @Body()
+        body: {
+            quantidade_inscricoes?: number;
+            outros_clientes?: Array<{ id?: string; nome?: string; email?: string; telefone?: string }>;
+            pendencia_pagamento?: boolean;
+        },
+    ) {
+        return this.documentosService.atualizarDadosVendaContratoHistorico(id, body || {});
+    }
+
     // Atualiza os comprovantes de pagamento da VENDA (contrato). Recebe um array
     // de data URLs base64 (imagens/PDF) ou a forma serializada usada pelo frontend.
     @Post('public/contratos-banco/:id/comprovantes')

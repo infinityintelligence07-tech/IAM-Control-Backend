@@ -24,9 +24,11 @@ import { RequirePermission } from '@/modules/auth/decorators/require-permission.
 export class UsuariosController {
     constructor(private readonly usuariosService: UsuariosService) {}
 
+    // Listagem liberada para qualquer usuário autenticado: o fluxo de venda
+    // (seleção de testemunhas e autorização de pendência/diferença) precisa
+    // listar todos os usuários independentemente do nível de acesso.
     @Get()
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'usuarios', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async findAll(@Query() filters: GetUsuariosDto, @Req() req: any): Promise<UsuariosListResponseDto> {
         console.log('[usuarios-url-debug][backend][controller] requisição recebida:', {
             originalUrl: req?.originalUrl,

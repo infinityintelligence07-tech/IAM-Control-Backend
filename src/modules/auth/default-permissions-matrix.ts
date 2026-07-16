@@ -48,6 +48,8 @@ function buildLiderPermissions(setor: ESetores): RolePermissions {
     role = grantModule(role, 'credenciamento', ['view', 'edit']);
     role = grantModule(role, 'documentos', ['view', 'create', 'edit']);
     role = grantModule(role, 'vendas', ['view', 'create', 'edit']);
+    // Dashboard de vendas: só líderes (prioridade ≥ 80) em todos os setores.
+    role = grantModule(role, 'vendasDashboard', ['view']);
     role = grantModule(role, 'usuarios', ['view', 'edit']);
     role = grantModule(role, 'relatorios', ['view']);
     role = grantModule(role, 'alunosNaTurma', 'all');

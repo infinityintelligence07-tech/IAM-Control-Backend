@@ -14,6 +14,7 @@ export const MODULE_KEYS = [
     'credenciamento',
     'documentos',
     'vendas',
+    'vendasDashboard',
     'usuarios',
     'relatorios',
     'alunosNaTurma',
@@ -49,6 +50,7 @@ export type PermissionKey =
     | 'alterarCredenciamento'
     | 'documentos'
     | 'vendas'
+    | 'vendasDashboard'
     | 'usuarios'
     | 'aprovarUsuarios'
     | 'relatorios'
@@ -71,6 +73,7 @@ export const PERMISSION_KEY_MAP: Record<PermissionKey, { module: ModuleKey; acti
     alterarCredenciamento: { module: 'credenciamento', action: 'edit' },
     documentos: { module: 'documentos', action: 'view' },
     vendas: { module: 'vendas', action: 'view' },
+    vendasDashboard: { module: 'vendasDashboard', action: 'view' },
     usuarios: { module: 'usuarios', action: 'view' },
     aprovarUsuarios: { module: 'usuarios', action: 'edit' },
     relatorios: { module: 'relatorios', action: 'view' },
@@ -114,7 +117,7 @@ export const FUNCTION_PRIORITY: Record<string, number> = {
 };
 
 export const PERMISSIONS_MATRIX_CONFIG_KEY = 'permissions_matrix';
-export const PERMISSIONS_MATRIX_VERSION = 6;
+export const PERMISSIONS_MATRIX_VERSION = 7;
 export const PERMISSION_METADATA_KEY = 'required_permission';
 
 export function getFunctionPriority(funcao: string): number {

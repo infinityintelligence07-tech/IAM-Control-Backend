@@ -271,6 +271,7 @@ export class PermissionsMatrixService {
      * v5: libera autorizacaoPendencia/assinarTestemunha onde o padrão prevê (Expansão de Negócios, colaborador+).
      * v6: quem pode criar vendas ganha documentos view/create/edit (finalizar a venda
      *     busca o template em GET /documentos e emite o contrato em POST zapsign/criar-contrato).
+     * v7: libera vendasDashboard.view para líderes (prioridade ≥ 80) em todos os setores.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -341,6 +342,21 @@ export class PermissionsMatrixService {
 
                 if (fromVersion < 6) {
                     this.aplicarInvarianteVendasDocumentos(role);
+                }
+
+                if (fromVersion < 7 && defaultRole.vendasDashboard?.view) {
+                    role.vendasDashboard = {
+                        view: true,
+                        create: Boolean(
+                            role.vendasDashboard?.create || defaultRole.vendasDashboard.create,
+                        ),
+                        edit: Boolean(
+                            role.vendasDashboard?.edit || defaultRole.vendasDashboard.edit,
+                        ),
+                        delete: Boolean(
+                            role.vendasDashboard?.delete || defaultRole.vendasDashboard.delete,
+                        ),
+                    };
                 }
             }
         }

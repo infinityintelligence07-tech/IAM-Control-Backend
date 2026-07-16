@@ -451,9 +451,35 @@ export type StatusRecebivelListaItem = {
     status: Exclude<StatusRecebivelFiltroLista, 'total'>;
     valor: number;
     inscricoes: number;
+    whatsapp?: string | null;
+    lider?: string | null;
+    produto?: string | null;
+    turma?: string | null;
+    forma_pagamento?: string | null;
+    pendencia_valor?: number | null;
+    pendencia_metodo?: string | null;
+    data_vencimento?: string | null;
+    data_quitada?: string | null;
+    data_cancelamento?: string | null;
 };
 
 const textoLimpo = (valor: unknown): string => String(valor ?? '').trim();
+
+const formatarMoedaPtBr = (valor: number): string =>
+    valor.toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+
+const formatarDataPtBr = (data: Date | null): string | null => {
+    if (!data || Number.isNaN(data.getTime())) return null;
+    const dia = String(data.getDate()).padStart(2, '0');
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const ano = data.getFullYear();
+    return `${dia}/${mes}/${ano}`;
+};
 
 const statusParaFiltro = (
     status: StatusRecebivel,
@@ -484,6 +510,168 @@ const montarRotuloTurmaCampos = (
     if (!base) return '';
     const partes = [base, textoLimpo(polo), textoLimpo(edicao)].filter(Boolean);
     return partes.join('_');
+};
+
+const rotuloCurtoForma = (forma?: string, tipo?: string, descricao?: string): string => {
+    const label = rotuloFormaPagamentoDashboard(forma, tipo);
+    if (label !== 'Outros') return label;
+    const base = normalizeForSearch(`${forma || ''} ${tipo || ''} ${descricao || ''}`);
+    if (base.includes('pix')) return 'Pix';
+    if (base.includes('boleto')) return 'Boleto';
+    if (base.includes('cartao') || base.includes('credito') || base.includes('debito')) return 'Cartão';
+    if (base.includes('link')) return 'Link';
+    return (forma || tipo || 'Outros').trim() || 'Outros';
+};
+
+const extrairParcelasForma = (forma: FormaPagamentoItem & { parcelas?: number; descricao?: string }): number | null => {
+    const parcelasNum = Number(forma.parcelas);
+    if (Number.isFinite(parcelasNum) && parcelasNum > 1) return Math.round(parcelasNum);
+    const match = String(forma.descricao || '').match(/(\d+)\s*x/i);
+    if (match) {
+        const n = Number(match[1]);
+        return Number.isFinite(n) && n > 1 ? n : null;
+    }
+    return null;
+};
+
+export const obterWhatsappContrato = (contrato: ContratoDashboardLinha): string | null => {
+    const aluno = contrato.dados_contrato?.aluno || {};
+    const campos = contrato.dados_contrato?.campos_variaveis || {};
+    return (
+        textoLimpo(aluno.telefone_um) ||
+        textoLimpo(aluno.telefone_dois) ||
+        textoLimpo(campos['Telefone']) ||
+        textoLimpo(campos['WhatsApp']) ||
+        null
+    );
+};
+
+export const obterProdutoContrato = (contrato: ContratoDashboardLinha): string => {
+    const { nome, sigla } = obterDadosEventoContrato(contrato);
+    return rotuloTreinamentoDashboard(nome, sigla) || textoLimpo(sigla) || textoLimpo(nome) || '—';
+};
+
+export const formatarFormasPagamentoDetalhe = (contrato: ContratoDashboardLinha): string => {
+    const pagamento = contrato.dados_contrato?.pagamento || {};
+    const formas: Array<FormaPagamentoItem & { parcelas?: number; descricao?: string }> = Array.isArray(
+        pagamento.formas_pagamento,
+    )
+        ? pagamento.formas_pagamento
+        : [];
+
+    if (formas.length === 0) {
+        const unica = rotuloCurtoForma(pagamento.forma_pagamento);
+        return unica !== 'Outros' ? unica : '—';
+    }
+
+    return (
+        formas
+            .map((forma) => {
+                const label = rotuloCurtoForma(forma.forma, forma.tipo, forma.descricao);
+                const valor = parseNumeroSeguro(forma.valor);
+                const parcelas = extrairParcelasForma(forma);
+                const partes = [label];
+                if (valor > 0) partes.push(formatarMoedaPtBr(valor));
+                if (parcelas) partes.push(`${parcelas}x`);
+                return partes.join(' ');
+            })
+            .filter(Boolean)
+            .join(' • ') || '—'
+    );
+};
+
+const parseMoedaBrTexto = (valor: string): number => {
+    const limpo = valor.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.');
+    const n = Number(limpo);
+    return Number.isFinite(n) ? n : 0;
+};
+
+export const obterDetalhePendenciaQuitada = (
+    contrato: ContratoDashboardLinha,
+): {
+    valor: number | null;
+    metodo: string | null;
+    dataVencimento: string | null;
+    dataQuitada: string | null;
+} => {
+    const pagamento = contrato.dados_contrato?.pagamento || {};
+    const formas: Array<FormaPagamentoItem & { descricao?: string; parcelas?: number }> = Array.isArray(
+        pagamento.formas_pagamento,
+    )
+        ? pagamento.formas_pagamento
+        : [];
+
+    const formaPendencia = formas.find((forma) =>
+        normalizeForSearch(`${forma.forma || ''} ${forma.tipo || ''} ${forma.descricao || ''}`).includes('pendencia'),
+    );
+
+    if (formaPendencia) {
+        const vencimento =
+            formatarDataPtBr(obterPrimeiroVencimentoBoleto(contrato)) ||
+            formatarDataPtBr(
+                parseDataFlexivel(contrato.dados_contrato?.campos_variaveis?.['Data da Venda']) ||
+                    (contrato.criado_em ? new Date(contrato.criado_em as string | Date) : null),
+            );
+        return {
+            valor: parseNumeroSeguro(formaPendencia.valor) || null,
+            metodo: rotuloCurtoForma(formaPendencia.forma, formaPendencia.tipo, formaPendencia.descricao),
+            dataVencimento: vencimento,
+            dataQuitada: vencimento,
+        };
+    }
+
+    const observacoes = String(contrato.dados_contrato?.observacoes || '');
+    const match = observacoes.match(
+        /Pend[eê]ncia(?:s)? de pagamento:.*?R?\$?\s*([\d.]+,\d{2}|\d+)\s*(?:dividido[^,]*)?(?:via\s+)?([A-Za-zÀ-ÿ/]+)(?:,\s*com pagamento em\s+(\d{2}\/\d{2}\/\d{4}))?/i,
+    );
+
+    if (match) {
+        const valor = parseMoedaBrTexto(match[1] || '');
+        const metodoRaw = textoLimpo(match[2] || '');
+        const metodo = rotuloCurtoForma(metodoRaw, metodoRaw, metodoRaw);
+        const data = match[3] || null;
+        return {
+            valor: valor > 0 ? valor : null,
+            metodo: metodo || metodoRaw || null,
+            dataVencimento: data,
+            dataQuitada: data,
+        };
+    }
+
+    const vencimento = formatarDataPtBr(obterPrimeiroVencimentoBoleto(contrato));
+    return {
+        valor: null,
+        metodo: null,
+        dataVencimento: vencimento,
+        dataQuitada: null,
+    };
+};
+
+export const obterDataCancelamentoContrato = (
+    contrato: ContratoDashboardLinha,
+): string | null => {
+    const campos = contrato.dados_contrato?.campos_variaveis || {};
+    const direta =
+        formatarDataPtBr(parseDataFlexivel(campos['Data de Cancelamento'])) ||
+        formatarDataPtBr(parseDataFlexivel(campos['Cancelada em'])) ||
+        formatarDataPtBr(parseDataFlexivel(campos['Data Cancelamento']));
+    if (direta) return direta;
+
+    const observacoes = String(contrato.dados_contrato?.observacoes || '');
+    const match = observacoes.match(
+        /(?:cancelad[ao]\s+em|data\s+de\s+cancelamento)[:\s]+(\d{2}\/\d{2}\/\d{4})/i,
+    );
+    if (match?.[1]) return match[1];
+
+    if (contrato.deletado_em) {
+        return formatarDataPtBr(
+            contrato.deletado_em instanceof Date
+                ? contrato.deletado_em
+                : new Date(contrato.deletado_em),
+        );
+    }
+
+    return null;
 };
 
 export const obterNomeAlunoContrato = (contrato: ContratoDashboardLinha): string => {
@@ -600,14 +788,28 @@ export const listarItensStatusRecebivel = (
 
         if (!inclui) continue;
 
+        const turmaDestino = obterTurmaDestinoContrato(contrato, rotuloPorIdTurma);
+        const pendenciaDetalhe = obterDetalhePendenciaQuitada(contrato);
+
         itens.push({
             id: contrato.id,
             aluno: obterNomeAlunoContrato(contrato),
-            turma_destino: obterTurmaDestinoContrato(contrato, rotuloPorIdTurma),
+            turma_destino: turmaDestino,
             turma_origem: obterTurmaOrigemContrato(contrato, rotuloPorIdTurma),
             status: statusParaFiltro(status),
             valor: obterValorTotalContrato(contrato),
             inscricoes: obterQuantidadeInscricoes(contrato),
+            whatsapp: obterWhatsappContrato(contrato),
+            lider: textoLimpo(contrato.lider_nome) || null,
+            produto: obterProdutoContrato(contrato),
+            turma: turmaDestino,
+            forma_pagamento: formatarFormasPagamentoDetalhe(contrato),
+            pendencia_valor: pendenciaDetalhe.valor,
+            pendencia_metodo: pendenciaDetalhe.metodo,
+            data_vencimento: pendenciaDetalhe.dataVencimento,
+            data_quitada: status === 'resolvida' ? pendenciaDetalhe.dataQuitada : null,
+            data_cancelamento:
+                status === 'cancelada' ? obterDataCancelamentoContrato(contrato) : null,
         });
     }
 

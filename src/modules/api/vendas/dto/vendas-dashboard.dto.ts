@@ -108,6 +108,16 @@ export class StatusRecebivelListaItemDto {
     status: Exclude<StatusRecebivelFiltro, 'total'>;
     valor: number;
     inscricoes: number;
+    whatsapp?: string | null;
+    lider?: string | null;
+    produto?: string | null;
+    turma?: string | null;
+    forma_pagamento?: string | null;
+    pendencia_valor?: number | null;
+    pendencia_metodo?: string | null;
+    data_vencimento?: string | null;
+    data_quitada?: string | null;
+    data_cancelamento?: string | null;
 }
 
 export class VendasDashboardStatusListaResponseDto {

@@ -7,6 +7,8 @@ import {
     VendasDashboardFiltrosResponseDto,
     VendasDashboardQueryDto,
     VendasDashboardResponseDto,
+    VendasDashboardStatusListaQueryDto,
+    VendasDashboardStatusListaResponseDto,
 } from './dto/vendas-dashboard.dto';
 
 /**
@@ -25,6 +27,13 @@ export class VendasController {
     @Get('dashboard')
     async getDashboard(@Query() query: VendasDashboardQueryDto): Promise<VendasDashboardResponseDto> {
         return this.vendasDashboardService.getDashboard(query);
+    }
+
+    @Get('dashboard/status-recebiveis')
+    async getStatusRecebiveisLista(
+        @Query() query: VendasDashboardStatusListaQueryDto,
+    ): Promise<VendasDashboardStatusListaResponseDto> {
+        return this.vendasDashboardService.getStatusRecebiveisLista(query);
     }
 
     @Get('dashboard/filtros')

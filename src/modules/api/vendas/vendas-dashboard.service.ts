@@ -9,6 +9,8 @@ import {
     VendasDashboardFiltrosResponseDto,
     VendasDashboardQueryDto,
     VendasDashboardResponseDto,
+    VendasDashboardStatusListaQueryDto,
+    VendasDashboardStatusListaResponseDto,
 } from './dto/vendas-dashboard.dto';
 import {
     agregarEstrategiasAquisicao,
@@ -23,6 +25,7 @@ import {
     ContratoDashboardLinha,
     criarMapaAquisicaoVazio,
     isProcessoVendaContrato,
+    listarItensStatusRecebivel,
     metricasVazia,
     obterDadosEventoContrato,
     resumoStatusVazio,
@@ -122,6 +125,14 @@ export class VendasDashboardService {
             rankingPendencia: calcularRankingLideresPendencia(contratos),
             aquisicaoPorEvento,
         };
+    }
+
+    async getStatusRecebiveisLista(
+        filtros: VendasDashboardStatusListaQueryDto,
+    ): Promise<VendasDashboardStatusListaResponseDto> {
+        const contratos = await this.carregarContratosFiltrados(filtros);
+        const rotuloPorIdTurma = await this.montarRotulosTurmas(contratos);
+        return listarItensStatusRecebivel(contratos, filtros.status, rotuloPorIdTurma);
     }
 
     async getFiltros(): Promise<VendasDashboardFiltrosResponseDto> {
@@ -242,6 +253,109 @@ export class VendasDashboardService {
         }
 
         return Number.isNaN(data.getTime()) ? null : data;
+    }
+
+    private async carregarContratosFiltrados(
+        filtros: VendasDashboardQueryDto,
+    ): Promise<ContratoDashboardLinha[]> {
+        const { dataInicio, dataFim } = this.resolverPeriodo(filtros.data_inicio, filtros.data_fim);
+        const eventoFiltro = filtros.evento || null;
+        const liderIdFiltro =
+            filtros.lider_id != null && Number.isFinite(Number(filtros.lider_id))
+                ? Number(filtros.lider_id)
+                : null;
+        const turmaIdFiltro =
+            filtros.turma_id != null && Number.isFinite(Number(filtros.turma_id))
+                ? Number(filtros.turma_id)
+                : null;
+
+        const linhasRaw = await this.carregarLinhasContratos(dataInicio, dataFim, turmaIdFiltro);
+        const contratosEnriquecidos = await this.enriquecerComStaffLider(linhasRaw);
+
+        let contratos = contratosEnriquecidos.filter((c) => isProcessoVendaContrato(c));
+
+        if (eventoFiltro) {
+            contratos = contratos.filter((c) => obterDadosEventoContrato(c).codigo === eventoFiltro);
+        }
+        if (turmaIdFiltro) {
+            contratos = contratos.filter((c) => c.ids_turma.includes(turmaIdFiltro));
+        }
+        if (liderIdFiltro) {
+            contratos = contratos.filter((c) => Number(c.lider_id) === liderIdFiltro);
+        }
+
+        return contratos;
+    }
+
+    private async montarRotulosTurmas(
+        contratos: ContratoDashboardLinha[],
+    ): Promise<Map<number, string>> {
+        const ids = new Set<number>();
+        for (const contrato of contratos) {
+            for (const id of contrato.ids_turma || []) {
+                if (Number.isFinite(id) && id > 0) ids.add(id);
+            }
+            const dados = contrato.dados_contrato || {};
+            for (const candidato of [
+                dados.fluxo_evento_origem_id_turma,
+                dados.id_turma_origem,
+                dados.turma_origem?.id,
+                dados.fluxo_evento_destino_id_turma,
+                dados.id_turma_destino,
+                dados.turma?.id,
+            ]) {
+                const n = Number(candidato);
+                if (Number.isFinite(n) && n > 0) ids.add(n);
+            }
+        }
+
+        const mapa = new Map<number, string>();
+        if (ids.size === 0) return mapa;
+
+        const turmas = await this.uow.turmasRP.find({
+            where: { id: In(Array.from(ids)), deletado_em: IsNull() },
+            relations: ['id_treinamento_fk', 'id_polo_fk'],
+            select: {
+                id: true,
+                edicao_turma: true,
+                cidade: true,
+                id_treinamento_fk: {
+                    id: true,
+                    treinamento: true,
+                    sigla_treinamento: true,
+                },
+                id_polo_fk: {
+                    id: true,
+                    sigla_polo: true,
+                    polo: true,
+                },
+            },
+        });
+
+        for (const turma of turmas) {
+            mapa.set(
+                turma.id,
+                rotuloTurmaIamControl({
+                    id: turma.id,
+                    edicao_turma: turma.edicao_turma,
+                    cidade: turma.cidade,
+                    treinamento: turma.id_treinamento_fk
+                        ? {
+                              treinamento: turma.id_treinamento_fk.treinamento,
+                              sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
+                          }
+                        : null,
+                    polo: turma.id_polo_fk
+                        ? {
+                              sigla_polo: turma.id_polo_fk.sigla_polo,
+                              nome: turma.id_polo_fk.polo,
+                          }
+                        : null,
+                }),
+            );
+        }
+
+        return mapa;
     }
 
     private parseJsonSeguro(valor: unknown): Record<string, any> {

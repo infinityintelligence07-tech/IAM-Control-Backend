@@ -92,6 +92,31 @@ export class StatusResumoItemDto {
     detalheExtra?: string;
 }
 
+export type StatusRecebivelFiltro = StatusResumoItemDto['id'];
+
+export class VendasDashboardStatusListaQueryDto extends VendasDashboardQueryDto {
+    @IsString()
+    @IsIn(['total', 'resolvidas', 'no_prazo', 'vencidas', 'canceladas'])
+    status: StatusRecebivelFiltro;
+}
+
+export class StatusRecebivelListaItemDto {
+    id: string;
+    aluno: string;
+    turma_destino: string;
+    turma_origem: string;
+    status: Exclude<StatusRecebivelFiltro, 'total'>;
+    valor: number;
+    inscricoes: number;
+}
+
+export class VendasDashboardStatusListaResponseDto {
+    status: StatusRecebivelFiltro;
+    titulo: string;
+    total: number;
+    itens: StatusRecebivelListaItemDto[];
+}
+
 export class ResumoStatusDashboardDto {
     total: StatusResumoItemDto;
     resolvidas: StatusResumoItemDto;

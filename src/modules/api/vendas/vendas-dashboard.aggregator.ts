@@ -441,6 +441,186 @@ const classificarStatusRecebivel = (contrato: ContratoDashboardLinha, agora: Dat
     return 'vencida';
 };
 
+export type StatusRecebivelFiltroLista = 'total' | 'resolvidas' | 'no_prazo' | 'vencidas' | 'canceladas';
+
+export type StatusRecebivelListaItem = {
+    id: string;
+    aluno: string;
+    turma_destino: string;
+    turma_origem: string;
+    status: Exclude<StatusRecebivelFiltroLista, 'total'>;
+    valor: number;
+    inscricoes: number;
+};
+
+const textoLimpo = (valor: unknown): string => String(valor ?? '').trim();
+
+const statusParaFiltro = (
+    status: StatusRecebivel,
+): Exclude<StatusRecebivelFiltroLista, 'total'> => {
+    switch (status) {
+        case 'resolvida':
+            return 'resolvidas';
+        case 'no_prazo':
+            return 'no_prazo';
+        case 'vencida':
+            return 'vencidas';
+        case 'cancelada':
+            return 'canceladas';
+        default: {
+            const _exhaustive: never = status;
+            return _exhaustive;
+        }
+    }
+};
+
+const montarRotuloTurmaCampos = (
+    treinamento?: string,
+    sigla?: string,
+    polo?: string,
+    edicao?: string,
+): string => {
+    const base = textoLimpo(sigla) || textoLimpo(treinamento);
+    if (!base) return '';
+    const partes = [base, textoLimpo(polo), textoLimpo(edicao)].filter(Boolean);
+    return partes.join('_');
+};
+
+export const obterNomeAlunoContrato = (contrato: ContratoDashboardLinha): string => {
+    const dados = contrato.dados_contrato || {};
+    const campos = dados.campos_variaveis || {};
+    const aluno = dados.aluno || {};
+    return (
+        textoLimpo(aluno.nome) ||
+        textoLimpo(campos['Nome Completo']) ||
+        textoLimpo(campos['Nome do Aluno']) ||
+        textoLimpo(campos['Nome do Comprador']) ||
+        'Aluno não informado'
+    );
+};
+
+export const obterTurmaOrigemContrato = (
+    contrato: ContratoDashboardLinha,
+    rotuloPorIdTurma?: Map<number, string>,
+): string => {
+    const dados = contrato.dados_contrato || {};
+    const campos = dados.campos_variaveis || {};
+    const direto =
+        textoLimpo(dados.fluxo_evento_origem_turma) ||
+        textoLimpo(campos['Turma de Origem']) ||
+        textoLimpo(campos['Turma Origem']) ||
+        textoLimpo(dados.turma_origem?.codigo) ||
+        textoLimpo(dados.turma_origem?.nome) ||
+        textoLimpo(dados.turma_origem?.label);
+    if (direto) return direto;
+
+    const idOrigem = Number(
+        dados.fluxo_evento_origem_id_turma ?? dados.id_turma_origem ?? dados.turma_origem?.id ?? 0,
+    );
+    if (Number.isFinite(idOrigem) && idOrigem > 0 && rotuloPorIdTurma?.has(idOrigem)) {
+        return rotuloPorIdTurma.get(idOrigem) || '—';
+    }
+    return '—';
+};
+
+export const obterTurmaDestinoContrato = (
+    contrato: ContratoDashboardLinha,
+    rotuloPorIdTurma?: Map<number, string>,
+): string => {
+    const dados = contrato.dados_contrato || {};
+    const campos = dados.campos_variaveis || {};
+    const treinamento = dados.treinamento || {};
+    const direto =
+        textoLimpo(dados.fluxo_evento_destino_turma) ||
+        textoLimpo(campos['Turma de Destino']) ||
+        textoLimpo(campos['Turma Destino']) ||
+        montarRotuloTurmaCampos(
+            treinamento.treinamento || treinamento.nome || campos['Nome do Treinamento Contratado'],
+            treinamento.sigla_treinamento || treinamento.sigla || campos['Sigla do Treinamento'],
+            dados.polo?.sigla_polo || campos['Sigla do Polo'] || campos['Polo'],
+            dados.turma?.edicao_turma || campos['Edição da Turma'] || campos['Edição'],
+        ) ||
+        textoLimpo(dados.turma?.codigo) ||
+        textoLimpo(dados.turma?.nome) ||
+        textoLimpo(dados.turma?.label);
+    if (direto) return direto;
+
+    const idDestino = Number(
+        dados.fluxo_evento_destino_id_turma ?? dados.id_turma_destino ?? dados.turma?.id ?? 0,
+    );
+    if (Number.isFinite(idDestino) && idDestino > 0 && rotuloPorIdTurma?.has(idDestino)) {
+        return rotuloPorIdTurma.get(idDestino) || '—';
+    }
+    return '—';
+};
+
+const tituloStatusRecebivel = (status: StatusRecebivelFiltroLista, total: number): string => {
+    switch (status) {
+        case 'total':
+            return `Total de pendências (${total})`;
+        case 'resolvidas':
+            return `Pendências resolvidas (${total})`;
+        case 'no_prazo':
+            return `Pendências no prazo (${total})`;
+        case 'vencidas':
+            return `Pendências vencidas (${total})`;
+        case 'canceladas':
+            return `Vendas canceladas (${total})`;
+        default: {
+            const _exhaustive: never = status;
+            return String(_exhaustive);
+        }
+    }
+};
+
+export const listarItensStatusRecebivel = (
+    contratos: ContratoDashboardLinha[],
+    statusFiltro: StatusRecebivelFiltroLista,
+    rotuloPorIdTurma?: Map<number, string>,
+): { status: StatusRecebivelFiltroLista; titulo: string; total: number; itens: StatusRecebivelListaItem[] } => {
+    const agora = new Date();
+    agora.setHours(0, 0, 0, 0);
+
+    const itens: StatusRecebivelListaItem[] = [];
+
+    for (const contrato of contratos) {
+        if (!isProcessoVendaContrato(contrato)) continue;
+        const status = classificarStatusRecebivel(contrato, agora);
+
+        const inclui =
+            statusFiltro === 'total'
+                ? status === 'resolvida' || status === 'no_prazo' || status === 'vencida'
+                : statusFiltro === 'resolvidas'
+                  ? status === 'resolvida'
+                  : statusFiltro === 'no_prazo'
+                    ? status === 'no_prazo'
+                    : statusFiltro === 'vencidas'
+                      ? status === 'vencida'
+                      : status === 'cancelada';
+
+        if (!inclui) continue;
+
+        itens.push({
+            id: contrato.id,
+            aluno: obterNomeAlunoContrato(contrato),
+            turma_destino: obterTurmaDestinoContrato(contrato, rotuloPorIdTurma),
+            turma_origem: obterTurmaOrigemContrato(contrato, rotuloPorIdTurma),
+            status: statusParaFiltro(status),
+            valor: obterValorTotalContrato(contrato),
+            inscricoes: obterQuantidadeInscricoes(contrato),
+        });
+    }
+
+    itens.sort((a, b) => a.aluno.localeCompare(b.aluno, 'pt-BR', { sensitivity: 'base' }));
+
+    return {
+        status: statusFiltro,
+        titulo: tituloStatusRecebivel(statusFiltro, itens.length),
+        total: itens.length,
+        itens,
+    };
+};
+
 const baseStatus = (): Omit<StatusResumoItemDto, 'id'> => ({
     quantidade: 0,
     valor: 0,

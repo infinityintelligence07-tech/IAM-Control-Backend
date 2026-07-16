@@ -157,9 +157,10 @@ export class TurmasController {
         return this.turmasService.getAlunosSaldoPeriodoTurma(id_turma, filtros);
     }
 
+    // Leitura dos bônus do comprador usada pela edição de venda no Histórico de
+    // Vendas: liberada a qualquer usuário autenticado (CRUD de vendas sem matriz).
     @Get('bonus-comprador/:id_aluno_comprador')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'turmas', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async getBonusMatriculasComprador(@Param('id_aluno_comprador', ParseIntPipe) id_aluno_comprador: number) {
         return this.turmasService.getBonusMatriculasComprador(id_aluno_comprador);
     }
@@ -500,6 +501,22 @@ export class TurmasController {
         console.log('Atualizando aluno na turma:', id_turma_aluno, 'com dados:', updateAlunoDto);
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.updateAlunoTurma(id_turma_aluno, updateAlunoDto, userId);
+    }
+
+    // Remoção de BÔNUS na edição de venda (Histórico de Vendas): liberada a
+    // qualquer usuário autenticado — o service garante que só matrículas
+    // ALUNO_BONUS podem ser removidas por esta rota (CRUD de vendas sem matriz).
+    @Delete(':id/alunos/:id_turma_aluno/bonus-venda')
+    @UseGuards(JwtAuthGuard)
+    async removeBonusVendaTurmaAluno(
+        @Param('id', ParseIntPipe) id_turma: number,
+        @Param('id_turma_aluno') id_turma_aluno: string,
+        @Req() req: any,
+    ): Promise<{ message: string }> {
+        console.log('Removendo bônus da venda (Histórico):', id_turma_aluno, 'turma:', id_turma);
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        await this.turmasService.removeBonusVendaTurmaAluno(id_turma_aluno, userId);
+        return { message: 'Bônus removido com sucesso' };
     }
 
     @Delete(':id/alunos/:id_turma_aluno')

@@ -605,6 +605,34 @@ export class UpdateAlunoTurmaDto {
     })
     id_acessor?: number | null;
 
+    // Forma de pagamento definida MANUALMENTE (negociação extra sistema). Permitida
+    // apenas quando o aluno NÃO tem forma de pagamento resolvida por contrato
+    // ("Forma de pagamento indisponível"). Aceita null para limpar.
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        return typeof value === 'string' ? value.toUpperCase().trim() : value;
+    })
+    forma_pagamento_manual?: string | null;
+
+    // Dia de vencimento do boleto (1-31) da forma de pagamento manual (somente BOLETO).
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : null;
+    })
+    boleto_dia_vencimento_manual?: number | null;
+
+    // Quantidade de boletos da forma de pagamento manual (somente BOLETO).
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : null;
+    })
+    boleto_quantidade_manual?: number | null;
+
     // Datas de assinatura da mentoria (somente turmas de mentoria). Edição manual do
     // período do mentorado; registra no histórico do aluno quem fez a alteração.
     // Formato aceito AAAA-MM-DD; null limpa a data.
@@ -754,6 +782,24 @@ export class AlunoTurmaResponseDto {
     formas_pagamento?: string[];
     /** true quando o aluno entrou por boleto (habilita a seleção de acessor no frontend). */
     veio_por_boleto?: boolean;
+    /**
+     * Forma de pagamento definida manualmente (negociação extra sistema), presente
+     * apenas quando o aluno não tem contrato que resolva a forma de pagamento.
+     */
+    forma_pagamento_manual?: string | null;
+    /** Dia de vencimento do boleto (1-31) da forma manual (somente BOLETO). */
+    boleto_dia_vencimento_manual?: number | null;
+    /** Quantidade de boletos da forma manual (somente BOLETO). */
+    boleto_quantidade_manual?: number | null;
+    /**
+     * Detalhes do boleto vindos do CONTRATO da venda (quando a forma inclui BOLETO):
+     * parcelas e data do 1º boleto para o frontend calcular o boleto atual pela data do sistema.
+     */
+    boleto_contrato?: {
+        parcelas?: number | null;
+        data_primeiro_boleto?: string | null;
+        dia_vencimento?: number | null;
+    } | null;
     /** Acessor responsável (apenas para alunos que vieram por boleto). */
     id_acessor?: number | null;
     acessor?: {

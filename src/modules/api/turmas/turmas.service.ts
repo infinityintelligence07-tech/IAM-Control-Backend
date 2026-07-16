@@ -511,6 +511,9 @@ export class TurmasService {
         codigo_turma_origem_planilha: true,
         transferido_por_robo: true,
         id_acessor: true,
+        forma_pagamento_manual: true,
+        boleto_dia_vencimento_manual: true,
+        boleto_quantidade_manual: true,
         criado_em: true,
         id_acessor_fk: {
             id: true,
@@ -1719,9 +1722,7 @@ export class TurmasService {
 
         // Times IPR mudam o vínculo membro→líder: recalcula hist_staff_lider_id em background.
         void this.documentosService.recalcularHistStaffLiderContratos().catch((error) => {
-            this.logger.warn(
-                `historico.staffLider.recalc | falha após updateTimesTurma: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            this.logger.warn(`historico.staffLider.recalc | falha após updateTimesTurma: ${error instanceof Error ? error.message : String(error)}`);
         });
 
         return {
@@ -3328,6 +3329,38 @@ export class TurmasService {
     }
 
     /**
+     * Extrai do `dados_contrato` os detalhes do BOLETO da venda (quando houver):
+     * número de parcelas (item BOLETO de formas_pagamento), data do 1º boleto e
+     * melhor dia de vencimento (campos_variaveis). Usado pelo frontend para exibir
+     * o boleto atual conforme a data do sistema.
+     */
+    private extrairBoletoDeContrato(dadosContrato: any): { parcelas: number | null; data_primeiro_boleto: string | null; dia_vencimento: number | null } | null {
+        const formasItens = Array.isArray(dadosContrato?.pagamento?.formas_pagamento)
+            ? dadosContrato.pagamento.formas_pagamento
+            : Array.isArray(dadosContrato?.formas_pagamento)
+              ? dadosContrato.formas_pagamento
+              : [];
+        const itemBoleto = formasItens.find((item: any) => typeof item?.forma === 'string' && item.forma.toUpperCase().trim() === EFormasPagamento.BOLETO);
+        if (!itemBoleto) {
+            return null;
+        }
+
+        const parcelasRaw = itemBoleto.parcelas;
+        const parcelasNum = typeof parcelasRaw === 'string' ? parseInt(parcelasRaw, 10) : parcelasRaw;
+        const parcelas = Number.isFinite(parcelasNum) && parcelasNum > 0 ? Number(parcelasNum) : null;
+
+        const camposVariaveis = dadosContrato?.campos_variaveis ?? {};
+        const dataPrimeiroRaw = camposVariaveis['Data do Primeiro Boleto'];
+        const data_primeiro_boleto = typeof dataPrimeiroRaw === 'string' && dataPrimeiroRaw.trim() ? dataPrimeiroRaw.trim() : null;
+
+        const diaRaw = camposVariaveis['Melhor Dia para Boleto'] ?? camposVariaveis['Dia de Vencimento do Boleto'];
+        const diaNum = typeof diaRaw === 'string' ? parseInt(diaRaw, 10) : diaRaw;
+        const dia_vencimento = Number.isFinite(diaNum) && diaNum >= 1 && diaNum <= 31 ? Number(diaNum) : null;
+
+        return { parcelas, data_primeiro_boleto, dia_vencimento };
+    }
+
+    /**
      * Extrai a observação interna da venda ("uso do sistema") do contrato — o mesmo texto
      * editável no Histórico de Vendas. Fica em `dados_contrato.campos_variaveis`.
      */
@@ -3681,8 +3714,16 @@ export class TurmasService {
             const dadosContratoPorTurmaAlunoId = await this.resolverDadosContratoPorTurmaAluno(id_turma, turmaAlunoIds);
             const formasPagamentoPorTurmaAlunoId = new Map<string, string[]>();
             const observacaoVendaPorTurmaAlunoId = new Map<string, string>();
+            const boletoContratoPorTurmaAlunoId = new Map<string, { parcelas: number | null; data_primeiro_boleto: string | null; dia_vencimento: number | null }>();
             for (const [idTa, dadosContrato] of dadosContratoPorTurmaAlunoId.entries()) {
-                formasPagamentoPorTurmaAlunoId.set(idTa, this.extrairFormasDeContrato(dadosContrato));
+                const formasContrato = this.extrairFormasDeContrato(dadosContrato);
+                formasPagamentoPorTurmaAlunoId.set(idTa, formasContrato);
+                if (formasContrato.includes(EFormasPagamento.BOLETO)) {
+                    const boletoContrato = this.extrairBoletoDeContrato(dadosContrato);
+                    if (boletoContrato) {
+                        boletoContratoPorTurmaAlunoId.set(idTa, boletoContrato);
+                    }
+                }
                 const observacao = this.extrairObservacaoVendaDeContrato(dadosContrato);
                 if (observacao) {
                     observacaoVendaPorTurmaAlunoId.set(idTa, observacao);
@@ -3694,7 +3735,11 @@ export class TurmasService {
             const classificacaoPorTurmaAlunoId = await this.getClassificacaoOrigemPorTurmaAluno(id_turma, turmaAlunoIds);
 
             const alunosResponse: AlunoTurmaResponseDto[] = turmasAlunos.map((turmaAluno) => {
-                const formasAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
+                const formasContratoAluno = formasPagamentoPorTurmaAlunoId.get(turmaAluno.id) ?? [];
+                // Sem contrato que resolva a forma de pagamento, vale a forma definida
+                // MANUALMENTE pelo usuário (negociação extra sistema), quando houver.
+                const formaManual = formasContratoAluno.length === 0 ? (turmaAluno.forma_pagamento_manual ?? null) : null;
+                const formasAluno = formaManual ? [formaManual] : formasContratoAluno;
                 const veioPorBoleto = formasAluno.includes(EFormasPagamento.BOLETO);
                 const acessorResolvido = acessorPorTurmaAlunoId.get(turmaAluno.id) ?? null;
                 const acessor = turmaAluno.id_acessor_fk ? { id: turmaAluno.id_acessor_fk.id, nome: turmaAluno.id_acessor_fk.nome } : acessorResolvido;
@@ -3727,6 +3772,10 @@ export class TurmasService {
                     forma_pagamento: this.formatarFormaPagamentoLabel(formasAluno),
                     formas_pagamento: formasAluno,
                     veio_por_boleto: veioPorBoleto,
+                    forma_pagamento_manual: formaManual,
+                    boleto_dia_vencimento_manual: formaManual === EFormasPagamento.BOLETO ? (turmaAluno.boleto_dia_vencimento_manual ?? null) : null,
+                    boleto_quantidade_manual: formaManual === EFormasPagamento.BOLETO ? (turmaAluno.boleto_quantidade_manual ?? null) : null,
+                    boleto_contrato: boletoContratoPorTurmaAlunoId.get(turmaAluno.id) ?? null,
                     id_acessor: turmaAluno.id_acessor ?? acessorResolvido?.id ?? null,
                     acessor,
                     created_at: turmaAluno.criado_em,
@@ -5950,7 +5999,33 @@ export class TurmasService {
         return String(matriculaDestino.id);
     }
 
-    async removeAlunoTurma(id_turma_aluno: string, userId?: number, motivo?: string): Promise<void> {
+    /**
+     * Remove uma matrícula de BÔNUS (ALUNO_BONUS) no contexto da edição de venda
+     * do Histórico de Vendas. Diferente da remoção geral, NÃO exige setor Cuidado
+     * de Alunos/acessora: qualquer usuário autenticado pode ajustar os bônus da
+     * venda (CRUD de vendas sem matriz de permissões). A restrição é de domínio:
+     * só matrículas com origem ALUNO_BONUS podem ser removidas por aqui.
+     */
+    async removeBonusVendaTurmaAluno(id_turma_aluno: string, userId?: number): Promise<void> {
+        const turmaAluno = await this.uow.turmasAlunosRP.findOne({
+            where: { id: id_turma_aluno },
+            select: ['id', 'origem_aluno'] as any,
+        });
+
+        if (!turmaAluno) {
+            throw new NotFoundException('Aluno não encontrado na turma');
+        }
+
+        if (turmaAluno.origem_aluno !== EOrigemAlunos.ALUNO_BONUS) {
+            throw new BadRequestException('Esta matrícula não é de bônus; a remoção deve ser feita pela tela da turma.');
+        }
+
+        await this.removeAlunoTurma(id_turma_aluno, userId, 'Bônus removido na edição da venda (Histórico de Vendas).', {
+            pularValidacaoPermissao: true,
+        });
+    }
+
+    async removeAlunoTurma(id_turma_aluno: string, userId?: number, motivo?: string, opts?: { pularValidacaoPermissao?: boolean }): Promise<void> {
         try {
             const turmaAluno = await this.uow.turmasAlunosRP.findOne({
                 where: { id: id_turma_aluno },
@@ -5961,7 +6036,9 @@ export class TurmasService {
                 throw new NotFoundException('Aluno não encontrado na turma');
             }
 
-            await this.validarPermissaoGerenciarAlunosTurma(turmaAluno.id_turma_fk, userId, 'remover');
+            if (!opts?.pularValidacaoPermissao) {
+                await this.validarPermissaoGerenciarAlunosTurma(turmaAluno.id_turma_fk, userId, 'remover');
+            }
 
             if (this.isTurmaCongelada(turmaAluno.id_turma_fk)) {
                 throw new BadRequestException('Não é possível remover alunos de uma turma encerrada. O registro permanece congelado para a trilha do aluno.');
@@ -6837,16 +6914,60 @@ export class TurmasService {
             if (updateAlunoDto.id_turma_transferencia_de !== undefined) {
                 turmaAluno.id_turma_transferencia_de = updateAlunoDto.id_turma_transferencia_de;
             }
+            // Forma de pagamento MANUAL (negociação extra sistema): permitida somente
+            // quando o aluno NÃO tem forma de pagamento resolvida por contrato.
+            if (updateAlunoDto.forma_pagamento_manual !== undefined) {
+                const novaFormaManual = updateAlunoDto.forma_pagamento_manual;
+                if (novaFormaManual !== null) {
+                    const formasValidas = Object.values(EFormasPagamento) as string[];
+                    if (!formasValidas.includes(novaFormaManual)) {
+                        throw new BadRequestException('Forma de pagamento inválida.');
+                    }
+                    const formasContrato = (await this.resolverFormasPagamentoPorTurmaAluno(turmaAluno.id_turma, [turmaAluno.id])).get(turmaAluno.id) ?? [];
+                    if (formasContrato.length > 0) {
+                        throw new BadRequestException(
+                            'Este aluno já possui forma de pagamento vinda do contrato; a forma manual só é permitida quando ela está indisponível.',
+                        );
+                    }
+                }
+                turmaAluno.forma_pagamento_manual = novaFormaManual;
+                if (novaFormaManual !== EFormasPagamento.BOLETO) {
+                    // Detalhes de boleto só fazem sentido quando a forma manual é BOLETO.
+                    turmaAluno.boleto_dia_vencimento_manual = null;
+                    turmaAluno.boleto_quantidade_manual = null;
+                }
+            }
+            if (updateAlunoDto.boleto_dia_vencimento_manual !== undefined) {
+                const dia = updateAlunoDto.boleto_dia_vencimento_manual;
+                if (dia !== null && (dia < 1 || dia > 31)) {
+                    throw new BadRequestException('O dia de vencimento do boleto deve estar entre 1 e 31.');
+                }
+                if (dia !== null && turmaAluno.forma_pagamento_manual !== EFormasPagamento.BOLETO) {
+                    throw new BadRequestException('O dia de vencimento só pode ser informado quando a forma de pagamento manual é Boleto.');
+                }
+                turmaAluno.boleto_dia_vencimento_manual = dia;
+            }
+            if (updateAlunoDto.boleto_quantidade_manual !== undefined) {
+                const quantidade = updateAlunoDto.boleto_quantidade_manual;
+                if (quantidade !== null && (quantidade < 1 || quantidade > 120)) {
+                    throw new BadRequestException('A quantidade de boletos deve estar entre 1 e 120.');
+                }
+                if (quantidade !== null && turmaAluno.forma_pagamento_manual !== EFormasPagamento.BOLETO) {
+                    throw new BadRequestException('A quantidade de boletos só pode ser informada quando a forma de pagamento manual é Boleto.');
+                }
+                turmaAluno.boleto_quantidade_manual = quantidade;
+            }
             // Acessor responsável: disponível apenas para alunos que entraram por boleto.
             if (updateAlunoDto.id_acessor !== undefined) {
                 if (updateAlunoDto.id_acessor !== null) {
                     const formasAluno = (await this.resolverFormasPagamentoPorTurmaAluno(turmaAluno.id_turma, [turmaAluno.id])).get(turmaAluno.id) ?? [];
-                    if (!formasAluno.includes(EFormasPagamento.BOLETO)) {
-                        throw new BadRequestException('O acessor só pode ser definido para alunos que entraram por boleto.');
+                    const boletoManual = turmaAluno.forma_pagamento_manual === EFormasPagamento.BOLETO;
+                    if (!formasAluno.includes(EFormasPagamento.BOLETO) && !boletoManual) {
+                        throw new BadRequestException('O Acessor Financeiro só pode ser definido para alunos que entraram por boleto.');
                     }
                     const acessorExiste = await this.uow.usuariosRP.findOne({ where: { id: updateAlunoDto.id_acessor }, select: { id: true } });
                     if (!acessorExiste) {
-                        throw new BadRequestException('Acessor (usuário) não encontrado.');
+                        throw new BadRequestException('Acessor Financeiro (usuário) não encontrado.');
                     }
                 }
                 turmaAluno.id_acessor = updateAlunoDto.id_acessor;

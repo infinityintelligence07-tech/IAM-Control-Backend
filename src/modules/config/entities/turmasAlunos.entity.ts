@@ -99,6 +99,22 @@ export class TurmasAlunos extends BaseEntity {
     @Column({ type: 'int', name: 'id_acessor', nullable: true })
     id_acessor: number | null;
 
+    /**
+     * Forma de pagamento definida MANUALMENTE pelo usuário (negociação extra sistema),
+     * usada apenas quando o aluno não tem contrato/venda que resolva a forma de pagamento
+     * ("Forma de pagamento indisponível"). Valores do enum EFormasPagamento.
+     */
+    @Column({ type: 'varchar', name: 'forma_pagamento_manual', length: 30, nullable: true })
+    forma_pagamento_manual: string | null;
+
+    /** Dia de vencimento do boleto (1-31) da forma de pagamento manual (somente BOLETO). */
+    @Column({ type: 'int', name: 'boleto_dia_vencimento_manual', nullable: true })
+    boleto_dia_vencimento_manual: number | null;
+
+    /** Quantidade de boletos da forma de pagamento manual (somente BOLETO). */
+    @Column({ type: 'int', name: 'boleto_quantidade_manual', nullable: true })
+    boleto_quantidade_manual: number | null;
+
     @ManyToOne(() => Turmas, { nullable: true })
     @JoinColumn([{ name: 'id_turma_transferencia_para', referencedColumnName: 'id' }])
     id_turma_transferencia_para_fk: Turmas | null;

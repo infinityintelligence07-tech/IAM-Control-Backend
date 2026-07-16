@@ -2169,7 +2169,9 @@ export class DocumentosService {
             // e o time decide manualmente se devem ser removidos.
             const turmaVenda = turmaAlunoComprador?.id_turma_fk;
             const treinamentoVenda = turmaVenda?.id_treinamento_fk;
-            const nomeAluno = turmaAlunoComprador?.id_aluno_fk?.nome || dadosContrato?.aluno?.nome || 'Aluno não identificado';
+            // Nome do COMPRADOR do contrato: snapshot da venda com prioridade
+            // (a relação pode apontar para outra pessoa após upsert por e-mail).
+            const nomeAluno = dadosContrato?.aluno?.nome || turmaAlunoComprador?.id_aluno_fk?.nome || 'Aluno não identificado';
             const turmaLabel = turmaVenda
                 ? `${treinamentoVenda?.treinamento || `Treinamento #${turmaVenda.id_treinamento}`} - ${turmaVenda.edicao_turma || 'Sem edição'}`
                 : null;
@@ -2703,7 +2705,10 @@ export class DocumentosService {
                 }
             }
             const aluno = turmaAluno?.id_aluno_fk;
-            const polo = aluno?.id_polo_fk;
+            // Comprador PRINCIPAL do contrato: snapshot da venda com prioridade
+            // sobre a relação (que pode apontar para outra pessoa — ex.: registro
+            // de aluno renomeado por upsert de e-mail ao lançar 2ª inscrição/combo).
+            const alunoComprador = this.resolverAlunoCompradorContrato(aluno, dadosContrato?.aluno);
             // Buscar treinamento dos dados do contrato ou das relations
             const treinamento = dadosContrato.treinamento || turmaAlunoTreinamento?.id_treinamento_fk || null;
             const turmaAlunoDadosContrato = dadosContrato.turma_aluno || {};
@@ -2747,7 +2752,7 @@ export class DocumentosService {
                 zapsign_document_status: contrato.zapsign_document_status,
                 // Contrato manuscrito anexado (foto(s) ou PDF) no fluxo de venda manual.
                 foto_documento_aluno_base64: contrato.foto_documento_aluno_base64 ?? null,
-                aluno_nome: aluno?.nome,
+                aluno_nome: alunoComprador.nome ?? undefined,
                 treinamento_nome: treinamento?.treinamento,
                 comprovantes_pagamento: comprovantesPagamento,
                 turma_aluno: {
@@ -2760,26 +2765,15 @@ export class DocumentosService {
                 },
                 dados_contrato: {
                     aluno: {
-                        id: aluno?.id,
-                        nome: aluno?.nome,
-                        cpf: aluno?.cpf,
-                        email: aluno?.email,
-                        data_nascimento: aluno?.data_nascimento,
-                        telefone_um: aluno?.telefone_um,
-                        polo: {
-                            id: polo?.id,
-                            cidade: polo?.cidade,
-                            estado: polo?.estado,
-                        },
-                        endereco: dadosContrato.aluno?.endereco || {
-                            logradouro: aluno?.logradouro || '',
-                            numero: aluno?.numero || '',
-                            complemento: aluno?.complemento || '',
-                            bairro: aluno?.bairro || '',
-                            cidade: aluno?.cidade || '',
-                            estado: aluno?.estado || '',
-                            cep: aluno?.cep || '',
-                        },
+                        id: alunoComprador.id,
+                        nome: alunoComprador.nome,
+                        cpf: alunoComprador.cpf,
+                        email: alunoComprador.email,
+                        data_nascimento: alunoComprador.data_nascimento,
+                        telefone_um: alunoComprador.telefone_um,
+                        telefone_dois: alunoComprador.telefone_dois,
+                        polo: alunoComprador.polo,
+                        endereco: alunoComprador.endereco,
                     },
                     treinamento: {
                         id: treinamento?.id,
@@ -2838,6 +2832,113 @@ export class DocumentosService {
         return String(valor || '')
             .trim()
             .toLowerCase();
+    }
+
+    /**
+     * Resolve o COMPRADOR PRINCIPAL do contrato para exibição no Histórico de
+     * Vendas. A fonte de verdade é SEMPRE o snapshot gravado em
+     * `dados_contrato.aluno` no ato da venda (é o nome impresso no contrato).
+     * A matrícula vinculada ao contrato pode apontar para OUTRA pessoa — ex.:
+     * o upsert de alunos por e-mail renomeia o registro quando a 2ª inscrição
+     * ou o titular do combo entra com os dados de um familiar usando o mesmo
+     * e-mail — então a relação só complementa campos ausentes quando for
+     * comprovadamente a MESMA pessoa (mesmo CPF ou mesmo nome). Contratos
+     * legados sem snapshot continuam usando a relação integralmente.
+     */
+    private resolverAlunoCompradorContrato(
+        alunoRelacao: Record<string, any> | null | undefined,
+        alunoSnapshotRaw: Record<string, any> | null | undefined,
+    ): {
+        id: number | null;
+        nome: string | null;
+        cpf: string | null;
+        email: string | null;
+        data_nascimento: string | Date | null;
+        telefone_um: string | null;
+        telefone_dois: string | null;
+        polo: { id: number | null; cidade: string | null; estado: string | null };
+        endereco: {
+            logradouro: string;
+            numero: string;
+            complemento: string;
+            bairro: string;
+            cidade: string;
+            estado: string;
+            cep: string;
+        };
+    } {
+        const normalizarNome = (valor?: string | null): string =>
+            String(valor || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+        const somenteDigitos = (valor?: string | null): string => String(valor || '').replace(/\D/g, '');
+
+        const snapshot = alunoSnapshotRaw && typeof alunoSnapshotRaw === 'object' ? alunoSnapshotRaw : {};
+        const nomeSnapshot = normalizarNome(snapshot.nome);
+        const cpfSnapshot = somenteDigitos(snapshot.cpf);
+        const cpfRelacao = somenteDigitos(alunoRelacao?.cpf);
+        // Sem snapshot (contrato legado) a relação é confiável; com snapshot,
+        // a relação só é usada como complemento se for a mesma pessoa.
+        const relacaoConfiavel = !nomeSnapshot
+            ? alunoRelacao || null
+            : alunoRelacao && ((cpfSnapshot && cpfRelacao && cpfSnapshot === cpfRelacao) || normalizarNome(alunoRelacao?.nome) === nomeSnapshot)
+              ? alunoRelacao
+              : null;
+
+        const poloSnapshot = snapshot.polo && typeof snapshot.polo === 'object' ? snapshot.polo : {};
+        const poloRelacao = relacaoConfiavel?.id_polo_fk || null;
+        // O snapshot da criação grava o endereço em campos achatados
+        // (logradouro/numero/...); vendas antigas podem ter o objeto `endereco`.
+        const enderecoSnapshot: Record<string, string> =
+            snapshot.endereco && typeof snapshot.endereco === 'object'
+                ? snapshot.endereco
+                : {
+                      logradouro: snapshot.logradouro || '',
+                      numero: snapshot.numero || '',
+                      complemento: snapshot.complemento || '',
+                      bairro: snapshot.bairro || '',
+                      cidade: snapshot.cidade || '',
+                      estado: snapshot.estado || '',
+                      cep: snapshot.cep || '',
+                  };
+        const temEnderecoSnapshot = Object.values(enderecoSnapshot).some((valor) => String(valor || '').trim());
+
+        return {
+            id: snapshot.id ?? relacaoConfiavel?.id ?? null,
+            nome: snapshot.nome ?? relacaoConfiavel?.nome ?? null,
+            cpf: snapshot.cpf ?? relacaoConfiavel?.cpf ?? null,
+            email: snapshot.email ?? relacaoConfiavel?.email ?? null,
+            data_nascimento: snapshot.data_nascimento ?? relacaoConfiavel?.data_nascimento ?? null,
+            telefone_um: snapshot.telefone_um ?? relacaoConfiavel?.telefone_um ?? null,
+            telefone_dois: snapshot.telefone_dois ?? relacaoConfiavel?.telefone_dois ?? null,
+            polo: {
+                id: poloSnapshot.id ?? poloRelacao?.id ?? null,
+                cidade: poloSnapshot.cidade ?? poloRelacao?.cidade ?? null,
+                estado: poloSnapshot.estado ?? poloRelacao?.estado ?? null,
+            },
+            endereco: temEnderecoSnapshot
+                ? {
+                      logradouro: enderecoSnapshot.logradouro || '',
+                      numero: enderecoSnapshot.numero || '',
+                      complemento: enderecoSnapshot.complemento || '',
+                      bairro: enderecoSnapshot.bairro || '',
+                      cidade: enderecoSnapshot.cidade || '',
+                      estado: enderecoSnapshot.estado || '',
+                      cep: enderecoSnapshot.cep || '',
+                  }
+                : {
+                      logradouro: relacaoConfiavel?.logradouro || '',
+                      numero: relacaoConfiavel?.numero || '',
+                      complemento: relacaoConfiavel?.complemento || '',
+                      bairro: relacaoConfiavel?.bairro || '',
+                      cidade: relacaoConfiavel?.cidade || poloRelacao?.cidade || '',
+                      estado: relacaoConfiavel?.estado || poloRelacao?.estado || '',
+                      cep: relacaoConfiavel?.cep || '',
+                  },
+        };
     }
 
     private inferirCanalVendaServidor(
@@ -3739,9 +3840,12 @@ export class DocumentosService {
             const concluido = this.statusContratoEhConcluido(statusDocumento);
 
             if (termoBusca) {
-                const nomeAluno = this.normalizarTexto(linha.aluno_nome || linha.aluno_nome_snapshot);
-                const emailAluno = this.normalizarTexto(linha.aluno_email || linha.aluno_email_snapshot);
-                if (!nomeAluno.includes(termoBusca) && !emailAluno.includes(termoBusca)) {
+                // Compara relação E snapshot (a listagem exibe o snapshot do
+                // comprador; a relação pode divergir após upsert por e-mail).
+                const candidatosBusca = [linha.aluno_nome_snapshot, linha.aluno_nome, linha.aluno_email_snapshot, linha.aluno_email].map((valor) =>
+                    this.normalizarTexto(valor),
+                );
+                if (!candidatosBusca.some((valor) => valor && valor.includes(termoBusca))) {
                     return;
                 }
             }
@@ -5443,7 +5547,11 @@ export class DocumentosService {
                         }
                     }
                     const aluno = turmaAluno?.id_aluno_fk;
-                    const polo = aluno?.id_polo_fk;
+                    // Comprador PRINCIPAL do contrato: o snapshot da venda tem
+                    // prioridade sobre a relação — a matrícula vinculada pode
+                    // apontar para OUTRA pessoa (registro de aluno renomeado por
+                    // upsert de e-mail na 2ª inscrição/titular de combo).
+                    const alunoComprador = this.resolverAlunoCompradorContrato(aluno, dadosContrato?.aluno);
 
                     // Usar treinamento das relations ou dos dados do contrato
                     const treinamento = turmaAlunoTreinamento?.id_treinamento_fk || dadosContrato.treinamento || null;
@@ -5610,9 +5718,9 @@ export class DocumentosService {
                         // dispensando o envio para assinatura digital.
                         contrato_manual: idsContratoManual.has(String(contrato.id)),
                         // Campos diretos para compatibilidade com frontend.
-                        // Fallback no snapshot JSON (dados_contrato.aluno) quando a relação
-                        // estiver vazia — por exemplo, matrícula soft-deleted por transferência.
-                        aluno_nome: aluno?.nome || dadosContrato?.aluno?.nome || null,
+                        // Nome do COMPRADOR do contrato (snapshot da venda), com a
+                        // relação apenas complementando contratos legados sem snapshot.
+                        aluno_nome: alunoComprador.nome ?? null,
                         treinamento_nome: treinamento?.treinamento || dadosContrato?.treinamento?.treinamento || null,
                         comprovantes_pagamento: comprovantesPagamento,
                         possui_comprovantes: possuiComprovantes,
@@ -5625,30 +5733,19 @@ export class DocumentosService {
                             comprovantes_pagamento: comprovantesPagamento,
                         },
                         dados_contrato: {
-                            // Mescla relação (fonte de verdade atualizada) com o snapshot
-                            // do contrato. Snapshot serve de fallback se a matrícula estiver
-                            // soft-deleted por transferência, perda de FK, etc.
+                            // Comprador PRINCIPAL do contrato: snapshot da venda como
+                            // fonte de verdade; a relação só complementa quando é a
+                            // mesma pessoa (ou em contratos legados sem snapshot).
                             aluno: {
-                                id: aluno?.id ?? dadosContrato?.aluno?.id ?? null,
-                                nome: aluno?.nome ?? dadosContrato?.aluno?.nome ?? null,
-                                cpf: aluno?.cpf ?? dadosContrato?.aluno?.cpf ?? null,
-                                email: aluno?.email ?? dadosContrato?.aluno?.email ?? null,
-                                data_nascimento: aluno?.data_nascimento ?? dadosContrato?.aluno?.data_nascimento ?? null,
-                                telefone_um: aluno?.telefone_um ?? dadosContrato?.aluno?.telefone_um ?? null,
-                                polo: {
-                                    id: polo?.id ?? dadosContrato?.aluno?.polo?.id ?? null,
-                                    cidade: polo?.cidade ?? dadosContrato?.aluno?.polo?.cidade ?? null,
-                                    estado: polo?.estado ?? dadosContrato?.aluno?.polo?.estado ?? null,
-                                },
-                                endereco: dadosContrato.aluno?.endereco || {
-                                    logradouro: aluno?.logradouro || '',
-                                    numero: aluno?.numero || '',
-                                    complemento: aluno?.complemento || '',
-                                    bairro: aluno?.bairro || '',
-                                    cidade: aluno?.cidade || polo?.cidade || '',
-                                    estado: aluno?.estado || polo?.estado || '',
-                                    cep: aluno?.cep || '',
-                                },
+                                id: alunoComprador.id,
+                                nome: alunoComprador.nome,
+                                cpf: alunoComprador.cpf,
+                                email: alunoComprador.email,
+                                data_nascimento: alunoComprador.data_nascimento,
+                                telefone_um: alunoComprador.telefone_um,
+                                telefone_dois: alunoComprador.telefone_dois,
+                                polo: alunoComprador.polo,
+                                endereco: alunoComprador.endereco,
                             },
                             treinamento: {
                                 id: treinamento?.id,

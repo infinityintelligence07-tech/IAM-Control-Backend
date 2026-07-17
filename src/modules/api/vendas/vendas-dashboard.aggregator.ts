@@ -483,7 +483,7 @@ export const parseHistoricoObservacoesPendencia = (
     if (!bruto) return [];
     if (Array.isArray(bruto)) {
         return bruto
-            .map((item) => {
+            .map((item): ObservacaoPendenciaItem | null => {
                 if (!item || typeof item !== 'object') return null;
                 const row = item as Record<string, unknown>;
                 const texto = textoLimpo(row.texto ?? row.texto_observacao ?? row.message);

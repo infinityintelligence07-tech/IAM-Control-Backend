@@ -19,6 +19,31 @@ import { AlunosEmpresas } from '../../config/entities/alunosEmpresas.entity';
 import { EProfissao } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 
+/** Campos cadastrais monitorados para registrar alterações no histórico de observações do aluno. */
+const CAMPOS_CADASTRAIS_HISTORICO: Array<{ campo: keyof Alunos; label: string }> = [
+    { campo: 'nome', label: 'nome' },
+    { campo: 'nome_cracha', label: 'crachá (como gostaria de ser chamado)' },
+    { campo: 'email', label: 'e-mail' },
+    { campo: 'genero', label: 'gênero' },
+    { campo: 'cpf', label: 'CPF' },
+    { campo: 'instagram', label: 'Instagram' },
+    { campo: 'data_nascimento', label: 'data de nascimento' },
+    { campo: 'telefone_um', label: 'telefone principal' },
+    { campo: 'telefone_dois', label: 'telefone secundário' },
+    { campo: 'cep', label: 'CEP' },
+    { campo: 'logradouro', label: 'logradouro' },
+    { campo: 'numero', label: 'número' },
+    { campo: 'complemento', label: 'complemento' },
+    { campo: 'bairro', label: 'bairro' },
+    { campo: 'cidade', label: 'cidade' },
+    { campo: 'estado', label: 'estado/UF' },
+    { campo: 'profissao', label: 'profissão' },
+    { campo: 'status_aluno_geral', label: 'status geral' },
+    { campo: 'possui_deficiencia', label: 'possui deficiência' },
+    { campo: 'desc_deficiencia', label: 'descrição da deficiência' },
+    { campo: 'id_polo', label: 'polo' },
+];
+
 @Injectable()
 export class AlunosService {
     constructor(private readonly uow: UnitOfWorkService) {}
@@ -447,7 +472,81 @@ export class AlunosService {
         }
     }
 
-    async update(id: number, updateAlunoDto: UpdateAlunoDto): Promise<AlunoResponseDto> {
+    /** Formata um valor cadastral para exibição no histórico (datas viram dd/mm/aaaa, booleanos viram Sim/Não). */
+    private formatarValorCadastral(campo: keyof Alunos, valor: unknown): string {
+        if (valor === null || valor === undefined) return '';
+        if (campo === 'possui_deficiencia') return valor ? 'Sim' : 'Não';
+        if (campo === 'data_nascimento') {
+            // Coluna date-only: formata direto da string "YYYY-MM-DD" (sem parser UTC).
+            const texto = valor instanceof Date ? valor.toISOString().slice(0, 10) : String(valor).slice(0, 10);
+            const [ano, mes, dia] = texto.split('-');
+            return ano && mes && dia ? `${dia}/${mes}/${ano}` : texto;
+        }
+        return String(valor).trim();
+    }
+
+    /**
+     * Registra no histórico de observações do aluno as alterações de dados
+     * cadastrais (ex.: "Mudou nome de João Teste para Paula Teste"). O log é
+     * ancorado na matrícula mais recente do aluno porque a tabela de histórico
+     * exige turma/matrícula, mas a leitura agregada é feita por id_aluno.
+     * Falha no registro não pode derrubar a atualização do cadastro.
+     */
+    private async registrarHistoricoAlteracaoCadastral(
+        idAluno: number,
+        alteracoes: Array<{ label: string; de: string; para: string }>,
+        fotoAlterada: boolean,
+        userId?: number,
+    ): Promise<void> {
+        if (alteracoes.length === 0 && !fotoAlterada) return;
+
+        try {
+            const matricula =
+                (await this.uow.turmasAlunosRP.findOne({
+                    where: { id_aluno: String(idAluno), deletado_em: IsNull() },
+                    order: { criado_em: 'DESC' },
+                    select: ['id', 'id_turma', 'id_aluno'] as any,
+                })) ??
+                (await this.uow.turmasAlunosRP.findOne({
+                    where: { id_aluno: String(idAluno) },
+                    withDeleted: true,
+                    order: { criado_em: 'DESC' },
+                    select: ['id', 'id_turma', 'id_aluno'] as any,
+                }));
+
+            // Aluno sem nenhuma matrícula: não há onde ancorar o log.
+            if (!matricula) return;
+
+            const linhas = alteracoes.map(({ label, de, para }) => {
+                if (de && para) return `Mudou ${label} de ${de} para ${para}`;
+                if (!de && para) return `Definiu ${label} como ${para}`;
+                return `Removeu ${label} (antes: ${de})`;
+            });
+            if (fotoAlterada) {
+                linhas.push('Alterou a foto do aluno');
+            }
+
+            await this.uow.historicoAlunosTurmasLogsRP.insert({
+                id_turma_aluno: matricula.id,
+                id_turma: matricula.id_turma,
+                id_aluno: String(idAluno),
+                tipo_acao: 'ATUALIZACAO',
+                titulo: 'Dados cadastrais alterados',
+                descricao: linhas.map((linha) => ` - ${linha}`).join('\n'),
+                detalhes: {
+                    alteracoes: alteracoes.map((item) => ({ campo: item.label, de: item.de || null, para: item.para || null })),
+                    foto_alterada: fotoAlterada,
+                },
+                data_acao: new Date(),
+                criado_por: userId,
+                atualizado_por: userId,
+            });
+        } catch (error) {
+            console.error('Erro ao registrar histórico de alteração cadastral do aluno:', error instanceof Error ? error.message : 'Erro desconhecido');
+        }
+    }
+
+    async update(id: number, updateAlunoDto: UpdateAlunoDto, userId?: number): Promise<AlunoResponseDto> {
         try {
             validateBase64ImageField(updateAlunoDto.url_foto_aluno, 'Foto do aluno');
             const aluno = await this.uow.alunosRP.findOne({
@@ -461,6 +560,13 @@ export class AlunosService {
             if (!aluno) {
                 throw new NotFoundException(`Aluno com ID ${id} não encontrado`);
             }
+
+            // Snapshot dos campos cadastrais ANTES da alteração (para o histórico).
+            const valoresAnteriores = new Map<keyof Alunos, unknown>();
+            for (const { campo } of CAMPOS_CADASTRAIS_HISTORICO) {
+                valoresAnteriores.set(campo, aluno[campo]);
+            }
+            const fotoAnterior = aluno.url_foto_aluno || '';
 
             // Atualizar campos fornecidos
             Object.assign(aluno, updateAlunoDto);
@@ -486,6 +592,39 @@ export class AlunosService {
 
             const alunoAtualizado = await this.uow.alunosRP.save(aluno);
             console.log('Aluno atualizado com sucesso:', alunoAtualizado);
+
+            // Monta a lista de alterações cadastrais para o histórico de observações.
+            const alteracoes: Array<{ label: string; de: string; para: string }> = [];
+            for (const { campo, label } of CAMPOS_CADASTRAIS_HISTORICO) {
+                const de = this.formatarValorCadastral(campo, valoresAnteriores.get(campo));
+                const para = this.formatarValorCadastral(campo, alunoAtualizado[campo]);
+                if (de === para) continue;
+
+                if (campo === 'id_polo') {
+                    // Ids de polo não dizem nada ao usuário: resolve os nomes.
+                    const idsPolo = [de, para].map(Number).filter((valor) => Number.isInteger(valor) && valor > 0);
+                    const nomesPolo = new Map<number, string>();
+                    if (idsPolo.length > 0) {
+                        const polos = await this.uow.polosRP.find({
+                            where: idsPolo.map((idPolo) => ({ id: idPolo })),
+                            withDeleted: true,
+                            select: ['id', 'polo'] as any,
+                        });
+                        polos.forEach((polo) => nomesPolo.set(Number(polo.id), polo.polo));
+                    }
+                    alteracoes.push({
+                        label,
+                        de: de ? nomesPolo.get(Number(de)) || `Polo ${de}` : '',
+                        para: para ? nomesPolo.get(Number(para)) || `Polo ${para}` : '',
+                    });
+                    continue;
+                }
+
+                alteracoes.push({ label, de, para });
+            }
+            const fotoAlterada = updateAlunoDto.url_foto_aluno !== undefined && (alunoAtualizado.url_foto_aluno || '') !== fotoAnterior;
+
+            await this.registrarHistoricoAlteracaoCadastral(id, alteracoes, fotoAlterada, userId ?? updateAlunoDto.atualizado_por ?? undefined);
 
             return {
                 id: alunoAtualizado.id,

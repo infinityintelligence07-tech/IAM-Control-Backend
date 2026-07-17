@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Query, Param, Body, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Query, Param, Body, UseInterceptors, ClassSerializerInterceptor, ParseIntPipe, UseGuards, Req } from '@nestjs/common';
 import { AlunosService } from './alunos.service';
 import {
     GetAlunosDto,
@@ -67,9 +67,10 @@ export class AlunosController {
     }
 
     @Put(':id')
-    async update(@Param('id', ParseIntPipe) id: number, @Body() updateAlunoDto: UpdateAlunoDto): Promise<AlunoResponseDto> {
+    async update(@Param('id', ParseIntPipe) id: number, @Body() updateAlunoDto: UpdateAlunoDto, @Req() req: any): Promise<AlunoResponseDto> {
         console.log('Atualizando aluno ID:', id, 'Dados:', updateAlunoDto);
-        return this.alunosService.update(id, updateAlunoDto);
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.alunosService.update(id, updateAlunoDto, userId);
     }
 
     @Put(':id/soft-delete')

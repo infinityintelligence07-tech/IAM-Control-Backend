@@ -3841,7 +3841,7 @@ export class TurmasService {
 
     /**
      * Classifica cada aluno da turma no MESMO canal usado pelo dashboard (buckets mutuamente
-     * exclusivos por prioridade), retornando o rótulo do canal e a categoria (Extra/Compra de ingresso).
+     * exclusivos por prioridade), retornando o rótulo do canal e a categoria (Extra/Compra de ingresso)
      * Espelha exatamente a partição de `getTurmaStatusResumo` (bônus > cortesia/sorteio > time de vendas
      * > transbordo > liberty > masterclass > transferência > demais). TRANSBORDO/LIBERTY = compra de ingresso.
      */

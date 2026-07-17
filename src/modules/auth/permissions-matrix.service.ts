@@ -272,6 +272,8 @@ export class PermissionsMatrixService {
      * v6: quem pode criar vendas ganha documentos view/create/edit (finalizar a venda
      *     busca o template em GET /documentos e emite o contrato em POST zapsign/criar-contrato).
      * v7: libera vendasDashboard.view para líderes (prioridade ≥ 80) em todos os setores.
+     * v8: libera credenciamento.edit (marcar presença) onde o padrão prevê
+     *     (Staff+ em Eventos/Expansão; estagiário permanece só view).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -355,6 +357,19 @@ export class PermissionsMatrixService {
                         ),
                         delete: Boolean(
                             role.vendasDashboard?.delete || defaultRole.vendasDashboard.delete,
+                        ),
+                    };
+                }
+
+                if (fromVersion < 8 && defaultRole.credenciamento?.edit) {
+                    role.credenciamento = {
+                        view: true,
+                        create: Boolean(
+                            role.credenciamento?.create || defaultRole.credenciamento.create,
+                        ),
+                        edit: true,
+                        delete: Boolean(
+                            role.credenciamento?.delete || defaultRole.credenciamento.delete,
                         ),
                     };
                 }

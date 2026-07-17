@@ -119,6 +119,8 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
             role = grantModule(role, 'enderecosEventos', ['view', 'create', 'edit']);
             role = grantModule(role, 'calendario', ['view', 'create', 'edit']);
             role = grantModule(role, 'turmas', ['view', 'create', 'edit']);
+            // Staff+ marca presença no Credenciamento (edit); estagiário sobrescreve abaixo.
+            role = grantModule(role, 'credenciamento', ['view', 'edit']);
             return role;
 
         case ESetores.EXPANSAO_NEGOCIOS:
@@ -168,14 +170,32 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
 
             if (funcao === EFuncoes.STAFF) {
                 let staff = buildStaffPermissions();
-                // STAFF de Eventos/Expansão opera vendas no evento (1→N inscrições).
+                // STAFF de Eventos/Expansão opera vendas no evento (1→N inscrições)
+                // e marca presença no Credenciamento.
                 if (setor === ESetores.EVENTOS || setor === ESetores.EXPANSAO) {
                     staff = grantModule(staff, 'alunos', ['view', 'create', 'edit']);
                     staff = grantModule(staff, 'alunosNaTurma', ['view', 'create', 'edit']);
                     staff = grantModule(staff, 'vendas', ['view', 'create', 'edit']);
                     staff = grantModule(staff, 'documentos', ['view', 'create', 'edit']);
+                    staff = grantModule(staff, 'credenciamento', ['view', 'edit']);
                 }
                 sectorRow[funcao] = staff;
+                continue;
+            }
+
+            if (funcao === EFuncoes.ESTAGIARIO) {
+                let estagiario = buildSetorPadrao(setor);
+                // Estagiário: só visualiza credenciamento (não marca presença).
+                estagiario = {
+                    ...estagiario,
+                    credenciamento: {
+                        view: true,
+                        create: false,
+                        edit: false,
+                        delete: false,
+                    },
+                };
+                sectorRow[funcao] = estagiario;
                 continue;
             }
 

@@ -32,7 +32,7 @@ import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { ESetores } from '@/modules/config/entities/enum';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
-import { resolverDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
+import { resolverDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
 
 const parsePositiveIntEnv = (value: string | undefined, fallback: number): number => {
     const parsed = Number(value);
@@ -1901,121 +1901,8 @@ export class DocumentosService {
 
             this.logger.log(`contract.repo.cancel | Contrato encontrado id=${contrato.id}`);
 
-            const dadosContrato = contrato.dados_contrato || {};
-            const turmaAlunoComprador = contrato.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
-            const idTurmaAlunoComprador = turmaAlunoComprador?.id || null;
-            const idAlunoComprador = turmaAlunoComprador?.id_aluno || dadosContrato?.aluno?.id || dadosContrato?.aluno?.id_aluno || null;
-
-            this.logger.debug('contract.repo.cancel | Cancelamento por IDs mapeado');
-
-            const idsTurmasAlunosParaRemover = new Set<string>();
-            const adicionarTurmaAlunoParaRemocao = (idTurmaAluno?: string | null) => {
-                if (!idTurmaAluno) return;
-                idsTurmasAlunosParaRemover.add(idTurmaAluno);
-            };
-            const podeRemoverTurmaAlunoSemAfetarOutrosContratos = async (idTurmaAluno: string) => {
-                const treinamentosDaMatricula = await this.uow.turmasAlunosTreinamentosRP.find({
-                    where: {
-                        id_turma_aluno: idTurmaAluno,
-                        deletado_em: null,
-                    },
-                    select: {
-                        id: true,
-                    },
-                });
-
-                const idsTreinamentosDaMatricula = treinamentosDaMatricula.map((item) => item.id);
-                if (idsTreinamentosDaMatricula.length === 0) {
-                    return true;
-                }
-
-                const outrosContratosAtivosVinculados = await this.uow.turmasAlunosTreinamentosContratosRP
-                    .createQueryBuilder('contrato')
-                    .where('contrato.deletado_em IS NULL')
-                    .andWhere('contrato.id <> :idContratoAtual', { idContratoAtual: contrato.id })
-                    .andWhere('contrato.id_turma_aluno_treinamento IN (:...idsTreinamentos)', {
-                        idsTreinamentos: idsTreinamentosDaMatricula,
-                    })
-                    .getCount();
-
-                return outrosContratosAtivosVinculados === 0;
-            };
-
-            // 1) Matrícula principal do aluno comprador na turma desta venda
-            adicionarTurmaAlunoParaRemocao(idTurmaAlunoComprador);
-
-            // 2) Matrículas bônus vinculadas ao comprador (somente por IDs)
-            if (idAlunoComprador) {
-                const idsTurmasBonusRelacionadas = new Set<number>();
-
-                if (idTurmaAlunoComprador) {
-                    const vinculosBonus = await this.uow.turmasAlunosTreinamentosBonusRP.find({
-                        where: {
-                            id_turma_aluno: idTurmaAlunoComprador,
-                            deletado_em: null,
-                        },
-                    });
-
-                    vinculosBonus.forEach((vinculo) => {
-                        const ganhadores = Array.isArray(vinculo.ganhadores_bonus) ? vinculo.ganhadores_bonus : [];
-                        ganhadores.forEach((ganhador) => {
-                            const idTurmaBonus = Number(ganhador.id_turma_gb);
-                            if (Number.isInteger(idTurmaBonus)) {
-                                idsTurmasBonusRelacionadas.add(idTurmaBonus);
-                            }
-                        });
-                    });
-                }
-
-                const turmaBonusInfo = (dadosContrato?.bonus?.turma_bonus_info || dadosContrato?.turma_bonus_info) as
-                    | { id?: unknown; id_turma?: unknown }
-                    | undefined;
-                const idTurmaBonusInfo = Number(turmaBonusInfo?.id_turma ?? turmaBonusInfo?.id);
-                if (Number.isInteger(idTurmaBonusInfo)) {
-                    idsTurmasBonusRelacionadas.add(idTurmaBonusInfo);
-                }
-
-                if (idsTurmasBonusRelacionadas.size > 0) {
-                    const matriculasBonus = await this.uow.turmasAlunosRP.find({
-                        where: {
-                            id_aluno_bonus: idAlunoComprador,
-                            origem_aluno: EOrigemAlunos.ALUNO_BONUS,
-                            deletado_em: null,
-                            id_turma: In(Array.from(idsTurmasBonusRelacionadas)),
-                        },
-                    });
-
-                    for (const turmaAlunoBonus of matriculasBonus) {
-                        adicionarTurmaAlunoParaRemocao(turmaAlunoBonus.id);
-                    }
-
-                    this.logger.debug(`contract.repo.cancel | Matrículas bônus identificadas=${matriculasBonus.length}`);
-                } else {
-                    this.logger.debug('contract.repo.cancel | Nenhuma turma bônus vinculada por ID encontrada para este contrato');
-                }
-            }
-
-            // 3) Remover matrículas apenas quando não houver outro contrato ativo vinculado
-            const idsTurmasAlunosElegiveisParaRemocao = new Set<string>();
-            for (const idTurmaAluno of idsTurmasAlunosParaRemover) {
-                const podeRemover = await podeRemoverTurmaAlunoSemAfetarOutrosContratos(idTurmaAluno);
-                if (podeRemover) {
-                    idsTurmasAlunosElegiveisParaRemocao.add(idTurmaAluno);
-                } else {
-                    this.logger.debug(`contract.repo.cancel | Matrícula preservada por contrato ativo idTurmaAluno=${idTurmaAluno}`);
-                }
-            }
-
-            this.logger.log(`contract.repo.cancel | Removendo matrículas elegíveis=${idsTurmasAlunosElegiveisParaRemocao.size}`);
-            for (const idTurmaAluno of idsTurmasAlunosElegiveisParaRemocao) {
-                try {
-                    await this.turmasService.removeAlunoTurma(idTurmaAluno);
-                    this.logger.debug(`contract.repo.cancel | Aluno removido da turma idTurmaAluno=${idTurmaAluno}`);
-                } catch (error) {
-                    this.logger.warn(`contract.repo.cancel | Erro ao remover aluno da turma idTurmaAluno=${idTurmaAluno}`);
-                    // Continuar removendo os outros mesmo se um falhar
-                }
-            }
+            // Matrículas NÃO são removidas no cancelamento do contrato —
+            // a exclusão de aluno da turma fica só com a acessora do Cuidado de Alunos.
 
             // Cancelar documento no ZapSign
             const documentIdZapSign = contrato.zapsign_document_id || contrato.dados_contrato?.zapsign_document_id || documentoId;
@@ -2035,10 +1922,10 @@ export class DocumentosService {
                 atualizado_por: userId,
             });
 
-            this.logger.log('contract.repo.cancel | Contrato removido do banco (soft delete)');
+            this.logger.log('contract.repo.cancel | Contrato removido do banco (soft delete); matrículas preservadas');
 
             return {
-                message: 'Documento cancelado com sucesso. Contrato removido e vínculos de turma/bônus tratados por ID, sem afetar contratos duplicados ativos.',
+                message: 'Documento cancelado com sucesso. As matrículas do aluno e os bônus foram mantidos nas turmas.',
             };
         } catch (error) {
             this.logger.error('zapsign.cancel | Erro ao cancelar documento', error instanceof Error ? error.stack : undefined);

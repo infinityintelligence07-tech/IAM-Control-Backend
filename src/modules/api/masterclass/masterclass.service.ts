@@ -469,7 +469,8 @@ export class MasterclassService {
             // Agrupar por evento (nome + data)
             const eventosMap = new Map<string, MasterclassEventoResponseDto>();
 
-            // Primeiro, adicionar todas as turmas de masterclass como eventos
+            // Uma entrada por turma (cada cidade/polo no mesmo dia aparece
+            // separada). Agrupar só por nome+data escondia as demais cidades.
             for (const turma of turmasConsideradas) {
                 const eventoNome = turma.id_treinamento_fk?.treinamento || 'Evento sem nome';
 
@@ -490,13 +491,15 @@ export class MasterclassService {
                     dataEvento = new Date();
                 }
 
-                const key = `${eventoNome}_${dataEvento.toISOString().split('T')[0]}`;
+                const key = String(turma.id);
 
                 if (!eventosMap.has(key)) {
                     eventosMap.set(key, {
+                        id_turma: turma.id,
                         evento_nome: eventoNome,
                         data_evento: dataEvento,
                         cidade: turma.cidade || turma.id_polo_fk?.cidade || 'Não informado',
+                        sigla_polo: turma.id_polo_fk?.sigla_polo || undefined,
                         total_inscritos: 0,
                         total_presentes: 0,
                         total_ausentes: 0,
@@ -523,32 +526,11 @@ export class MasterclassService {
 
             // Adicionar pré-cadastros aos eventos existentes (apenas turmas reais)
             for (const pc of preCadastros) {
-                // Converter data_evento para Date se vier como string
-                const dataEventoPC = typeof pc.data_evento === 'string' ? new Date(pc.data_evento) : pc.data_evento;
-
                 // Buscar a turma correspondente ao pré-cadastro
                 const turmaCorrespondente = turmasConsideradas.find((t) => t.id === pc.id_turma);
                 if (!turmaCorrespondente) continue; // Pular se não encontrar a turma
 
-                // Usar o nome da turma, não do pré-cadastro
-                const eventoNome = turmaCorrespondente.id_treinamento_fk?.treinamento || 'Evento sem nome';
-                const dataInicioTurma = turmaCorrespondente.data_inicio;
-
-                // Criar data sem deslocamento de timezone
-                let dataEventoTurma: Date;
-                if (dataInicioTurma) {
-                    if (typeof dataInicioTurma === 'string') {
-                        // Para strings "YYYY-MM-DD", criar data local
-                        const [year, month, day] = dataInicioTurma.split('-').map(Number);
-                        dataEventoTurma = new Date(year, month - 1, day); // month é 0-indexado
-                    } else {
-                        dataEventoTurma = dataInicioTurma;
-                    }
-                } else {
-                    dataEventoTurma = new Date();
-                }
-
-                const key = `${eventoNome}_${dataEventoTurma.toISOString().split('T')[0]}`;
+                const key = String(turmaCorrespondente.id);
 
                 const evento = eventosMap.get(key);
                 if (evento) {

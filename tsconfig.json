@@ -9,7 +9,7 @@
     "target": "ES2023",
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "..",
+    "rootDir": "./src",
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": false,
@@ -21,9 +21,6 @@
     "paths": {
       "@/*": [
         "./src/*"
-      ],
-      "@shared/*": [
-        "./shared/*"
       ]
     },
     "strict": true

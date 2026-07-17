@@ -3,7 +3,7 @@ import {
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT,
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT,
 } from './constants/contract-signature.constants';
-import { getContractDestinationProfile, IAM_LOGO_PATH, LIBERTY_LOGO_PATH } from '@shared/contracts/contract-destination-profile';
+import { getContractDestinationProfile, IAM_LOGO_PATH, LIBERTY_LOGO_PATH } from '@/utils/contract-destination-profile';
 import { PdfBrowserService } from './pdf-browser.service';
 
 @Injectable()

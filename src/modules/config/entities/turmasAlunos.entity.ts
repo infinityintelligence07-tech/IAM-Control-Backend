@@ -2,7 +2,7 @@ import { Entity, Column, OneToMany, PrimaryGeneratedColumn, ManyToOne, JoinColum
 
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
-import { EOrigemAlunos, EPresencaTurmas, EStatusAlunosTurmas } from './enum/index';
+import { EFormasPagamento, EOrigemAlunos, EPresencaTurmas, EStatusAlunosTurmas } from './enum/index';
 import { Turmas } from './turmas.entity';
 import { TurmasAlunosProdutos } from './turmasAlunosProdutos.entity';
 import { Alunos } from './alunos.entity';
@@ -105,7 +105,7 @@ export class TurmasAlunos extends BaseEntity {
      * ("Forma de pagamento indisponível"). Valores do enum EFormasPagamento.
      */
     @Column({ type: 'varchar', name: 'forma_pagamento_manual', length: 30, nullable: true })
-    forma_pagamento_manual: string | null;
+    forma_pagamento_manual: EFormasPagamento | null;
 
     /** Dia de vencimento do boleto (1-31) da forma de pagamento manual (somente BOLETO). */
     @Column({ type: 'int', name: 'boleto_dia_vencimento_manual', nullable: true })

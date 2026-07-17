@@ -12,7 +12,7 @@ import { Equal, FindManyOptions, Like, ILike, Not, In } from 'typeorm';
 import { Treinamentos } from '../../config/entities/treinamentos.entity';
 import { EPresencaTurmas, EStatusAlunosTurmas } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
-import { resolverDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
+import { resolverDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
 
 @Injectable()
 export class TreinamentosService {

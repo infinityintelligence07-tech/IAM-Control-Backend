@@ -7,6 +7,7 @@ import { WhatsAppBulkQueueService, BulkSendJobSnapshot } from './whatsapp-bulk-q
 import * as jwt from 'jsonwebtoken';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
+import { validarIdadeMinimaNascimentoAluno } from '../shared/aluno-idade.validator';
 
 export interface CheckInStudentDto {
     alunoTurmaId: string;
@@ -1376,6 +1377,7 @@ Vamos Prosperar! 🙌`;
     async preencherDadosAluno(token: string, dados: any): Promise<{ success: boolean; message: string }> {
         try {
             validateBase64ImageField(dados?.url_foto_aluno, 'Foto do aluno');
+            validarIdadeMinimaNascimentoAluno(dados?.data_nascimento);
             // Verificar e decodificar token
             const decoded = this.decodeCheckInToken(token);
 

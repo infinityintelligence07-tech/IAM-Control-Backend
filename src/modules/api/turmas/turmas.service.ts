@@ -60,12 +60,13 @@ import {
 import { FindOptionsSelect, Not, In, IsNull } from 'typeorm';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { DocumentosService } from '../documentos/documentos.service';
+import { ConfiguracoesService } from '../configuracoes/configuracoes.service';
 import { PresentesSorteio } from '../../config/entities/presentesSorteio.entity';
 import { HistoricoSorteados } from '../../config/entities/historicoSorteados.entity';
 import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
 import { TurmasAlunos } from '../../config/entities/turmasAlunos.entity';
 import { Usuarios } from '../../config/entities/usuarios.entity';
-import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@shared/mentoria/mentoria-duracao';
+import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
 
 export interface PresenteSorteioPayload {
     descricao: string;
@@ -157,6 +158,7 @@ export class TurmasService {
         private readonly whatsappService: WhatsAppService,
         @Inject(forwardRef(() => DocumentosService))
         private readonly documentosService: DocumentosService,
+        private readonly configuracoesService: ConfiguracoesService,
     ) {}
 
     async getPresentesSorteio(): Promise<PresentesSorteio[]> {
@@ -763,18 +765,19 @@ export class TurmasService {
     private static readonly FUNCOES_LIDERANCA = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
 
     /**
-     * Regra de gestão manual de alunos da turma (REMOÇÃO apenas — a adição é
-     * liberada para qualquer usuário autenticado):
+     * Regra de exclusão/cancelamento de alunos da turma (a adição é liberada
+     * para qualquer usuário autenticado):
      * - Somente funcionários do setor Cuidado de Alunos (administradores têm bypass).
      * - Se a turma tiver acessora definida, somente ela (além de administradores)
-     *   pode executar a operação.
+     *   pode remover ou cancelar alunos — vale tanto para DELETE quanto para
+     *   status CANCELADO (que também faz soft delete da matrícula).
      * Chamadas internas do sistema (sem userId — ex.: cancelamento de contrato,
      * robô de transferências) não passam por esta validação.
      */
     private async validarPermissaoGerenciarAlunosTurma(
         turma: { id_acessora?: number | null } | null | undefined,
         userId: number | undefined,
-        acao: 'adicionar' | 'remover',
+        acao: 'adicionar' | 'remover' | 'cancelar',
     ): Promise<void> {
         if (!userId) return; // chamada interna do sistema
 
@@ -842,6 +845,11 @@ export class TurmasService {
             }
             if (acessora.setor !== ESetores.CUIDADO_DE_ALUNOS) {
                 throw new BadRequestException('A acessora da turma deve ser uma colaboradora do Cuidado de Alunos.');
+            }
+            // Se houver whitelist em Configurações, só aceita IDs da lista.
+            const idsPermitidos = await this.configuracoesService.getAssessoresCuidadoAlunosIds();
+            if (idsPermitidos.length > 0 && !idsPermitidos.includes(Number(idAcessora))) {
+                throw new BadRequestException('Esta colaboradora não está na lista de Assessores do Cuidado de Alunos (Configurações).');
             }
         }
 
@@ -6917,7 +6925,8 @@ export class TurmasService {
             // Forma de pagamento MANUAL (negociação extra sistema): permitida somente
             // quando o aluno NÃO tem forma de pagamento resolvida por contrato.
             if (updateAlunoDto.forma_pagamento_manual !== undefined) {
-                const novaFormaManual = updateAlunoDto.forma_pagamento_manual;
+                // Cast seguro: o valor é validado contra o enum logo abaixo (BadRequestException se inválido).
+                const novaFormaManual = updateAlunoDto.forma_pagamento_manual as EFormasPagamento | null;
                 if (novaFormaManual !== null) {
                     const formasValidas = Object.values(EFormasPagamento) as string[];
                     if (!formasValidas.includes(novaFormaManual)) {
@@ -6968,6 +6977,10 @@ export class TurmasService {
                     const acessorExiste = await this.uow.usuariosRP.findOne({ where: { id: updateAlunoDto.id_acessor }, select: { id: true } });
                     if (!acessorExiste) {
                         throw new BadRequestException('Acessor Financeiro (usuário) não encontrado.');
+                    }
+                    const idsFinanceiros = await this.configuracoesService.getAssessoresFinanceirosIds();
+                    if (!idsFinanceiros.includes(Number(updateAlunoDto.id_acessor))) {
+                        throw new BadRequestException('Este usuário não está na lista de Assessores Financeiros (Configurações).');
                     }
                 }
                 turmaAluno.id_acessor = updateAlunoDto.id_acessor;
@@ -7117,6 +7130,11 @@ export class TurmasService {
             }
 
             const solicitouCancelamento = novoStatusAlunoTurma === EStatusAlunosTurmas.CANCELADO && statusAnterior !== EStatusAlunosTurmas.CANCELADO;
+
+            if (solicitouCancelamento) {
+                // Cancelar = soft delete da matrícula: mesma regra da remoção (acessora da turma).
+                await this.validarPermissaoGerenciarAlunosTurma(turmaAluno.id_turma_fk, userId, 'cancelar');
+            }
 
             if (solicitouCancelamento && this.isTurmaCongelada(turmaAluno.id_turma_fk)) {
                 throw new BadRequestException('Não é possível cancelar alunos de uma turma encerrada. O registro permanece congelado para a trilha do aluno.');

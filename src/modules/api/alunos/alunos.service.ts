@@ -18,6 +18,7 @@ import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
 import { AlunosEmpresas } from '../../config/entities/alunosEmpresas.entity';
 import { EProfissao } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
+import { validarIdadeMinimaNascimentoAluno } from '../shared/aluno-idade.validator';
 
 /** Campos cadastrais monitorados para registrar alterações no histórico de observações do aluno. */
 const CAMPOS_CADASTRAIS_HISTORICO: Array<{ campo: keyof Alunos; label: string }> = [
@@ -257,6 +258,7 @@ export class AlunosService {
     async create(createAlunoDto: CreateAlunoDto): Promise<AlunoResponseDto> {
         try {
             validateBase64ImageField(createAlunoDto.url_foto_aluno, 'Foto do aluno');
+            validarIdadeMinimaNascimentoAluno(createAlunoDto.data_nascimento);
             // Verificar se já existe um aluno com esse email (incluindo deletados)
             // Usar query SQL direta para garantir que busca incluindo deletados
             const queryRunner = this.uow.alunosRP.manager.connection.createQueryRunner();
@@ -549,6 +551,9 @@ export class AlunosService {
     async update(id: number, updateAlunoDto: UpdateAlunoDto, userId?: number): Promise<AlunoResponseDto> {
         try {
             validateBase64ImageField(updateAlunoDto.url_foto_aluno, 'Foto do aluno');
+            if (updateAlunoDto.data_nascimento !== undefined) {
+                validarIdadeMinimaNascimentoAluno(updateAlunoDto.data_nascimento);
+            }
             const aluno = await this.uow.alunosRP.findOne({
                 where: {
                     id,

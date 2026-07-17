@@ -133,9 +133,13 @@ export class MasterclassPreCadastroResponseDto {
 }
 
 export class MasterclassEventoResponseDto {
+    /** Id da turma de masterclass (uma entrada por turma/cidade). */
+    id_turma?: number;
     evento_nome: string;
     data_evento: Date;
     cidade?: string;
+    /** Sigla do polo da turma (ex.: AM, GYN, POA). */
+    sigla_polo?: string;
     total_inscritos: number;
     total_presentes: number;
     total_ausentes: number;

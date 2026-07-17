@@ -376,15 +376,6 @@ const parseDataFlexivel = (valor?: string | null): Date | null => {
 
 type StatusRecebivel = 'resolvida' | 'no_prazo' | 'vencida' | 'cancelada';
 
-const contratoTemBoleto = (contrato: ContratoDashboardLinha): boolean => {
-    const pagamento = contrato.dados_contrato?.pagamento || {};
-    const formas: FormaPagamentoItem[] = Array.isArray(pagamento.formas_pagamento) ? pagamento.formas_pagamento : [];
-    if (formas.some((forma) => normalizeForSearch(`${forma.forma || ''} ${forma.tipo || ''}`).includes('boleto'))) {
-        return true;
-    }
-    return normalizeForSearch(pagamento.forma_pagamento || '').includes('boleto');
-};
-
 const contratoEhCancelado = (contrato: ContratoDashboardLinha): boolean => {
     if (contrato.deletado_em) return true;
     const campos = contrato.dados_contrato?.campos_variaveis || {};
@@ -398,6 +389,10 @@ const contratoEhCancelado = (contrato: ContratoDashboardLinha): boolean => {
 
 const contratoSolicitouCancelamento = (contrato: ContratoDashboardLinha): boolean => {
     const campos = contrato.dados_contrato?.campos_variaveis || {};
+    const flag = String(campos['Solicitou Cancelamento'] ?? '').trim().toLowerCase();
+    if (flag === 'true' || flag === '1' || flag === 'sim') return true;
+    if (flag === 'false' || flag === '0' || flag === 'nao' || flag === 'não') return false;
+
     const observacoes = contrato.dados_contrato?.observacoes || '';
     const texto = normalizeForSearch([observacoes, campos['Observações'], campos['Observacoes']].filter(Boolean).join(' '));
     return (
@@ -424,24 +419,35 @@ const obterPrimeiroVencimentoBoleto = (contrato: ContratoDashboardLinha): Date |
     return parseDataFlexivel(criadoEm) || parseDataFlexivel(campos['Data da Venda']);
 };
 
+/** Preferência: data reaberta da pendência; fallback boleto / venda. */
+const obterDataVencimentoPendencia = (contrato: ContratoDashboardLinha): Date | null => {
+    const campos = contrato.dados_contrato?.campos_variaveis || {};
+    return (
+        parseDataFlexivel(campos['Data de Vencimento da Pendência']) ||
+        obterPrimeiroVencimentoBoleto(contrato)
+    );
+};
+
 const classificarStatusRecebivel = (contrato: ContratoDashboardLinha, agora: Date): StatusRecebivel => {
     if (contratoEhCancelado(contrato)) return 'cancelada';
 
     const pendente = possuiPendenciaPagamento(contrato);
     if (!pendente) return 'resolvida';
 
-    if (contratoTemBoleto(contrato)) {
-        const vencimento = obterPrimeiroVencimentoBoleto(contrato);
-        if (vencimento && vencimento.getTime() >= agora.getTime()) {
-            return 'no_prazo';
-        }
-        return 'vencida';
+    const vencimento = obterDataVencimentoPendencia(contrato);
+    if (vencimento && vencimento.getTime() >= agora.getTime()) {
+        return 'no_prazo';
     }
-
     return 'vencida';
 };
 
 export type StatusRecebivelFiltroLista = 'total' | 'resolvidas' | 'no_prazo' | 'vencidas' | 'canceladas';
+
+export type ObservacaoPendenciaItem = {
+    data: string;
+    texto: string;
+    autor?: string | null;
+};
 
 export type StatusRecebivelListaItem = {
     id: string;
@@ -461,9 +467,71 @@ export type StatusRecebivelListaItem = {
     data_vencimento?: string | null;
     data_quitada?: string | null;
     data_cancelamento?: string | null;
+    solicitou_cancelamento?: boolean;
+    observacoes_historico?: ObservacaoPendenciaItem[];
 };
 
 const textoLimpo = (valor: unknown): string => String(valor ?? '').trim();
+
+export const CAMPO_DATA_VENCIMENTO_PENDENCIA = 'Data de Vencimento da Pendência';
+export const CAMPO_SOLICITOU_CANCELAMENTO = 'Solicitou Cancelamento';
+export const CAMPO_HISTORICO_OBS_PENDENCIA = 'Histórico Observações Pendência';
+
+export const parseHistoricoObservacoesPendencia = (
+    bruto: unknown,
+): ObservacaoPendenciaItem[] => {
+    if (!bruto) return [];
+    if (Array.isArray(bruto)) {
+        return bruto
+            .map((item) => {
+                if (!item || typeof item !== 'object') return null;
+                const row = item as Record<string, unknown>;
+                const texto = textoLimpo(row.texto ?? row.texto_observacao ?? row.message);
+                if (!texto) return null;
+                return {
+                    data: textoLimpo(row.data) || '—',
+                    texto,
+                    autor: textoLimpo(row.autor) || null,
+                };
+            })
+            .filter((item): item is ObservacaoPendenciaItem => Boolean(item));
+    }
+    if (typeof bruto === 'string') {
+        const trimmed = bruto.trim();
+        if (!trimmed) return [];
+        try {
+            return parseHistoricoObservacoesPendencia(JSON.parse(trimmed));
+        } catch {
+            // Linhas legadas: "DD/MM/YYYY texto"
+            return trimmed
+                .split(/\n+/)
+                .map((linha) => linha.trim())
+                .filter(Boolean)
+                .map((linha) => {
+                    const match = linha.match(/^(\d{2}\/\d{2}\/\d{4})\s+(.+)$/);
+                    if (match) {
+                        return { data: match[1], texto: match[2].trim(), autor: null };
+                    }
+                    return { data: '—', texto: linha, autor: null };
+                });
+        }
+    }
+    return [];
+};
+
+export const obterHistoricoObservacoesPendencia = (
+    contrato: ContratoDashboardLinha,
+): ObservacaoPendenciaItem[] => {
+    const campos = contrato.dados_contrato?.campos_variaveis || {};
+    const doCampo = parseHistoricoObservacoesPendencia(campos[CAMPO_HISTORICO_OBS_PENDENCIA]);
+    if (doCampo.length > 0) return doCampo;
+
+    const internas = textoLimpo(campos['Observações Internas (uso do sistema)']);
+    if (internas) {
+        return parseHistoricoObservacoesPendencia(internas);
+    }
+    return [];
+};
 
 const formatarMoedaPtBr = (valor: number): string =>
     valor.toLocaleString('pt-BR', {
@@ -806,10 +874,14 @@ export const listarItensStatusRecebivel = (
             forma_pagamento: formatarFormasPagamentoDetalhe(contrato),
             pendencia_valor: pendenciaDetalhe.valor,
             pendencia_metodo: pendenciaDetalhe.metodo,
-            data_vencimento: pendenciaDetalhe.dataVencimento,
+            data_vencimento:
+                formatarDataPtBr(obterDataVencimentoPendencia(contrato)) ||
+                pendenciaDetalhe.dataVencimento,
             data_quitada: status === 'resolvida' ? pendenciaDetalhe.dataQuitada : null,
             data_cancelamento:
                 status === 'cancelada' ? obterDataCancelamentoContrato(contrato) : null,
+            solicitou_cancelamento: contratoSolicitouCancelamento(contrato),
+            observacoes_historico: obterHistoricoObservacoesPendencia(contrato),
         });
     }
 

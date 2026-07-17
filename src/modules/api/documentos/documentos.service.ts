@@ -3680,6 +3680,109 @@ export class DocumentosService {
         }
         if (dados.pendencia_pagamento !== undefined) {
             turmaAlunoSnapshot.pendencia_pagamento = Boolean(dados.pendencia_pagamento);
+            if (dados.pendencia_pagamento) {
+                camposVariaveis['Pendência de Pagamento'] = 'true';
+            } else {
+                camposVariaveis['Pendência de Pagamento'] = 'false';
+            }
+        }
+
+        dadosContrato.turma_aluno = turmaAlunoSnapshot;
+        dadosContrato.campos_variaveis = camposVariaveis;
+        await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
+            dados_contrato: dadosContrato,
+            ...(await this.montarColunasHistoricoVendaCompletas(dadosContrato, contrato.criado_por)),
+        });
+        this.invalidarCachesHistoricoVendas();
+
+        return { atualizado: true };
+    }
+
+    /**
+     * Ações do card de pendência no dashboard (vencidas / no prazo):
+     * quitar, reabrir prazo, flag solicitou cancelamento, append observação.
+     */
+    async atualizarPendenciaRecebivelContrato(
+        contratoId: string,
+        body: {
+            quitar?: boolean;
+            reabrir?: { data_vencimento?: string };
+            solicitou_cancelamento?: boolean;
+            observacao?: string;
+            autor?: string;
+        },
+    ): Promise<{ atualizado: boolean }> {
+        const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+            where: { id: contratoId, deletado_em: IsNull() },
+        });
+        if (!contrato) {
+            throw new NotFoundException('Contrato não encontrado');
+        }
+
+        const dadosContrato = { ...(contrato.dados_contrato || {}) };
+        const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
+        const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
+
+        const formatarDataBr = (isoOuBr: string): string | null => {
+            const bruto = String(isoOuBr || '').trim();
+            if (!bruto) return null;
+            const br = bruto.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (br) return `${br[1]}/${br[2]}/${br[3]}`;
+            const iso = bruto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+            const d = new Date(bruto);
+            if (Number.isNaN(d.getTime())) return null;
+            const dia = String(d.getDate()).padStart(2, '0');
+            const mes = String(d.getMonth() + 1).padStart(2, '0');
+            return `${dia}/${mes}/${d.getFullYear()}`;
+        };
+
+        if (body.quitar === true) {
+            turmaAlunoSnapshot.pendencia_pagamento = false;
+            camposVariaveis['Pendência de Pagamento'] = 'false';
+        }
+
+        if (body.reabrir?.data_vencimento) {
+            const dataBr = formatarDataBr(body.reabrir.data_vencimento);
+            if (!dataBr) {
+                throw new BadRequestException('Data de vencimento inválida para reabrir a pendência.');
+            }
+            // Mantém pendência ativa e joga para "no prazo" via classificação.
+            turmaAlunoSnapshot.pendencia_pagamento = true;
+            camposVariaveis['Pendência de Pagamento'] = 'true';
+            camposVariaveis['Data de Vencimento da Pendência'] = dataBr;
+            // Espelha no campo de boleto para listagens que ainda leem essa chave.
+            camposVariaveis['Data do Primeiro Boleto'] = dataBr;
+        }
+
+        if (typeof body.solicitou_cancelamento === 'boolean') {
+            camposVariaveis['Solicitou Cancelamento'] = body.solicitou_cancelamento ? 'true' : 'false';
+        }
+
+        const textoObs = String(body.observacao || '').trim();
+        if (textoObs) {
+            let historico: Array<{ data: string; texto: string; autor?: string | null }> = [];
+            const bruto = camposVariaveis['Histórico Observações Pendência'];
+            if (typeof bruto === 'string' && bruto.trim()) {
+                try {
+                    const parsed = JSON.parse(bruto);
+                    if (Array.isArray(parsed)) historico = parsed;
+                } catch {
+                    historico = [];
+                }
+            } else if (Array.isArray(bruto)) {
+                historico = bruto as Array<{ data: string; texto: string; autor?: string | null }>;
+            }
+
+            const agora = new Date();
+            const dia = String(agora.getDate()).padStart(2, '0');
+            const mes = String(agora.getMonth() + 1).padStart(2, '0');
+            historico.push({
+                data: `${dia}/${mes}/${agora.getFullYear()}`,
+                texto: textoObs,
+                autor: String(body.autor || '').trim() || null,
+            });
+            camposVariaveis['Histórico Observações Pendência'] = JSON.stringify(historico);
         }
 
         dadosContrato.turma_aluno = turmaAlunoSnapshot;

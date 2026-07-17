@@ -370,6 +370,32 @@ export class DocumentosController {
         return this.documentosService.atualizarDadosVendaContratoHistorico(id, body || {});
     }
 
+    // Ações do card de pendência no dashboard de vendas (quitar / reabrir / obs / cancel).
+    @Post('public/contratos-banco/:id/pendencia-recebivel')
+    @UseGuards(JwtAuthGuard)
+    atualizarPendenciaRecebivel(
+        @Param('id') id: string,
+        @Body()
+        body: {
+            quitar?: boolean;
+            reabrir?: { data_vencimento?: string };
+            solicitou_cancelamento?: boolean;
+            observacao?: string;
+            autor?: string;
+        },
+        @Req() req: Request,
+    ) {
+        const autor =
+            body?.autor ||
+            String((req.user as { nome?: string; name?: string } | undefined)?.nome || '') ||
+            String((req.user as { nome?: string; name?: string } | undefined)?.name || '') ||
+            undefined;
+        return this.documentosService.atualizarPendenciaRecebivelContrato(id, {
+            ...(body || {}),
+            autor,
+        });
+    }
+
     // Atualiza os comprovantes de pagamento da VENDA (contrato). Recebe um array
     // de data URLs base64 (imagens/PDF) ou a forma serializada usada pelo frontend.
     @Post('public/contratos-banco/:id/comprovantes')

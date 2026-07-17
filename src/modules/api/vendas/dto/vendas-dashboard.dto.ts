@@ -118,6 +118,8 @@ export class StatusRecebivelListaItemDto {
     data_vencimento?: string | null;
     data_quitada?: string | null;
     data_cancelamento?: string | null;
+    solicitou_cancelamento?: boolean;
+    observacoes_historico?: Array<{ data: string; texto: string; autor?: string | null }>;
 }
 
 export class VendasDashboardStatusListaResponseDto {

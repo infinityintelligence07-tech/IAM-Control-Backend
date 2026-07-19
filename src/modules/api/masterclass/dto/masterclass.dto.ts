@@ -132,6 +132,22 @@ export class MasterclassPreCadastroResponseDto {
     atualizado_em: Date;
 }
 
+/**
+ * Item da busca de pré-cadastros usada pelo fluxo de VENDA com origem em
+ * Masterclass: pesquisa em TODOS os pré-cadastros (qualquer masterclass),
+ * retornando apenas os dados necessários para selecionar/criar o aluno.
+ */
+export class MasterclassPreCadastroBuscaVendaDto {
+    id: string;
+    nome_aluno: string;
+    email: string;
+    telefone: string;
+    evento_nome: string;
+    data_evento: Date;
+    id_turma: number;
+    id_aluno_vinculado: string | null;
+}
+
 export class MasterclassEventoResponseDto {
     /** Id da turma de masterclass (uma entrada por turma/cidade). */
     id_turma?: number;

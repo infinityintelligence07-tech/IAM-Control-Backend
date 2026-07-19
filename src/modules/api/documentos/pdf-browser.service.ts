@@ -1,5 +1,10 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { execFile } from 'child_process';
+import { existsSync } from 'fs';
+import { promisify } from 'util';
 import * as puppeteer from 'puppeteer';
+
+const execFileAsync = promisify(execFile);
 
 interface GerarPdfOptions {
     /** Estratégia de espera do setContent (contrato usa networkidle0; termo, domcontentloaded). */
@@ -26,7 +31,9 @@ interface GerarPdfOptions {
  *   entre vendas);
  * - página sempre fechada em finally e navegador fechado no shutdown do módulo
  *   (evita chromes órfãos também no watcher do start:dev);
- * - retentativas com backoff para erros transientes de sessão/conexão.
+ * - retentativas com backoff para erros transientes de sessão/conexão;
+ * - resolução de executablePath com fallbacks (env, cache do projeto, Chrome
+ *   do sistema) e reinstalação automática do binário se estiver ausente.
  */
 @Injectable()
 export class PdfBrowserService implements OnModuleDestroy {
@@ -37,6 +44,7 @@ export class PdfBrowserService implements OnModuleDestroy {
     private browserPromise: Promise<puppeteer.Browser> | null = null;
     private fila: Promise<unknown> = Promise.resolve();
     private idleTimer: NodeJS.Timeout | null = null;
+    private chromeInstallPromise: Promise<void> | null = null;
 
     async onModuleDestroy(): Promise<void> {
         this.cancelarIdleTimer();
@@ -63,19 +71,31 @@ export class PdfBrowserService implements OnModuleDestroy {
                 } catch (error) {
                     ultimaFalha = error;
                     const transiente = this.isErroTransientePuppeteer(error);
+                    const chromeAusente = this.isErroChromeAusente(error);
 
                     console.error(
                         `[PDF] Falha na tentativa ${tentativa}/${PdfBrowserService.MAX_TENTATIVAS}:`,
                         error instanceof Error ? error.message : error,
                     );
 
-                    // Erro de sessão/conexão do Chromium: descarta o navegador
-                    // para relançar um novo na próxima tentativa.
-                    if (transiente) {
+                    // Chrome ausente (comum após deploy): tenta baixar 1x e relança.
+                    if (chromeAusente) {
+                        await this.descartarBrowser();
+                        try {
+                            await this.ensureChromeInstalled();
+                        } catch (installError) {
+                            console.error(
+                                '[PDF] Falha ao instalar Chrome do Puppeteer:',
+                                installError instanceof Error ? installError.message : installError,
+                            );
+                        }
+                    } else if (transiente) {
+                        // Erro de sessão/conexão do Chromium: descarta o navegador
+                        // para relançar um novo na próxima tentativa.
                         await this.descartarBrowser();
                     }
 
-                    if (!transiente || tentativa === PdfBrowserService.MAX_TENTATIVAS) {
+                    if ((!transiente && !chromeAusente) || tentativa === PdfBrowserService.MAX_TENTATIVAS) {
                         throw error;
                     }
 
@@ -143,6 +163,15 @@ export class PdfBrowserService implements OnModuleDestroy {
                   '--disable-software-rasterizer',
               ];
 
+        const executablePath = this.resolveExecutablePath();
+        if (executablePath) {
+            console.log(`[PDF] Usando Chrome em: ${executablePath}`);
+        } else {
+            console.warn(
+                '[PDF] executablePath não resolvido — Puppeteer usará o cache padrão (.cache/puppeteer ou ~/.cache/puppeteer).',
+            );
+        }
+
         // Transporte pipe (mais estável que websocket).
         this.browserPromise = puppeteer.launch({
             headless: true,
@@ -150,8 +179,71 @@ export class PdfBrowserService implements OnModuleDestroy {
             args: chromiumArgs,
             ignoreDefaultArgs: ['--disable-extensions'],
             protocolTimeout: 120000,
+            ...(executablePath ? { executablePath } : {}),
         });
         return this.browserPromise;
+    }
+
+    /**
+     * Resolve o binário do Chrome na ordem:
+     * 1) PUPPETEER_EXECUTABLE_PATH (override manual na VPS)
+     * 2) cache do Puppeteer do projeto (.puppeteerrc.cjs)
+     * 3) Chrome/Chromium instalado no sistema
+     */
+    private resolveExecutablePath(): string | undefined {
+        const envPath = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
+        if (envPath && existsSync(envPath)) {
+            return envPath;
+        }
+
+        try {
+            const bundled = puppeteer.executablePath();
+            if (bundled && existsSync(bundled)) {
+                return bundled;
+            }
+        } catch {
+            // Cache vazio / versão ainda não baixada.
+        }
+
+        const candidatos =
+            process.platform === 'win32'
+                ? [
+                      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+                      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+                  ]
+                : [
+                      '/usr/bin/google-chrome-stable',
+                      '/usr/bin/google-chrome',
+                      '/usr/bin/chromium-browser',
+                      '/usr/bin/chromium',
+                      '/snap/bin/chromium',
+                  ];
+
+        return candidatos.find((path) => existsSync(path));
+    }
+
+    /**
+     * Baixa o Chrome for Testing no cache do projeto (single-flight).
+     * Usado quando o launch falha com "Could not find Chrome".
+     */
+    private async ensureChromeInstalled(): Promise<void> {
+        if (!this.chromeInstallPromise) {
+            this.chromeInstallPromise = (async () => {
+                console.warn('[PDF] Chrome do Puppeteer ausente — instalando via npx puppeteer browsers install chrome...');
+                await execFileAsync('npx', ['puppeteer', 'browsers', 'install', 'chrome'], {
+                    cwd: process.cwd(),
+                    env: process.env,
+                    timeout: 5 * 60 * 1000,
+                    shell: process.platform === 'win32',
+                });
+                console.log('[PDF] Chrome do Puppeteer instalado com sucesso.');
+            })().catch((error) => {
+                // Permite nova tentativa em falha (ex.: rede intermitente).
+                this.chromeInstallPromise = null;
+                throw error;
+            });
+        }
+        await this.chromeInstallPromise;
     }
 
     /** Fecha e descarta o navegador compartilhado. */
@@ -194,6 +286,18 @@ export class PdfBrowserService implements OnModuleDestroy {
             message.includes('protocol error') ||
             message.includes('browser has disconnected') ||
             message.includes('navigation failed because browser has disconnected')
+        );
+    }
+
+    private isErroChromeAusente(error: unknown): boolean {
+        const message = String((error as Error)?.message || '').toLowerCase();
+        return (
+            message.includes('could not find chrome') ||
+            message.includes('could not find browser') ||
+            message.includes('browser was not found') ||
+            message.includes('não encontrado') ||
+            message.includes('executable doesn\'t exist') ||
+            message.includes('executable doesnt exist')
         );
     }
 }

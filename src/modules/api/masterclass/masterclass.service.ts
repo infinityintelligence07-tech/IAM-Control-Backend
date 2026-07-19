@@ -11,6 +11,7 @@ import {
     VincularAlunoDto,
     AlterarInteresseDto,
     MasterclassPreCadastroResponseDto,
+    MasterclassPreCadastroBuscaVendaDto,
     MasterclassEventoResponseDto,
     MasterclassListResponseDto,
     MasterclassStatsDto,
@@ -1067,6 +1068,41 @@ export class MasterclassService {
             }
             throw new Error('Erro interno do servidor ao fazer soft delete do pré-cadastro');
         }
+    }
+
+    /**
+     * Busca de pré-cadastros para o fluxo de VENDA com origem em Masterclass:
+     * pesquisa em TODOS os pré-cadastros (qualquer masterclass, qualquer data)
+     * por nome, e-mail ou telefone. Retorna apenas os campos necessários para
+     * o vendedor selecionar a pessoa e o frontend resolver/criar o aluno.
+     */
+    async buscarPreCadastrosParaVenda(termo: string, limit = 30): Promise<MasterclassPreCadastroBuscaVendaDto[]> {
+        const busca = (termo || '').trim();
+        if (busca.length < 2) {
+            return [];
+        }
+        const take = Math.min(Math.max(Number(limit) || 30, 1), 50);
+        const like = `%${busca}%`;
+
+        // O soft delete (deletado_em) é aplicado automaticamente pelo TypeORM.
+        const preCadastros = await this.uow.masterclassPreCadastrosRP
+            .createQueryBuilder('pc')
+            .where('(pc.nome_aluno ILIKE :like OR pc.email ILIKE :like OR pc.telefone ILIKE :like)', { like })
+            .orderBy('pc.nome_aluno', 'ASC')
+            .addOrderBy('pc.data_evento', 'DESC')
+            .take(take)
+            .getMany();
+
+        return preCadastros.map((pc) => ({
+            id: String(pc.id),
+            nome_aluno: pc.nome_aluno,
+            email: pc.email,
+            telefone: pc.telefone,
+            evento_nome: pc.evento_nome,
+            data_evento: pc.data_evento,
+            id_turma: pc.id_turma,
+            id_aluno_vinculado: pc.id_aluno_vinculado ? String(pc.id_aluno_vinculado) : null,
+        }));
     }
 
     /**

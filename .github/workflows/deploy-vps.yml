@@ -32,5 +32,10 @@ jobs:
             git stash || true
             git pull origin main
             npm i --legacy-peer-deps
+            # Garante o Chrome do Puppeteer no cache do projeto (.cache/puppeteer).
+            # O npm i pode pular o download (ignore-scripts / cache limpo) e a
+            # geração de PDF do contrato falha com "Could not find Chrome".
+            export PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer"
+            npx puppeteer browsers install chrome
             npm run build
-            pm2 restart all
+            pm2 restart all --update-env

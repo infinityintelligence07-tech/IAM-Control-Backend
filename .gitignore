@@ -53,6 +53,9 @@ responsive-cab-468017-d2-*.json
 .temp
 .tmp
 
+# Cache do Chrome do Puppeteer (baixado via postinstall/deploy)
+.cache/
+
 # Runtime data
 pids
 *.pid

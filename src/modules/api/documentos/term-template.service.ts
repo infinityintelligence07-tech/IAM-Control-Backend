@@ -412,8 +412,14 @@ export class TermTemplateService {
                 throw new Error('Erro ao gerar PDF do termo: Dependências do sistema faltando. Verifique os logs do servidor.');
             }
 
-            // Propaga a causa real para o frontend exibir no toast.
             const mensagemOriginal = String(error?.message || '');
+            if (mensagemOriginal.includes('Could not find Chrome') || mensagemOriginal.includes('Could not find browser')) {
+                throw new Error(
+                    'Erro ao gerar PDF do termo: navegador do Puppeteer não encontrado no servidor. Execute: npx puppeteer browsers install chrome',
+                );
+            }
+
+            // Propaga a causa real para o frontend exibir no toast.
             throw new Error(`Erro ao gerar PDF do termo${mensagemOriginal ? `: ${mensagemOriginal}` : ''}`);
         }
     }

@@ -79,8 +79,29 @@ export class TreinamentosService {
         };
     }
 
+    /** Resumo da empresa vinculada (relação `id_empresa_fk` carregada). */
+    private mapEmpresaResumo(treinamento: Treinamentos): { id: number; nome: string; sigla?: string | null } | null {
+        if (!treinamento.id_empresa_fk) return null;
+        return {
+            id: treinamento.id_empresa_fk.id,
+            nome: treinamento.id_empresa_fk.nome,
+            sigla: treinamento.id_empresa_fk.sigla ?? null,
+        };
+    }
+
     async findAll(filters: GetTreinamentosDto): Promise<TreinamentosListResponseDto> {
-        const { page = 1, limit = 12, treinamento, preco_treinamento, tipo_treinamento, tipo_palestra, tipo_online, tipo_mentoria, tipo_presencial } = filters;
+        const {
+            page = 1,
+            limit = 12,
+            treinamento,
+            preco_treinamento,
+            tipo_treinamento,
+            tipo_palestra,
+            tipo_online,
+            tipo_mentoria,
+            tipo_presencial,
+            id_empresa,
+        } = filters;
 
         // Construir condições de busca
         const whereConditions: any = {};
@@ -113,12 +134,18 @@ export class TreinamentosService {
             whereConditions.tipo_presencial = tipo_presencial;
         }
 
+        // Visualização por empresa (seletor global): filtra pelo vínculo do cadastro.
+        if (id_empresa !== undefined && !Number.isNaN(id_empresa)) {
+            whereConditions.id_empresa = id_empresa;
+        }
+
         // Adicionar condição para excluir registros deletados
         whereConditions.deletado_em = null;
 
         // Configurar opções de busca
         const findOptions: FindManyOptions = {
             where: whereConditions,
+            relations: ['id_empresa_fk'],
             order: {
                 treinamento: 'ASC',
                 criado_em: 'DESC',
@@ -150,6 +177,8 @@ export class TreinamentosService {
                         duracao_meses: treinamento.duracao_meses ?? null,
                         tipo_online: treinamento.tipo_online,
                         tipo_presencial: treinamento.tipo_presencial,
+                        id_empresa: treinamento.id_empresa ?? null,
+                        empresa: this.mapEmpresaResumo(treinamento),
                         total_turmas: stats.totalTurmas,
                         total_alunos: stats.totalAlunos,
                         capacidade_total: stats.capacidadeTotal,
@@ -187,6 +216,7 @@ export class TreinamentosService {
                     id,
                     deletado_em: null,
                 },
+                relations: ['id_empresa_fk'],
             });
 
             if (!treinamento) {
@@ -239,6 +269,8 @@ export class TreinamentosService {
                 duracao_meses: treinamento.duracao_meses ?? null,
                 tipo_online: treinamento.tipo_online,
                 tipo_presencial: treinamento.tipo_presencial,
+                id_empresa: treinamento.id_empresa ?? null,
+                empresa: this.mapEmpresaResumo(treinamento),
                 total_turmas: totalTurmas,
                 total_alunos: totalAlunos,
                 capacidade_total: capacidadeTotal,
@@ -275,6 +307,7 @@ export class TreinamentosService {
                 : null;
             novoTreinamento.tipo_online = createTreinamentoDto.tipo_online;
             novoTreinamento.tipo_presencial = createTreinamentoDto.tipo_presencial;
+            novoTreinamento.id_empresa = createTreinamentoDto.id_empresa ?? null;
             novoTreinamento.criado_por = createTreinamentoDto.criado_por;
 
             const treinamentoSalvo = await this.uow.treinamentosRP.save(novoTreinamento);
@@ -294,6 +327,7 @@ export class TreinamentosService {
                 duracao_meses: treinamentoSalvo.duracao_meses ?? null,
                 tipo_online: treinamentoSalvo.tipo_online,
                 tipo_presencial: treinamentoSalvo.tipo_presencial,
+                id_empresa: treinamentoSalvo.id_empresa ?? null,
                 total_turmas: 0,
                 total_alunos: 0,
                 capacidade_total: 0,
@@ -367,6 +401,9 @@ export class TreinamentosService {
             if (updateTreinamentoDto.tipo_presencial !== undefined) {
                 treinamento.tipo_presencial = updateTreinamentoDto.tipo_presencial;
             }
+            if (updateTreinamentoDto.id_empresa !== undefined) {
+                treinamento.id_empresa = updateTreinamentoDto.id_empresa;
+            }
             if (updateTreinamentoDto.atualizado_por !== undefined) {
                 treinamento.atualizado_por = updateTreinamentoDto.atualizado_por;
             }
@@ -421,6 +458,7 @@ export class TreinamentosService {
                 duracao_meses: treinamentoAtualizado.duracao_meses ?? null,
                 tipo_online: treinamentoAtualizado.tipo_online,
                 tipo_presencial: treinamentoAtualizado.tipo_presencial,
+                id_empresa: treinamentoAtualizado.id_empresa ?? null,
                 total_turmas: totalTurmas,
                 total_alunos: totalAlunos,
                 capacidade_total: capacidadeTotal,

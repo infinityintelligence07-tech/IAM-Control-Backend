@@ -4734,7 +4734,7 @@ export class DocumentosService {
             // (fluxo_evento_origem_id_turma), com a mesma partição de
             // TurmasService.getClassificacaoOrigemPorTurmaAluno / dashboard:
             // Presente > Bônus > Cortesia/Sorteio > Time de Vendas > Transbordo > Liberty
-            // (conta como Demais Vendas) > Masterclass > Transferência > Demais Vendas.
+            // (conta como Vendas em Eventos) > Masterclass > Transferência > Vendas em Eventos.
             const idTurmaOrigemClassificacaoSql = idTurmaOrigemDadosContratoSql;
             // Matrícula ATIVA do aluno na turma de origem da venda (join direto,
             // sem subquery correlacionada — que fazia a query inteira degradar).
@@ -4790,16 +4790,16 @@ export class DocumentosService {
                 )
             )`;
             const origemLabelSql = `CASE
-                WHEN ${idTurmaOrigemClassificacaoSql} IS NULL OR ta_origem.id IS NULL THEN 'Demais Vendas'
+                WHEN ${idTurmaOrigemClassificacaoSql} IS NULL OR ta_origem.id IS NULL THEN 'Vendas em Eventos'
                 WHEN ${origemAlunoOrigemSql} = 'PRESENTE' THEN 'Presente'
                 WHEN COALESCE(ta_origem.vaga_bonus, false) = true OR ${origemAlunoOrigemSql} = 'ALUNO_BONUS' THEN 'Bônus'
                 WHEN ${origemAlunoOrigemSql} IN ('CORTESIA', 'SORTEIO') THEN 'Cortesia/Sorteio'
                 WHEN ${histTimeVendasOrigemSql} THEN 'Time de Vendas'
                 WHEN ${codigoOrigemPlanilhaOrigemSql} = 'TRANSBORDO' THEN 'Transbordo'
-                WHEN ${codigoOrigemPlanilhaOrigemSql} = 'LIBERTY' THEN 'Demais Vendas'
+                WHEN ${codigoOrigemPlanilhaOrigemSql} = 'LIBERTY' THEN 'Vendas em Eventos'
                 WHEN ${origemEhMcOrigemSql} THEN 'Masterclass'
                 WHEN ${origemAlunoOrigemSql} = 'TRANSFERENCIA' THEN 'Transferência'
-                ELSE 'Demais Vendas'
+                ELSE 'Vendas em Eventos'
             END`;
             const origensFiltro = String(filtros?.origem || '')
                 .split('|')

@@ -1740,13 +1740,26 @@ export class TurmasService {
     }
 
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
-        const { page = 1, limit = 10, edicao_turma, status_turma, id_polo, id_treinamento, tipo_treinamento, data_inicio, data_final, turma_aberta } = filters;
+        const {
+            page = 1,
+            limit = 10,
+            edicao_turma,
+            status_turma,
+            id_polo,
+            id_treinamento,
+            id_empresa,
+            tipo_treinamento,
+            data_inicio,
+            data_final,
+            turma_aberta,
+        } = filters;
 
         try {
             const queryBuilder = this.uow.turmasRP
                 .createQueryBuilder('turma')
                 .leftJoinAndSelect('turma.id_polo_fk', 'polo', 'polo.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.id_treinamento_fk', 'treinamento', 'treinamento.deletado_em IS NULL')
+                .leftJoinAndSelect('treinamento.id_empresa_fk', 'empresa', 'empresa.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.id_acessora_fk', 'acessora', 'acessora.deletado_em IS NULL')
                 .where('turma.deletado_em IS NULL');
@@ -1766,6 +1779,12 @@ export class TurmasService {
 
             if (id_treinamento) {
                 queryBuilder.andWhere('turma.id_treinamento = :id_treinamento', { id_treinamento });
+            }
+
+            // Visualização por empresa (seletor global): aplicado NA QUERY antes
+            // da paginação, pelo vínculo treinamento→empresa do cadastro.
+            if (id_empresa) {
+                queryBuilder.andWhere('treinamento.id_empresa = :id_empresa', { id_empresa });
             }
 
             // Filtro do credenciamento: só turmas habilitadas, aplicado na query
@@ -1899,6 +1918,8 @@ export class TurmasService {
                               duracao_meses: turma.id_treinamento_fk.duracao_meses ?? null,
                               url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
                               tipo_online: turma.id_treinamento_fk.tipo_online,
+                              id_empresa: turma.id_treinamento_fk.id_empresa ?? null,
+                              empresa_nome: turma.id_treinamento_fk.id_empresa_fk?.nome ?? null,
                           }
                         : undefined,
                     lider: turma.lider_evento_fk
@@ -1945,7 +1966,7 @@ export class TurmasService {
         try {
             const turma = await this.uow.turmasRP.findOne({
                 where: { id, deletado_em: null },
-                relations: ['id_polo_fk', 'id_treinamento_fk', 'lider_evento_fk', 'id_acessora_fk'],
+                relations: ['id_polo_fk', 'id_treinamento_fk', 'id_treinamento_fk.id_empresa_fk', 'lider_evento_fk', 'id_acessora_fk'],
             });
 
             if (!turma) {
@@ -2018,6 +2039,8 @@ export class TurmasService {
                           duracao_meses: turma.id_treinamento_fk.duracao_meses ?? null,
                           url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
                           tipo_online: turma.id_treinamento_fk.tipo_online,
+                          id_empresa: turma.id_treinamento_fk.id_empresa ?? null,
+                          empresa_nome: turma.id_treinamento_fk.id_empresa_fk?.nome ?? null,
                       }
                     : undefined,
                 lider: turma.lider_evento_fk
@@ -2688,7 +2711,7 @@ export class TurmasService {
                 } else if (codigoOrigemPlanilha.startsWith('MC_')) {
                     origem_label = 'Masterclass';
                 } else if (origemAluno === EOrigemAlunos.COMPROU_INGRESSO || origemAluno === EOrigemAlunos.ALUNO_CONVIDADO || !origemAluno) {
-                    origem_label = 'Demais Vendas';
+                    origem_label = 'Vendas em Eventos';
                 } else if (turmaOrigem) {
                     aplicarOrigemTurma();
                 } else {
@@ -3856,7 +3879,7 @@ export class TurmasService {
             time_vendas: 'Time de Vendas',
             transbordo: 'Transbordo',
             liberty: 'Liberty',
-            importacao: 'Demais Vendas',
+            importacao: 'Vendas em Eventos',
         };
         // Espelha o card de Extras do dashboard: extras = presente + bônus + cortesia/sorteio + transferência.
         const bucketsExtra = new Set(['presente', 'bonus', 'cortesia_sorteio', 'transferencia']);
@@ -3941,7 +3964,7 @@ export class TurmasService {
             else if (origemAluno === EOrigemAlunos.TRANSFERENCIA) bucket = 'transferencia';
 
             mapa.set(String(row.id), {
-                canal: labelPorBucket[bucket] ?? 'Demais Vendas',
+                canal: labelPorBucket[bucket] ?? 'Vendas em Eventos',
                 categoria: bucketsExtra.has(bucket) ? 'Extra' : 'Compra de Ingresso',
             });
         }
@@ -3995,7 +4018,7 @@ export class TurmasService {
                     numero_cracha: turmaAluno.numero_cracha ?? '',
                     status_aluno_turma: turmaAluno.status_aluno_turma ?? undefined,
                     origem_aluno: turmaAluno.origem_aluno ?? undefined,
-                    canal: classe?.canal ?? 'Demais Vendas',
+                    canal: classe?.canal ?? 'Vendas em Eventos',
                     categoria: classe?.categoria ?? 'Compra de Ingresso',
                     created_at: turmaAluno.criado_em instanceof Date ? turmaAluno.criado_em.toISOString() : String(turmaAluno.criado_em ?? ''),
                 };
@@ -4740,7 +4763,7 @@ export class TurmasService {
                     pushMov(idTurma, {
                         dia: row.dia,
                         tipo: 'ENTRADA',
-                        categoria: 'Demais Vendas',
+                        categoria: 'Vendas em Eventos',
                         id_turma_aluno: String(row.id_turma_aluno),
                         classificarCanal: true,
                     });
@@ -4774,7 +4797,7 @@ export class TurmasService {
                 if (idsAlunos.length === 0) continue;
                 const classif = await this.getClassificacaoOrigemPorTurmaAluno(idTurma, idsAlunos);
                 for (const idAluno of idsAlunos) {
-                    canalPorTurmaAluno.set(`${idTurma}:${idAluno}`, classif.get(idAluno)?.canal || 'Demais Vendas');
+                    canalPorTurmaAluno.set(`${idTurma}:${idAluno}`, classif.get(idAluno)?.canal || 'Vendas em Eventos');
                 }
             }
 
@@ -4801,7 +4824,7 @@ export class TurmasService {
                     if (m.tipo !== tipo) continue;
                     let label = m.categoria;
                     if (tipo === 'ENTRADA' && m.classificarCanal && m.id_turma_aluno) {
-                        label = canalPorTurmaAluno.get(`${idTurma}:${m.id_turma_aluno}`) || 'Demais Vendas';
+                        label = canalPorTurmaAluno.get(`${idTurma}:${m.id_turma_aluno}`) || 'Vendas em Eventos';
                     }
                     mapa.set(label, (mapa.get(label) ?? 0) + 1);
                 }
@@ -4982,7 +5005,7 @@ export class TurmasService {
                 const idTurmaAluno = row.id_turma_aluno != null ? String(row.id_turma_aluno) : null;
                 if (row.tipo_acao === 'CRIACAO') {
                     if (idTurmaAluno) criacaoIds.add(idTurmaAluno);
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'ENTRADA', categoria: 'Demais Vendas' });
+                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'ENTRADA', categoria: 'Vendas em Eventos' });
                 } else if (row.tipo_acao === 'CANCELAMENTO') {
                     itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'SAIDA', categoria: 'Cancelamento' });
                 } else if (row.tipo_acao === 'REMOCAO') {
@@ -4995,7 +5018,7 @@ export class TurmasService {
                 const classif = await this.getClassificacaoOrigemPorTurmaAluno(id_turma, Array.from(criacaoIds));
                 for (const item of itens) {
                     if (item.tipo === 'ENTRADA' && item.id_turma_aluno) {
-                        item.categoria = classif.get(item.id_turma_aluno)?.canal || 'Demais Vendas';
+                        item.categoria = classif.get(item.id_turma_aluno)?.canal || 'Vendas em Eventos';
                     }
                 }
             }
@@ -5264,7 +5287,7 @@ export class TurmasService {
 
             const grupos = new Map<string, AlunoSaldoPeriodoItemDto[]>();
             for (const row of rows) {
-                const canal = classif.get(String(row.id_turma_aluno))?.canal || 'Demais Vendas';
+                const canal = classif.get(String(row.id_turma_aluno))?.canal || 'Vendas em Eventos';
                 const idTurmaOrigem = origemTransferenciaMap.get(String(row.id_turma_aluno));
                 const lista = grupos.get(canal) ?? [];
                 lista.push({
@@ -5282,7 +5305,7 @@ export class TurmasService {
             // Ordem fixa das estratégias (igual ao filtro de Origem da turma), com
             // canais desconhecidos ao final por total decrescente.
             const ordemCanais = [
-                'Demais Vendas',
+                'Vendas em Eventos',
                 'Masterclass',
                 'Time de Vendas',
                 'Transbordo',

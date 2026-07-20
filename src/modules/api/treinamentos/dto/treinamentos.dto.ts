@@ -68,12 +68,23 @@ export class GetTreinamentosDto {
     @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value, 10))
+    id_empresa?: number;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => parseInt(value, 10))
     page?: number = 1;
 
     @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value, 10))
     limit?: number = 12;
+}
+
+export class TreinamentoEmpresaResumoDto {
+    id: number;
+    nome: string;
+    sigla?: string | null;
 }
 
 export class TreinamentoResponseDto {
@@ -89,6 +100,8 @@ export class TreinamentoResponseDto {
     duracao_meses?: number | null;
     tipo_online: boolean;
     tipo_presencial: boolean;
+    id_empresa?: number | null;
+    empresa?: TreinamentoEmpresaResumoDto | null;
     total_turmas: number;
     total_alunos: number;
     capacidade_total: number;
@@ -167,6 +180,15 @@ export class CreateTreinamentoDto {
 
     @IsOptional()
     @IsNumber()
+    @Transform(({ value }) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    })
+    id_empresa?: number | null;
+
+    @IsOptional()
+    @IsNumber()
     criado_por?: number;
 }
 
@@ -228,6 +250,15 @@ export class UpdateTreinamentoDto {
     @IsBoolean()
     @Transform(({ value }) => value === 'true' || value === true)
     tipo_presencial?: boolean;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === null || value === undefined || value === '') return null;
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+    })
+    id_empresa?: number | null;
 
     @IsOptional()
     @IsNumber()

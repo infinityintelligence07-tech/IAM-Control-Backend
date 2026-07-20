@@ -811,7 +811,7 @@ export class VendasDashboardService {
             WHEN ${codigoPlanilhaSql} = 'LIBERTY' THEN 'Liberty'
             WHEN ${origemEhMcSql} THEN 'Masterclass'
             WHEN ${origemAlunoSql} = 'TRANSFERENCIA' THEN 'Transferência'
-            ELSE 'Demais Vendas'
+            ELSE 'Vendas em Eventos'
         END`;
 
         const rows = await this.uow.turmasAlunosRP
@@ -841,7 +841,7 @@ export class VendasDashboardService {
             if (opts.evento && evento !== opts.evento) continue;
             if (opts.turmaId && idTurma !== opts.turmaId) continue;
             porEvento.get(evento)!.push({
-                canal: String(row.canal || 'Demais Vendas'),
+                canal: String(row.canal || 'Vendas em Eventos'),
                 quantidade: Number(row.quantidade || 0),
             });
         }

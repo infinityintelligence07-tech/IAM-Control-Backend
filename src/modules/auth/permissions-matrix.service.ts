@@ -274,6 +274,8 @@ export class PermissionsMatrixService {
      * v7: libera vendasDashboard.view para líderes (prioridade ≥ 80) em todos os setores.
      * v8: libera credenciamento.edit (marcar presença) onde o padrão prevê
      *     (Staff+ em Eventos/Expansão; estagiário permanece só view).
+     * v9: novo módulo `empresas` (cadastro de empresas Liberty/IAM e vínculo de
+     *     treinamentos): copia as permissões de `treinamentos` de cada papel.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -371,6 +373,17 @@ export class PermissionsMatrixService {
                         delete: Boolean(
                             role.credenciamento?.delete || defaultRole.credenciamento.delete,
                         ),
+                    };
+                }
+
+                if (fromVersion < 9) {
+                    // Quem gerencia treinamentos gerencia também o cadastro de
+                    // empresas (vínculo treinamento→empresa vive nos dois lados).
+                    role.empresas = {
+                        view: Boolean(role.empresas?.view || role.treinamentos?.view),
+                        create: Boolean(role.empresas?.create || role.treinamentos?.create),
+                        edit: Boolean(role.empresas?.edit || role.treinamentos?.edit),
+                        delete: Boolean(role.empresas?.delete || role.treinamentos?.delete),
                     };
                 }
             }

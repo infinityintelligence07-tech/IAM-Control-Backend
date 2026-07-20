@@ -27,6 +27,13 @@ export class GetTurmasDto {
     @Transform(({ value }) => parseInt(value))
     id_treinamento?: number;
 
+    // Visualização por empresa (seletor global): filtra pelo vínculo
+    // treinamento→empresa NA QUERY (antes da paginação, como o filtro por tipo).
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => parseInt(value))
+    id_empresa?: number;
+
     @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
@@ -712,6 +719,9 @@ export class TurmaResponseDto {
         duracao_meses?: number | null;
         url_logo_treinamento?: string;
         tipo_online?: boolean;
+        /** Empresa dona do treinamento (visualização por empresa). */
+        id_empresa?: number | null;
+        empresa_nome?: string | null;
     };
     lider?: {
         id: number;
@@ -755,7 +765,7 @@ export class AlunoTurmaResponseDto {
     origem_aluno?: string;
     /** Distinção de canal para origem COMPROU_INGRESSO */
     origem_canal_ingresso?: 'MASTERCLASS' | 'TIME_VENDAS' | 'DEMAIS_IMPORTACAO';
-    /** Canal reclassificado (MESMA regra do dashboard e da planilha): Bônus, Cortesia/Sorteio, Transferência, Masterclass, Time de Vendas, Transbordo, Liberty, Demais Vendas. */
+    /** Canal reclassificado (MESMA regra do dashboard e da planilha): Bônus, Cortesia/Sorteio, Transferência, Masterclass, Time de Vendas, Transbordo, Liberty, Vendas em Eventos. */
     canal?: string;
     /** Categoria do dashboard: 'Extra' ou 'Compra de Ingresso'. */
     categoria?: string;
@@ -1054,7 +1064,7 @@ export class AlunosTurmaListResponseDto {
 export class AlunoTurmaExportItemDto {
     nome: string;
     email: string;
-    /** Canal reclassificado (mesma regra do dashboard): Bônus, Cortesia/Sorteio, Transferência, Masterclass, Time de Vendas, Transbordo, Liberty, Demais Vendas. */
+    /** Canal reclassificado (mesma regra do dashboard): Bônus, Cortesia/Sorteio, Transferência, Masterclass, Time de Vendas, Transbordo, Liberty, Vendas em Eventos. */
     canal?: string;
     /** Categoria do dashboard: 'Extra' ou 'Compra de Ingresso'. */
     categoria?: string;
@@ -1361,7 +1371,7 @@ export class AlunoSaldoPeriodoItemDto {
 
 /** Grupo de alunos do saldo por estratégia de origem (canal do dashboard). */
 export class AlunosSaldoPeriodoCanalDto {
-    /** Canal: Demais Vendas, Masterclass, Time de Vendas, Transbordo, Bônus, Cortesia/Sorteio, Transferência, Presente, Liberty. */
+    /** Canal: Vendas em Eventos, Masterclass, Time de Vendas, Transbordo, Bônus, Cortesia/Sorteio, Transferência, Presente, Liberty. */
     canal: string;
     total: number;
     alunos: AlunoSaldoPeriodoItemDto[];

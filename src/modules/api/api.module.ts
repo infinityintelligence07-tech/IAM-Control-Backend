@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { PolosModule } from './polos/polos.module';
 import { AlunosModule } from './alunos/alunos.module';
 import { TreinamentosModule } from './treinamentos/treinamentos.module';
+import { EmpresasModule } from './empresas/empresas.module';
 import { TurmasModule } from './turmas/turmas.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { MasterclassModule } from './masterclass/masterclass.module';
@@ -23,6 +24,7 @@ import { VendasModule } from './vendas/vendas.module';
         AlunosModule,
         PolosModule,
         TreinamentosModule,
+        EmpresasModule,
         TurmasModule,
         WhatsAppModule,
         MasterclassModule,

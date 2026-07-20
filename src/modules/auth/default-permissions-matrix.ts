@@ -42,6 +42,7 @@ function buildLiderPermissions(setor: ESetores): RolePermissions {
     role = grantModule(role, 'alunos', 'all');
     role = grantModule(role, 'polos', ['view', 'create', 'edit']);
     role = grantModule(role, 'treinamentos', ['view', 'create', 'edit']);
+    role = grantModule(role, 'empresas', ['view', 'create', 'edit']);
     role = grantModule(role, 'enderecosEventos', ['view', 'create', 'edit']);
     role = grantModule(role, 'turmas', ['view', 'create', 'edit']);
     role = grantModule(role, 'calendario', ['view', 'create', 'edit']);
@@ -66,6 +67,7 @@ function buildStaffPermissions(): RolePermissions {
     role = grantModule(role, 'alunos', ['view']);
     role = grantModule(role, 'turmas', ['view']);
     role = grantModule(role, 'treinamentos', ['view']);
+    role = grantModule(role, 'empresas', ['view']);
     role = grantModule(role, 'polos', ['view']);
     role = grantModule(role, 'vendas', ['view']);
     role = grantModule(role, 'credenciamento', ['view']);
@@ -78,6 +80,8 @@ function buildAuthenticatedBase(): RolePermissions {
     // Leitura de nomes de treinamentos/polos é pré-requisito dos filtros da tela
     // de turmas (quem vê turmas precisa listar treinamentos e polos).
     role = grantModule(role, 'treinamentos', ['view']);
+    // Seletor global de empresa (topo do sistema) precisa listar as empresas.
+    role = grantModule(role, 'empresas', ['view']);
     role = grantModule(role, 'polos', ['view']);
     role = grantModule(role, 'vendas', ['view']);
     role = grantModule(role, 'credenciamento', ['view']);
@@ -116,6 +120,7 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
             role = grantModule(role, 'documentos', ['view', 'create', 'edit']);
             role = grantModule(role, 'polos', ['view', 'create', 'edit']);
             role = grantModule(role, 'treinamentos', ['view', 'create', 'edit']);
+            role = grantModule(role, 'empresas', ['view', 'create', 'edit']);
             role = grantModule(role, 'enderecosEventos', ['view', 'create', 'edit']);
             role = grantModule(role, 'calendario', ['view', 'create', 'edit']);
             role = grantModule(role, 'turmas', ['view', 'create', 'edit']);

@@ -27,6 +27,7 @@ import { HistoricoAlunosTurmasLog } from '../entities/historicoAlunosTurmasLog.e
 import { HistoricoTurmasLog } from '../entities/historicoTurmasLog.entity';
 import { TurmasMetricasSnapshot } from '../entities/turmasMetricasSnapshot.entity';
 import { ConfiguracoesSistema } from '../entities/configuracoesSistema.entity';
+import { Empresas } from '../entities/empresas.entity';
 import { Notificacoes } from '../entities/notificacoes.entity';
 import { NotificacoesLeituras } from '../entities/notificacoesLeituras.entity';
 /*****************************************************************************/
@@ -250,6 +251,12 @@ export class UnitOfWorkService {
     get configuracoesSistemaRP(): Repository<ConfiguracoesSistema> {
         if (!this._configuracoesSistemaRP) this._configuracoesSistemaRP = this.postgresEM.getRepository(ConfiguracoesSistema);
         return this._configuracoesSistemaRP;
+    }
+
+    private _empresasRP?: Repository<Empresas>;
+    get empresasRP(): Repository<Empresas> {
+        if (!this._empresasRP) this._empresasRP = this.postgresEM.getRepository(Empresas);
+        return this._empresasRP;
     }
 
     private _notificacoesRP?: Repository<Notificacoes>;

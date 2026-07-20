@@ -1,7 +1,8 @@
-import { Entity, Column, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
+import { Empresas } from './empresas.entity';
 import { Turmas } from './turmas.entity';
 import { TurmasAlunosTreinamentos } from './turmasAlunosTreinamentos.entity';
 import { TurmasAlunosTreinamentosBonus } from './turmasAlunosTreinamentosBonus.entity';
@@ -75,6 +76,18 @@ export class Treinamentos extends BaseEntity {
 
     @Column({ type: 'boolean', name: 'tipo_presencial', nullable: false })
     tipo_presencial: boolean;
+
+    /**
+     * Empresa dona do treinamento (ex.: IAM ou Liberty). NULL = sem vínculo.
+     * Usada para a visualização/filtragem do sistema por empresa; não restringe
+     * vendas entre empresas.
+     */
+    @Column({ type: 'int', name: 'id_empresa', nullable: true })
+    id_empresa: number | null;
+
+    @ManyToOne(() => Empresas, (empresa) => empresa.treinamentos, { nullable: true })
+    @JoinColumn([{ name: 'id_empresa', referencedColumnName: 'id' }])
+    id_empresa_fk: Empresas | null;
 
     @OneToMany(() => Turmas, (turmas) => turmas.id_polo_fk)
     turmas: Turmas[];

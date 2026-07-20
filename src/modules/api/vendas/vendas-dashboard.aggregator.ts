@@ -1133,6 +1133,7 @@ export const agregarEstrategiasAquisicao = (
                 break;
             case 'Transbordo':
             case 'Liberty':
+            case 'Vendas em Eventos':
             case 'Demais Vendas':
             case 'Importação':
                 demaisVendas += qtd;
@@ -1146,7 +1147,7 @@ export const agregarEstrategiasAquisicao = (
     const itens = [
         { label: 'Masterclass', quantidade: masterclass },
         { label: 'Time de Vendas', quantidade: timeVendas },
-        { label: 'Demais vendas', quantidade: demaisVendas },
+        { label: 'Vendas em Eventos', quantidade: demaisVendas },
         { label: 'Presente', quantidade: presente },
         { label: 'Bônus', quantidade: bonus },
         { label: 'Transferência', quantidade: transferencia },

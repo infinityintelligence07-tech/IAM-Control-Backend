@@ -19,7 +19,7 @@ import { memoryStorage } from 'multer';
 import { Request } from 'express';
 
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
-import { AdminGuard } from '@/modules/auth/guards/admin.guard';
+import { DuvidasKnowledgeAdminGuard } from '@/modules/auth/guards/duvidas-knowledge-admin.guard';
 import { DuvidasService } from './duvidas.service';
 import {
     AprovarSugestaoDto,
@@ -61,8 +61,9 @@ export class DuvidasController {
         return this.duvidasService.sugerirDaMensagem(id, this.userId(req));
     }
 
-    /* ---- Artigos ---- */
+    /* ---- Artigos (somente knowledge admin) ---- */
 
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Get('artigos')
     async listarArtigos(@Query() query: ListarArtigosQueryDto) {
         return this.duvidasService.listarArtigos({
@@ -72,18 +73,19 @@ export class DuvidasController {
         });
     }
 
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Get('artigos/:id')
     async obterArtigo(@Param('id', ParseIntPipe) id: number) {
         return this.duvidasService.obterArtigo(id);
     }
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Post('artigos')
     async criarArtigo(@Body() dto: CriarArtigoDto, @Req() req: Request) {
         return this.duvidasService.criarArtigo(dto, this.userId(req));
     }
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Patch('artigos/:id')
     async atualizarArtigo(
         @Param('id', ParseIntPipe) id: number,
@@ -93,7 +95,7 @@ export class DuvidasController {
         return this.duvidasService.atualizarArtigo(id, dto, this.userId(req));
     }
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Delete('artigos/:id')
     async arquivarArtigo(@Param('id', ParseIntPipe) id: number, @Req() req: Request) {
         return this.duvidasService.arquivarArtigo(id, this.userId(req));
@@ -101,7 +103,7 @@ export class DuvidasController {
 
     /* ---- Import ---- */
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Post('import/obsidian')
     @UseInterceptors(
         FileInterceptor('file', {
@@ -116,7 +118,7 @@ export class DuvidasController {
 
     /* ---- Sugestões ---- */
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Get('sugestoes')
     async listarSugestoes(@Query() query: ListarSugestoesQueryDto) {
         return this.duvidasService.listarSugestoes({
@@ -126,7 +128,7 @@ export class DuvidasController {
         });
     }
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Post('sugestoes/:id/aprovar')
     async aprovarSugestao(
         @Param('id', ParseIntPipe) id: number,
@@ -136,7 +138,7 @@ export class DuvidasController {
         return this.duvidasService.aprovarSugestao(id, dto || {}, this.userId(req));
     }
 
-    @UseGuards(AdminGuard)
+    @UseGuards(DuvidasKnowledgeAdminGuard)
     @Post('sugestoes/:id/rejeitar')
     async rejeitarSugestao(@Param('id', ParseIntPipe) id: number, @Req() req: Request) {
         return this.duvidasService.rejeitarSugestao(id, this.userId(req));

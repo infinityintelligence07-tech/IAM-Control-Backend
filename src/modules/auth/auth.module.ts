@@ -14,6 +14,7 @@ import { AdminGuard } from './guards/admin.guard';
 import { AdminOrLiderGuard } from './guards/admin-or-lider.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { PermissionsMatrixService } from './permissions-matrix.service';
+import { DuvidasKnowledgeAdminGuard } from './guards/duvidas-knowledge-admin.guard';
 
 @Global()
 @Module({
@@ -40,6 +41,7 @@ import { PermissionsMatrixService } from './permissions-matrix.service';
         AdminOrLiderGuard,
         PermissionsGuard,
         PermissionsMatrixService,
+        DuvidasKnowledgeAdminGuard,
     ],
     exports: [
         AuthService,
@@ -48,6 +50,7 @@ import { PermissionsMatrixService } from './permissions-matrix.service';
         PermissionsGuard,
         AdminGuard,
         AdminOrLiderGuard,
+        DuvidasKnowledgeAdminGuard,
     ],
 })
 export class AuthModule {}

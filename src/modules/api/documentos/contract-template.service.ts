@@ -1068,7 +1068,9 @@ export class ContractTemplateService {
                 );
             }
 
-            if (!destinationProfile.showBonus) {
+            // Toda venda pode conceder bônus de IPR: o quadro de Bônus só é
+            // removido quando o perfil não o exibe E o contrato não tem bônus.
+            if (!destinationProfile.showBonus && !possuiBonusRelevante) {
                 renderedTemplate = renderedTemplate.replace(
                     /<td class="half-width" style="vertical-align: top;">\s*<strong>B[oô]nus:<\/strong><br>[\s\S]*?<\/td>/i,
                     '',
@@ -1105,6 +1107,9 @@ export class ContractTemplateService {
             normalizedDestinationTrainingName.includes('LIBERTY');
         const trainingLogoUrlEmbedded = getAbsoluteImageUrl(destinationProfileEmbedded.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH);
         const dataTreinamentoLabelEmbedded = destinationProfileEmbedded.dataLabel || 'DATA PREVISTA';
+        // Toda venda pode conceder bônus de IPR: o quadro de Bônus aparece
+        // quando o perfil o exibe (Confronto) OU quando o contrato tem bônus.
+        const exibirQuadroBonusEmbedded = destinationProfileEmbedded.showBonus || possuiBonusRelevante;
         const clauseTypographyByBrand =
             destinationProfileEmbedded.brand === 'LIBERTY'
                 ? {
@@ -1909,7 +1914,7 @@ export class ContractTemplateService {
               <!-- Treinamento e Bônus -->
               <table class="table">
                 <tr class="table-row">
-                  <td class="table-cell ${possuiBonusRelevante ? 'half-width' : ''}" ${possuiBonusRelevante ? '' : 'colspan="2"'} style="vertical-align: top;">
+                  <td class="table-cell ${exibirQuadroBonusEmbedded ? 'half-width' : ''}" ${exibirQuadroBonusEmbedded ? '' : 'colspan="2"'} style="vertical-align: top;">
                     <strong>${destinationProfileEmbedded.treinamentoLabel}:</strong> ${treinamento?.nome || '_________________'}<br><br>
                     <strong>Cidade:</strong> ${campos_variaveis?.['Cidade do Treinamento'] || 'Local a definir'}<br><br>
                     ${
@@ -1971,7 +1976,7 @@ export class ContractTemplateService {
                     })()}
                   </td>
                   ${
-                      destinationProfileEmbedded.showBonus
+                      exibirQuadroBonusEmbedded
                           ? `<td class="table-cell half-width" style="vertical-align: top;">
                     <strong>Bônus:</strong><br>
                           ${(() => {

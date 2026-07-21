@@ -16,6 +16,11 @@ export interface CriarNotificacaoParams {
     setorDestino: ESetores | string;
     dados?: Record<string, unknown> | null;
     criadoPor?: number;
+    /**
+     * Quando informado, a notificação fica visível SOMENTE para este usuário
+     * (não para todo o `setorDestino`). Usado nas mudanças de venda.
+     */
+    usuarioDestino?: number | null;
 }
 
 @Injectable()
@@ -35,6 +40,7 @@ export class NotificacoesService {
                 titulo: params.titulo,
                 mensagem: params.mensagem,
                 setor_destino: String(params.setorDestino),
+                id_usuario_destino: params.usuarioDestino ?? null,
                 dados: params.dados ?? null,
                 criado_por: params.criadoPor,
             });
@@ -43,6 +49,30 @@ export class NotificacoesService {
             this.logger.error(
                 `notificacoes.criar | Erro ao criar notificação tipo=${params.tipo}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
             );
+        }
+    }
+
+    /**
+     * Cria a MESMA notificação para uma lista de usuários específicos (uma linha
+     * por usuário, com `id_usuario_destino`). Deduplica e ignora ids inválidos.
+     * Cada destinatário controla sua própria leitura. Nunca lança.
+     */
+    async criarNotificacaoParaUsuarios(
+        params: Omit<CriarNotificacaoParams, 'usuarioDestino'>,
+        usuariosDestino: Array<number | null | undefined>,
+    ): Promise<void> {
+        const idsUnicos = Array.from(
+            new Set(
+                (usuariosDestino || [])
+                    .map((id) => Number(id))
+                    .filter((id) => Number.isInteger(id) && id > 0),
+            ),
+        );
+        if (idsUnicos.length === 0) {
+            return;
+        }
+        for (const idUsuario of idsUnicos) {
+            await this.criarNotificacao({ ...params, usuarioDestino: idUsuario });
         }
     }
 
@@ -72,12 +102,26 @@ export class NotificacoesService {
             .andWhere('notificacao.criado_em >= :dataLimite', { dataLimite })
             .orderBy('notificacao.criado_em', 'DESC');
 
-        if (!isAdmin) {
+        // Regras de visibilidade:
+        // - notificação de SETOR (id_usuario_destino IS NULL): quem é do setor
+        //   (admins veem todas);
+        // - notificação DIRECIONADA (id_usuario_destino preenchido): SOMENTE o
+        //   próprio destinatário — nem os demais do setor, nem admins. Usada nas
+        //   mudanças de venda (líder do Cuidado de Alunos + acessora da turma).
+        if (isAdmin) {
+            query.andWhere('(notificacao.id_usuario_destino IS NULL OR notificacao.id_usuario_destino = :userId)', {
+                userId,
+            });
+        } else {
             const setoresUsuario = normalizeSetores(usuario.setor).map(String);
             if (setoresUsuario.length === 0) {
-                return { data: [], total: 0, nao_lidas: 0 };
+                query.andWhere('notificacao.id_usuario_destino = :userId', { userId });
+            } else {
+                query.andWhere(
+                    '((notificacao.id_usuario_destino IS NULL AND notificacao.setor_destino IN (:...setoresUsuario)) OR notificacao.id_usuario_destino = :userId)',
+                    { setoresUsuario, userId },
+                );
             }
-            query.andWhere('notificacao.setor_destino IN (:...setoresUsuario)', { setoresUsuario });
         }
 
         const notificacoes = await query.getMany();

@@ -30,6 +30,16 @@ export class Notificacoes extends BaseEntity {
     @Column({ type: 'varchar', name: 'setor_destino', length: 60, nullable: false })
     setor_destino: string;
 
+    /**
+     * Destinatário INDIVIDUAL (opcional). Quando preenchido, a notificação é
+     * visível apenas para este usuário (não para todo o `setor_destino`) — usado
+     * nas mudanças de venda, que vão só para a líder do Cuidado de Alunos e para
+     * a acessora da turma de destino.
+     */
+    @Index('idx_notificacoes_usuario_destino')
+    @Column({ type: 'int', name: 'id_usuario_destino', nullable: true })
+    id_usuario_destino: number | null;
+
     /** Dados estruturados adicionais (ex.: ids do contrato/aluno/turmas envolvidos). */
     @Column({ type: 'jsonb', name: 'dados', nullable: true })
     dados: Record<string, unknown> | null;

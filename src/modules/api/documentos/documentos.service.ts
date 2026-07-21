@@ -3,10 +3,19 @@ import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
 import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/turmasAlunosTreinamentosContratos.entity';
-import { EStatusAssinaturasContratos, EOrigemAlunos, EStatusAlunosTurmas, ETipoDocumento, EFormasPagamento, ECategoriaExclusaoContrato, ESetores } from '@/modules/config/entities/enum';
+import {
+    EStatusAssinaturasContratos,
+    EOrigemAlunos,
+    EStatusAlunosTurmas,
+    ETipoDocumento,
+    EFormasPagamento,
+    ECategoriaExclusaoContrato,
+    ESetores,
+    EFuncoes,
+} from '@/modules/config/entities/enum';
 import * as crypto from 'crypto';
 import axios from 'axios';
-import { Not, IsNull, In, Between } from 'typeorm';
+import { Not, IsNull, In, Between, Brackets } from 'typeorm';
 import {
     CreateDocumentoDto,
     UpdateDocumentoDto,
@@ -29,6 +38,7 @@ import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
+import { CONFIG_KEYS } from '../configuracoes/configuracoes.service';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { Usuarios } from '@/modules/config/entities/usuarios.entity';
@@ -970,10 +980,10 @@ export class DocumentosService {
                 criado_por: userId,
                 atualizado_por: userId,
             });
-            Object.assign(contrato, await this.montarColunasHistoricoVendaCompletas(contrato.dados_contrato, userId, [
-                idTurmaOrigemContrato,
-                criarContratoDto.id_turma_destino,
-            ]));
+            Object.assign(
+                contrato,
+                await this.montarColunasHistoricoVendaCompletas(contrato.dados_contrato, userId, [idTurmaOrigemContrato, criarContratoDto.id_turma_destino]),
+            );
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
             this.invalidarCachesHistoricoVendas();
@@ -1936,11 +1946,7 @@ export class DocumentosService {
     /**
      * Exclui um contrato do ZapSign e faz soft delete no banco
      */
-    async excluirDocumentoZapSign(
-        contratoId: string,
-        userId?: number,
-        motivo?: ExcluirContratoDto,
-    ): Promise<{ message: string }> {
+    async excluirDocumentoZapSign(contratoId: string, userId?: number, motivo?: ExcluirContratoDto): Promise<{ message: string }> {
         try {
             this.logger.log(`zapsign.delete | Excluindo contrato ZapSign contratoId=${contratoId}`);
             const contratoIdNumerico = Number(contratoId);
@@ -1949,9 +1955,7 @@ export class DocumentosService {
             }
 
             if (!motivo?.categoria_exclusao || !motivo?.observacao_exclusao?.trim()) {
-                throw new BadRequestException(
-                    'Informe a categoria e a observação da exclusão antes de apagar o contrato.',
-                );
+                throw new BadRequestException('Informe a categoria e a observação da exclusão antes de apagar o contrato.');
             }
 
             const observacaoExclusao = motivo.observacao_exclusao.trim();
@@ -1992,20 +1996,15 @@ export class DocumentosService {
 
             this.logger.debug('contract.repo.delete | Exclusão por IDs mapeada');
 
-            // As matrículas do aluno e os bônus NÃO são mais removidos na exclusão do
-            // contrato: eles são apenas identificados para compor a notificação enviada
-            // ao Cuidado de Alunos, que decide manualmente o que fazer com cada um.
-            const idsTurmasAlunosVinculados = new Set<string>();
-            const adicionarTurmaAlunoVinculado = (idTurmaAluno?: string | null) => {
-                if (!idTurmaAluno) return;
-                idsTurmasAlunosVinculados.add(idTurmaAluno);
-            };
+            // Matrículas a REMOVER automaticamente junto com a exclusão da venda:
+            // - o aluno da venda (comprador + inscrições adicionais) na turma de
+            //   DESTINO do contrato;
+            // - as matrículas de BÔNUS nas turmas de bônus.
+            // A matrícula da turma de ORIGEM (a vinculada ao contrato) é PRESERVADA:
+            // ela representa a participação real do aluno no evento em que comprou.
 
-            // 1) Matrícula principal do aluno comprador na turma desta venda
-            adicionarTurmaAlunoVinculado(idTurmaAlunoComprador);
-
-            // 2) Matrículas bônus vinculadas ao comprador (sempre por IDs)
-            let quantidadeMatriculasBonus = 0;
+            // 1) Matrículas bônus vinculadas ao comprador (sempre por IDs)
+            let matriculasBonusParaRemover: TurmasAlunos[] = [];
             if (idAlunoComprador) {
                 const idsTurmasBonusRelacionadas = new Set<number>();
 
@@ -2037,24 +2036,85 @@ export class DocumentosService {
                 }
 
                 if (idsTurmasBonusRelacionadas.size > 0) {
-                    const matriculasBonus = await this.uow.turmasAlunosRP.find({
+                    matriculasBonusParaRemover = await this.uow.turmasAlunosRP.find({
                         where: {
                             id_aluno_bonus: idAlunoComprador,
                             origem_aluno: EOrigemAlunos.ALUNO_BONUS,
                             deletado_em: null,
                             id_turma: In(Array.from(idsTurmasBonusRelacionadas)),
                         },
+                        relations: ['id_aluno_fk'],
                     });
 
-                    for (const turmaAlunoBonus of matriculasBonus) {
-                        adicionarTurmaAlunoVinculado(turmaAlunoBonus.id);
-                    }
-                    quantidadeMatriculasBonus = matriculasBonus.length;
-
-                    this.logger.debug(`contract.repo.delete | Matrículas bônus identificadas=${matriculasBonus.length}`);
+                    this.logger.debug(`contract.repo.delete | Matrículas bônus identificadas=${matriculasBonusParaRemover.length}`);
                 } else {
                     this.logger.debug('contract.repo.delete | Nenhuma turma bônus vinculada por ID encontrada para esta venda');
                 }
+            }
+
+            // 2) Matrículas na turma de DESTINO da venda (comprador + inscrições
+            // adicionais). A resolução do destino aqui é ESTRITA (ids gravados no
+            // ato da venda), sem fallback para a turma de origem — senão a
+            // exclusão removeria a participação real do aluno no evento de origem.
+            const idTurmaDestinoRemocao = (() => {
+                const candidatos = [
+                    dadosContrato?.fluxo_evento_destino_id_turma,
+                    dadosContrato?.id_turma_destino,
+                    contrato.id_turma_aluno_treinamento_fk?.id_turma_destino,
+                ];
+                for (const candidato of candidatos) {
+                    const id = Number(candidato);
+                    if (Number.isInteger(id) && id > 0) return id;
+                }
+                return null;
+            })();
+
+            const matriculasDestinoParaRemover = await this.localizarMatriculasVendaNaTurmaDestino({
+                idTurmaDestino: idTurmaDestinoRemocao,
+                idAlunoComprador,
+                emailComprador: dadosContrato?.aluno?.email || turmaAlunoComprador?.id_aluno_fk?.email || null,
+                outrosClientes: Array.isArray(dadosContrato?.turma_aluno?.outros_clientes)
+                    ? dadosContrato.turma_aluno.outros_clientes
+                    : Array.isArray(dadosContrato?.compradores_adicionais)
+                      ? dadosContrato.compradores_adicionais
+                      : [],
+            });
+
+            // Guarda: se existe OUTRA venda ativa do mesmo aluno para a mesma turma
+            // de destino, a matrícula do comprador é compartilhada entre as vendas
+            // e não pode ser removida por esta exclusão.
+            let matriculaCompradorMantidaOutraVenda = false;
+            if (idAlunoComprador && idTurmaDestinoRemocao) {
+                try {
+                    const outrasVendasAtivas = await this.uow.turmasAlunosTreinamentosContratosRP
+                        .createQueryBuilder('c')
+                        .where('c.deletado_em IS NULL')
+                        .andWhere('c.id != :idContratoExcluido', { idContratoExcluido: contrato.id })
+                        .andWhere("(c.dados_contrato->>'fluxo_evento_destino_id_turma') = :idTurmaDestinoTexto", {
+                            idTurmaDestinoTexto: String(idTurmaDestinoRemocao),
+                        })
+                        .andWhere("COALESCE(c.dados_contrato->'aluno'->>'id', c.dados_contrato->'aluno'->>'id_aluno') = :idAlunoCompradorTexto", {
+                            idAlunoCompradorTexto: String(idAlunoComprador),
+                        })
+                        .getCount();
+                    matriculaCompradorMantidaOutraVenda = outrasVendasAtivas > 0;
+                } catch (error) {
+                    this.logger.warn(
+                        `contract.repo.delete | Falha ao verificar outras vendas ativas do comprador: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                    );
+                }
+            }
+
+            const matriculasParaRemover = new Map<string, TurmasAlunos>();
+            for (const matricula of [...matriculasDestinoParaRemover, ...matriculasBonusParaRemover]) {
+                if (
+                    matriculaCompradorMantidaOutraVenda &&
+                    matricula.origem_aluno !== EOrigemAlunos.ALUNO_BONUS &&
+                    String(matricula.id_aluno) === String(idAlunoComprador)
+                ) {
+                    continue;
+                }
+                matriculasParaRemover.set(String(matricula.id), matricula);
             }
 
             // Remover documento da Zapsign se existir
@@ -2083,8 +2143,36 @@ export class DocumentosService {
 
             this.invalidarCachesHistoricoVendas();
 
-            // 4) Notificar o Cuidado de Alunos: os alunos/bônus permanecem nas turmas
-            // e o time decide manualmente se devem ser removidos.
+            const categoriaLabel = this.labelCategoriaExclusaoContrato(motivo.categoria_exclusao);
+
+            // 4) Remover AUTOMATICAMENTE as matrículas da venda (aluno na turma de
+            // destino + bônus). Falha em uma matrícula não bloqueia as demais nem a
+            // exclusão do contrato (ex.: turma congelada) — as falhas vão na notificação.
+            const motivoRemocao = `Contrato ${contrato.id} excluído no Histórico de Vendas (${categoriaLabel}): ${observacaoExclusao}`;
+            const idsMatriculasRemovidas: string[] = [];
+            const falhasRemocao: string[] = [];
+            let alunosRemovidos = 0;
+            let bonusRemovidos = 0;
+            for (const matricula of matriculasParaRemover.values()) {
+                try {
+                    await this.turmasService.removeAlunoTurma(String(matricula.id), userId, motivoRemocao, {
+                        pularValidacaoPermissao: true,
+                    });
+                    idsMatriculasRemovidas.push(String(matricula.id));
+                    if (matricula.origem_aluno === EOrigemAlunos.ALUNO_BONUS) {
+                        bonusRemovidos++;
+                    } else {
+                        alunosRemovidos++;
+                    }
+                } catch (error) {
+                    const nomeMatricula = matricula.id_aluno_fk?.nome || `matrícula ${matricula.id}`;
+                    falhasRemocao.push(`${nomeMatricula} (${error instanceof Error ? error.message : 'erro desconhecido'})`);
+                }
+            }
+            this.logger.log(`contract.repo.delete | Remoção automática: alunos=${alunosRemovidos} bonus=${bonusRemovidos} falhas=${falhasRemocao.length}`);
+
+            // 5) Notificar líder do Cuidado de Alunos + acessora da turma de destino
+            // sobre a exclusão e as remoções automáticas realizadas.
             const turmaVenda = turmaAlunoComprador?.id_turma_fk;
             const treinamentoVenda = turmaVenda?.id_treinamento_fk;
             // Nome do COMPRADOR do contrato: snapshot da venda com prioridade
@@ -2104,76 +2192,248 @@ export class DocumentosService {
                 nomeUsuarioExclusao = usuarioExclusao?.nome || null;
             }
 
-            const categoriaLabel = this.labelCategoriaExclusaoContrato(motivo.categoria_exclusao);
+            // Notificação clara e DIRECIONADA: líder(es) do Cuidado de Alunos +
+            // acessora da turma de destino (não o setor inteiro).
+            const idTurmaDestino = this.resolverIdTurmaDestinoContrato(dadosContrato, turmaVenda?.id ?? null);
+            const destinatarios = await this.resolverDestinatariosMudancaVenda(idTurmaDestino);
 
-            const partesMensagem = [
-                `O contrato #${contrato.id} do aluno ${nomeAluno}${turmaLabel ? ` (turma ${turmaLabel})` : ''} foi excluído${nomeUsuarioExclusao ? ` por ${nomeUsuarioExclusao}` : ''} no Histórico de Vendas.`,
-                `Motivo: ${categoriaLabel}. Observação: ${observacaoExclusao}`,
-                'As matrículas do aluno e os bônus vinculados à venda NÃO foram removidos das turmas.',
-                `Matrículas vinculadas à venda: ${idsTurmasAlunosVinculados.size}${quantidadeMatriculasBonus > 0 ? ` (sendo ${quantidadeMatriculasBonus} de bônus)` : ''}.`,
-                'Avalie na tela da turma se o aluno e os bônus devem ser removidos manualmente.',
+            const linhasMensagem = [
+                `Aluno: ${nomeAluno}`,
+                `Excluído por: ${nomeUsuarioExclusao || 'Usuário não identificado'} - ${this.formatarDataHoraBr(agora)}`,
+                `Observações: ${categoriaLabel}. ${observacaoExclusao}`,
+                `Removidos automaticamente: ${alunosRemovidos} aluno(s) da turma de destino e ${bonusRemovidos} bônus.`,
             ];
+            if (matriculaCompradorMantidaOutraVenda) {
+                linhasMensagem.push('Matrícula do comprador mantida: há outra venda ativa para a mesma turma de destino.');
+            }
+            if (falhasRemocao.length > 0) {
+                linhasMensagem.push(`Atenção: ${falhasRemocao.length} matrícula(s) não puderam ser removidas: ${falhasRemocao.join('; ')}`);
+            }
 
-            await this.notificacoesService.criarNotificacao({
-                tipo: 'CONTRATO_EXCLUIDO',
-                titulo: `Contrato excluído: ${nomeAluno}`,
-                mensagem: partesMensagem.join(' '),
-                setorDestino: ESetores.CUIDADO_DE_ALUNOS,
-                criadoPor: userId,
-                dados: {
-                    id_contrato: contrato.id,
-                    id_aluno: idAlunoComprador,
-                    nome_aluno: nomeAluno,
-                    id_turma: turmaVenda?.id ?? null,
-                    turma_label: turmaLabel,
-                    ids_turmas_alunos_vinculados: Array.from(idsTurmasAlunosVinculados),
-                    quantidade_matriculas_bonus: quantidadeMatriculasBonus,
-                    excluido_por: userId ?? null,
-                    excluido_por_nome: nomeUsuarioExclusao,
-                    categoria_exclusao: motivo.categoria_exclusao,
-                    categoria_exclusao_label: categoriaLabel,
-                    observacao_exclusao: observacaoExclusao,
-                    excluido_em: agora.toISOString(),
+            await this.notificacoesService.criarNotificacaoParaUsuarios(
+                {
+                    tipo: 'CONTRATO_EXCLUIDO',
+                    titulo: `Contrato excluído: ID ${contrato.id}`,
+                    mensagem: linhasMensagem.join('\n'),
+                    setorDestino: ESetores.CUIDADO_DE_ALUNOS,
+                    criadoPor: userId,
+                    dados: {
+                        id_contrato: contrato.id,
+                        id_aluno: idAlunoComprador,
+                        nome_aluno: nomeAluno,
+                        id_turma: turmaVenda?.id ?? null,
+                        id_turma_destino: idTurmaDestino,
+                        turma_label: turmaLabel,
+                        ids_turmas_alunos_removidos: idsMatriculasRemovidas,
+                        quantidade_alunos_removidos: alunosRemovidos,
+                        quantidade_matriculas_bonus_removidas: bonusRemovidos,
+                        matricula_comprador_mantida_outra_venda: matriculaCompradorMantidaOutraVenda,
+                        falhas_remocao: falhasRemocao,
+                        excluido_por: userId ?? null,
+                        excluido_por_nome: nomeUsuarioExclusao,
+                        categoria_exclusao: motivo.categoria_exclusao,
+                        categoria_exclusao_label: categoriaLabel,
+                        observacao_exclusao: observacaoExclusao,
+                        excluido_em: agora.toISOString(),
+                    },
                 },
-            });
+                destinatarios,
+            );
 
-            this.logger.log('contract.repo.delete | Contrato removido; matrículas/bônus preservados e Cuidado de Alunos notificado');
+            this.logger.log('contract.repo.delete | Contrato removido; matrículas de destino/bônus removidas e líder/acessora notificados');
+            const resumoRemocao = `${alunosRemovidos} aluno(s) e ${bonusRemovidos} bônus removidos automaticamente das turmas de destino`;
             return {
-                message: 'Contrato excluído com sucesso. As matrículas do aluno e os bônus foram mantidos nas turmas e o Cuidado de Alunos foi notificado.',
+                message:
+                    falhasRemocao.length > 0
+                        ? `Contrato excluído com sucesso. ${resumoRemocao}, mas ${falhasRemocao.length} matrícula(s) não puderam ser removidas (${falhasRemocao.join('; ')}).`
+                        : `Contrato excluído com sucesso. ${resumoRemocao}. O Cuidado de Alunos foi notificado.`,
             };
         } catch (error) {
             this.logger.error('zapsign.delete | Erro ao excluir contrato', error instanceof Error ? error.stack : undefined);
             if (error instanceof BadRequestException || error instanceof NotFoundException) {
                 throw error;
             }
-            throw new BadRequestException(
-                `Erro ao excluir contrato: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-            );
+            throw new BadRequestException(`Erro ao excluir contrato: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
         }
     }
 
     private labelCategoriaExclusaoContrato(categoria: ECategoriaExclusaoContrato | string | null | undefined): string {
-        switch (categoria) {
-            case ECategoriaExclusaoContrato.ERRO_PREENCHIMENTO:
-                return 'Erro de preenchimento';
-            case ECategoriaExclusaoContrato.CANCELAMENTO_ALUNO:
-                return 'Cancelamento de aluno';
-            case ECategoriaExclusaoContrato.OUTRO_MOTIVO:
-                return 'Outro motivo';
-            default:
-                return 'Não informado';
+        const labels: Record<ECategoriaExclusaoContrato, string> = {
+            [ECategoriaExclusaoContrato.ERRO_PREENCHIMENTO]: 'Erro de preenchimento',
+            [ECategoriaExclusaoContrato.CANCELAMENTO_ALUNO]: 'Cancelamento de aluno',
+            [ECategoriaExclusaoContrato.OUTRO_MOTIVO]: 'Outro motivo',
+        };
+        return (categoria && labels[categoria as ECategoriaExclusaoContrato]) || 'Não informado';
+    }
+
+    /** Funções consideradas de liderança (mesmo conjunto usado nas turmas). */
+    private static readonly FUNCOES_LIDERANCA_CA = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
+
+    /** Formata uma data/hora no fuso de São Paulo como dd/mm/aaaa hh:mm. */
+    private formatarDataHoraBr(data: Date): string {
+        try {
+            return new Intl.DateTimeFormat('pt-BR', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: 'America/Sao_Paulo',
+            })
+                .format(data)
+                .replace(',', '');
+        } catch {
+            return data.toISOString();
         }
+    }
+
+    /**
+     * Resolve os DESTINATÁRIOS de uma mudança de venda (exclusão/atualização):
+     * a(s) líder(es) do Cuidado de Alunos + a acessora da turma de DESTINO +
+     * a pessoa do FINANCEIRO definida em /configuracoes (chave
+     * `financeiro_notificacoes_vendas_usuario`).
+     * Retorna ids de usuário únicos (sem nulos). Nunca lança.
+     */
+    private async resolverDestinatariosMudancaVenda(idTurmaDestino?: number | null): Promise<number[]> {
+        const ids = new Set<number>();
+
+        try {
+            const lideres = await this.uow.usuariosRP
+                .createQueryBuilder('usuario')
+                .select(['usuario.id'])
+                .where('usuario.deletado_em IS NULL')
+                .andWhere('usuario.setor && :setores', { setores: [ESetores.CUIDADO_DE_ALUNOS] })
+                .andWhere('usuario.funcao && :funcoes', { funcoes: DocumentosService.FUNCOES_LIDERANCA_CA })
+                .getMany();
+            lideres.forEach((lider) => {
+                if (lider?.id) ids.add(Number(lider.id));
+            });
+        } catch (error) {
+            this.logger.warn(
+                `notificacoes.destinatarios | Falha ao buscar líderes do Cuidado de Alunos: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+        }
+
+        const idTurma = Number(idTurmaDestino);
+        if (Number.isInteger(idTurma) && idTurma > 0) {
+            try {
+                const turma = await this.uow.turmasRP.findOne({
+                    where: { id: idTurma },
+                    select: ['id', 'id_acessora'] as any,
+                });
+                if (turma?.id_acessora) {
+                    ids.add(Number(turma.id_acessora));
+                }
+            } catch (error) {
+                this.logger.warn(
+                    `notificacoes.destinatarios | Falha ao buscar acessora da turma de destino ${idTurma}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                );
+            }
+        }
+
+        // Pessoa do FINANCEIRO configurada em /configuracoes para acompanhar
+        // as mudanças de venda (exclusões/atualizações de contrato).
+        try {
+            const configFinanceiro = await this.uow.configuracoesSistemaRP.findOne({
+                where: { chave: CONFIG_KEYS.FINANCEIRO_NOTIFICACOES_VENDAS },
+            });
+            const idFinanceiro = Number(String(configFinanceiro?.valor ?? '').trim());
+            if (Number.isInteger(idFinanceiro) && idFinanceiro > 0) {
+                ids.add(idFinanceiro);
+            }
+        } catch (error) {
+            this.logger.warn(
+                `notificacoes.destinatarios | Falha ao buscar usuário do financeiro configurado: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+        }
+
+        return Array.from(ids);
+    }
+
+    /** Resolve a turma de DESTINO de uma venda a partir do snapshot do contrato. */
+    private resolverIdTurmaDestinoContrato(dadosContrato: any, turmaAlunoTurmaId?: number | null): number | null {
+        const candidatos = [dadosContrato?.fluxo_evento_destino_id_turma, dadosContrato?.id_turma_destino, dadosContrato?.turma?.id, turmaAlunoTurmaId];
+        for (const candidato of candidatos) {
+            const id = Number(candidato);
+            if (Number.isInteger(id) && id > 0) return id;
+        }
+        return null;
+    }
+
+    /** Escapa curingas de LIKE (%/_/\) para uso com ESCAPE '\'. */
+    private escaparLikeSql(texto: string): string {
+        return texto.replace(/[\\%_]/g, (caractere) => `\\${caractere}`);
+    }
+
+    /**
+     * Localiza as matrículas ATIVAS criadas por uma venda na turma de DESTINO
+     * do contrato: o comprador, as réplicas de inscrições adicionais (e-mail
+     * marcado "local+insc..._n_comp@dominio") e os "outros clientes" da venda
+     * (por id ou e-mail). Só considera matrículas com origem COMPROU_INGRESSO
+     * — a origem usada pelo fluxo de venda — preservando matrículas do mesmo
+     * aluno vindas de bônus, transferência ou importação.
+     */
+    private async localizarMatriculasVendaNaTurmaDestino(params: {
+        idTurmaDestino: number | null;
+        idAlunoComprador: string | number | null;
+        emailComprador: string | null;
+        outrosClientes: Array<{ id?: unknown; email?: unknown }>;
+    }): Promise<TurmasAlunos[]> {
+        const { idTurmaDestino, idAlunoComprador } = params;
+        if (!idTurmaDestino) {
+            return [];
+        }
+
+        const emailComprador = String(params.emailComprador || '')
+            .trim()
+            .toLowerCase();
+        const paraTexto = (valor: unknown): string => (typeof valor === 'string' || typeof valor === 'number' ? String(valor).trim() : '');
+        const idsOutrosClientes = params.outrosClientes.map((cliente) => paraTexto(cliente?.id)).filter((id) => /^\d+$/.test(id));
+        const emailsOutrosClientes = params.outrosClientes.map((cliente) => paraTexto(cliente?.email).toLowerCase()).filter((email) => email.includes('@'));
+
+        const posicaoArroba = emailComprador.indexOf('@');
+        const temEmailComprador = posicaoArroba > 0;
+        if (!idAlunoComprador && !temEmailComprador && idsOutrosClientes.length === 0 && emailsOutrosClientes.length === 0) {
+            return [];
+        }
+
+        const query = this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .leftJoinAndSelect('ta.id_aluno_fk', 'aluno')
+            .where('ta.id_turma = :idTurmaDestino', { idTurmaDestino })
+            .andWhere('ta.deletado_em IS NULL')
+            .andWhere('ta.origem_aluno = :origemCompra', { origemCompra: EOrigemAlunos.COMPROU_INGRESSO });
+
+        query.andWhere(
+            new Brackets((where) => {
+                if (idAlunoComprador) {
+                    where.orWhere('ta.id_aluno = :idAlunoComprador', { idAlunoComprador: String(idAlunoComprador) });
+                }
+                if (temEmailComprador) {
+                    // Réplicas de inscrições adicionais: "local+insc..._n_comp@dominio"
+                    // (cobre também o titular de item de combo "insc1_combo{n}_n_comp").
+                    const local = this.escaparLikeSql(emailComprador.slice(0, posicaoArroba));
+                    const dominio = this.escaparLikeSql(emailComprador.slice(posicaoArroba + 1));
+                    where.orWhere("LOWER(aluno.email) LIKE :padraoReplica ESCAPE '\\'", {
+                        padraoReplica: `${local}+insc%\\_n\\_comp@${dominio}`,
+                    });
+                }
+                if (idsOutrosClientes.length > 0) {
+                    where.orWhere('ta.id_aluno IN (:...idsOutrosClientes)', { idsOutrosClientes });
+                }
+                if (emailsOutrosClientes.length > 0) {
+                    where.orWhere('LOWER(aluno.email) IN (:...emailsOutrosClientes)', { emailsOutrosClientes });
+                }
+            }),
+        );
+
+        return query.getMany();
     }
 
     /**
      * Listagem de contratos já excluídos no Histórico de Vendas (consulta de auditoria).
      */
-    async listarContratosExcluidos(filtros?: {
-        page?: number;
-        limit?: number;
-        search?: string;
-        categoria_exclusao?: string;
-    }): Promise<{
+    async listarContratosExcluidos(filtros?: { page?: number; limit?: number; search?: string; categoria_exclusao?: string }): Promise<{
         data: Array<{
             id: string;
             aluno_nome: string;
@@ -2229,9 +2489,7 @@ export class DocumentosService {
             };
             if (termoBuscaDigitos.length >= 3) {
                 condicoesBusca.push(`REGEXP_REPLACE(COALESCE(aluno.cpf, ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`);
-                condicoesBusca.push(
-                    `REGEXP_REPLACE(COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`,
-                );
+                condicoesBusca.push(`REGEXP_REPLACE(COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`);
                 parametrosBusca.termoBuscaCpf = `%${termoBuscaDigitos}%`;
             }
             qb.andWhere(`(${condicoesBusca.join(' OR ')})`, parametrosBusca);
@@ -2276,25 +2534,12 @@ export class DocumentosService {
                       })()
                     : row.dados_contrato || {};
             const alunoSnapshot = dadosContrato?.aluno || {};
-            const alunoNome =
-                alunoSnapshot?.nome || row.aluno_nome_rel || 'Aluno não identificado';
+            const alunoNome = alunoSnapshot?.nome || row.aluno_nome_rel || 'Aluno não identificado';
             const alunoEmail = alunoSnapshot?.email || row.aluno_email_rel || null;
             const alunoCpf = alunoSnapshot?.cpf || row.aluno_cpf_rel || null;
-            const treinamento =
-                dadosContrato?.treinamento?.nome ||
-                dadosContrato?.treinamento?.treinamento ||
-                row.hist_treinamento_origem ||
-                null;
-            const turmaOrigem =
-                dadosContrato?.fluxo_evento_origem_label ||
-                dadosContrato?.turma_origem?.edicao_turma ||
-                row.hist_turma_origem ||
-                null;
-            const turmaDestino =
-                dadosContrato?.fluxo_evento_destino_label ||
-                dadosContrato?.turma?.edicao_turma ||
-                row.hist_turma_destino ||
-                null;
+            const treinamento = dadosContrato?.treinamento?.nome || dadosContrato?.treinamento?.treinamento || row.hist_treinamento_origem || null;
+            const turmaOrigem = dadosContrato?.fluxo_evento_origem_label || dadosContrato?.turma_origem?.edicao_turma || row.hist_turma_origem || null;
+            const turmaDestino = dadosContrato?.fluxo_evento_destino_label || dadosContrato?.turma?.edicao_turma || row.hist_turma_destino || null;
             const receita = Number(row.hist_receita_total || dadosContrato?.pagamento?.valor_total || 0) || 0;
             const categoria = (row.categoria_exclusao as ECategoriaExclusaoContrato | null) || null;
 
@@ -2699,14 +2944,14 @@ export class DocumentosService {
         }
     }
 
-    async buscarContratoCompleto(contratoId: string): Promise<any> {
+    async buscarContratoCompleto(contratoId: string, incluirExcluidos = false): Promise<any> {
         try {
-            // Primeiro, vamos buscar o contrato básico
+            // Primeiro, vamos buscar o contrato básico. Quando `incluirExcluidos`
+            // é true (aba "Contratos excluídos"), o soft delete é ignorado para
+            // permitir consultar os detalhes da venda apagada.
             const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-                where: {
-                    id: contratoId,
-                    deletado_em: null,
-                },
+                where: incluirExcluidos ? { id: contratoId } : { id: contratoId, deletado_em: null },
+                withDeleted: incluirExcluidos,
                 relations: [
                     'id_turma_aluno_treinamento_fk',
                     'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
@@ -3104,12 +3349,7 @@ export class DocumentosService {
         const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoFake) || '').trim();
         const turmaDestino = String(this.extrairTurmaDestinoServidor(contratoFake) || '').trim();
         const criadoPorConfronto = dadosContrato?.criado_por_confronto || {};
-        const vendedorCandidatos = [
-            criadoPorConfronto?.consolidado,
-            criadoPor,
-            dadosContrato?.criado_por,
-            criadoPorConfronto?.contrato,
-        ];
+        const vendedorCandidatos = [criadoPorConfronto?.consolidado, criadoPor, dadosContrato?.criado_por, criadoPorConfronto?.contrato];
         let histVendedorId: number | null = null;
         for (const candidato of vendedorCandidatos) {
             const id = Number(candidato);
@@ -3132,7 +3372,10 @@ export class DocumentosService {
         };
     }
 
-    private obterIdsTurmasParaStaffLider(dadosContratoRaw: Record<string, any> | null | undefined, extras: Array<string | number | null | undefined> = []): number[] {
+    private obterIdsTurmasParaStaffLider(
+        dadosContratoRaw: Record<string, any> | null | undefined,
+        extras: Array<string | number | null | undefined> = [],
+    ): number[] {
         const dadosContrato = dadosContratoRaw || {};
         const candidatos = [
             ...extras,
@@ -3201,10 +3444,7 @@ export class DocumentosService {
         return this.mapaLiderIprCache;
     }
 
-    private async resolverHistStaffLiderId(
-        vendedorId: number | null,
-        idsTurmas: number[],
-    ): Promise<number | null> {
+    private async resolverHistStaffLiderId(vendedorId: number | null, idsTurmas: number[]): Promise<number | null> {
         if (!vendedorId) return null;
         const vendedorKey = String(vendedorId);
         const { timesPorTurma, liderPorMembroGlobal } = await this.obterMapaLiderIprCacheado();
@@ -3667,9 +3907,7 @@ export class DocumentosService {
                 const turma = await this.uow.turmasRP.findOne({ where: { id: linha.id_turma }, withDeleted: true });
                 edicoesResolvidas.set(linha.id_turma, String(turma?.edicao_turma || '').trim() || String(linha.id_turma));
             }
-            const partes = linhasValidas.map(
-                (linha, index) => `Turma ${index + 1}: ${edicoesResolvidas.get(linha.id_turma)} (${linha.quantidade} inscrição(ões))`,
-            );
+            const partes = linhasValidas.map((linha, index) => `Turma ${index + 1}: ${edicoesResolvidas.get(linha.id_turma)} (${linha.quantidade} inscrição(ões))`);
             camposVariaveis['Turmas do Imersão Prosperar'] = partes.join('|');
         }
 
@@ -3753,6 +3991,7 @@ export class DocumentosService {
             outros_clientes?: Array<{ id?: string; nome?: string; email?: string; telefone?: string }>;
             pendencia_pagamento?: boolean;
         },
+        userId?: number,
     ): Promise<{ atualizado: boolean }> {
         const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
             where: { id: contratoId, deletado_em: IsNull() },
@@ -3764,15 +4003,20 @@ export class DocumentosService {
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
         const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
+        const alteracoes: string[] = [];
 
         if (dados.quantidade_inscricoes !== undefined) {
             const quantidade = Math.max(1, Math.trunc(Number(dados.quantidade_inscricoes) || 1));
+            const anterior = Number(turmaAlunoSnapshot.quantidade_inscricoes) || null;
             turmaAlunoSnapshot.quantidade_inscricoes = quantidade;
             // O frontend/resumo calculam max(snapshot, campos variáveis, outros
             // clientes + 1); sem sincronizar os campos variáveis, uma redução de
             // quantidade nunca refletiria na tela.
             camposVariaveis['Quantidade de Inscrições'] = String(quantidade);
             delete camposVariaveis['Quantidade de Inscricoes'];
+            alteracoes.push(
+                anterior && anterior !== quantidade ? `Quantidade de inscrições: ${anterior} → ${quantidade}` : `Quantidade de inscrições: ${quantidade}`,
+            );
         }
         if (dados.outros_clientes !== undefined) {
             turmaAlunoSnapshot.outros_clientes = Array.isArray(dados.outros_clientes) ? dados.outros_clientes : [];
@@ -3781,6 +4025,7 @@ export class DocumentosService {
             if (Array.isArray(dadosContrato.compradores_adicionais)) {
                 dadosContrato.compradores_adicionais = turmaAlunoSnapshot.outros_clientes;
             }
+            alteracoes.push(`Outros clientes: ${turmaAlunoSnapshot.outros_clientes.length}`);
         }
         if (dados.pendencia_pagamento !== undefined) {
             turmaAlunoSnapshot.pendencia_pagamento = Boolean(dados.pendencia_pagamento);
@@ -3789,6 +4034,7 @@ export class DocumentosService {
             } else {
                 camposVariaveis['Pendência de Pagamento'] = 'false';
             }
+            alteracoes.push(`Pendência de pagamento: ${dados.pendencia_pagamento ? 'sim' : 'não'}`);
         }
 
         dadosContrato.turma_aluno = turmaAlunoSnapshot;
@@ -3799,7 +4045,70 @@ export class DocumentosService {
         });
         this.invalidarCachesHistoricoVendas();
 
+        await this.notificarAtualizacaoVenda(contrato.id, dadosContrato, alteracoes, userId);
+
         return { atualizado: true };
+    }
+
+    /**
+     * Notifica a líder do Cuidado de Alunos e a acessora da turma de destino
+     * sobre uma ATUALIZAÇÃO de venda no Histórico. Mesmo formato claro da
+     * exclusão. Nunca lança (falha em notificar não derruba a edição).
+     */
+    private async notificarAtualizacaoVenda(contratoId: string, dadosContrato: any, alteracoes: string[], userId?: number): Promise<void> {
+        try {
+            if (!alteracoes || alteracoes.length === 0) {
+                return;
+            }
+
+            const nomeAluno = dadosContrato?.aluno?.nome || 'Aluno não identificado';
+            const idTurmaDestino = this.resolverIdTurmaDestinoContrato(dadosContrato, null);
+            const destinatarios = await this.resolverDestinatariosMudancaVenda(idTurmaDestino);
+            if (destinatarios.length === 0) {
+                return;
+            }
+
+            let nomeUsuario: string | null = null;
+            if (userId) {
+                const usuario = await this.uow.usuariosRP.findOne({
+                    where: { id: userId },
+                    select: ['id', 'nome'] as any,
+                    withDeleted: true,
+                });
+                nomeUsuario = usuario?.nome || null;
+            }
+
+            const agora = new Date();
+            const linhasMensagem = [
+                `Aluno: ${nomeAluno}`,
+                `Atualizado por: ${nomeUsuario || 'Usuário não identificado'} - ${this.formatarDataHoraBr(agora)}`,
+                `Alterações: ${alteracoes.join('; ')}`,
+            ];
+
+            await this.notificacoesService.criarNotificacaoParaUsuarios(
+                {
+                    tipo: 'VENDA_ATUALIZADA',
+                    titulo: `Venda atualizada: ID ${contratoId}`,
+                    mensagem: linhasMensagem.join('\n'),
+                    setorDestino: ESetores.CUIDADO_DE_ALUNOS,
+                    criadoPor: userId,
+                    dados: {
+                        id_contrato: contratoId,
+                        nome_aluno: nomeAluno,
+                        id_turma_destino: idTurmaDestino,
+                        alteracoes,
+                        atualizado_por: userId ?? null,
+                        atualizado_por_nome: nomeUsuario,
+                        atualizado_em: agora.toISOString(),
+                    },
+                },
+                destinatarios,
+            );
+        } catch (error) {
+            this.logger.warn(
+                `notificacoes.venda.atualizada | Falha ao notificar atualização do contrato ${contratoId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+        }
     }
 
     /**
@@ -4314,17 +4623,13 @@ export class DocumentosService {
         const temHist =
             row.hist_qtd_inscricoes !== null &&
             row.hist_qtd_inscricoes !== undefined &&
-            (Number.isFinite(histQtd) ||
-                Number.isFinite(histBonus) ||
-                row.hist_pendencia_pagamento !== null ||
-                Number.isFinite(histReceita));
+            (Number.isFinite(histQtd) || Number.isFinite(histBonus) || row.hist_pendencia_pagamento !== null || Number.isFinite(histReceita));
 
         if (temHist) {
             return {
                 quantidadeInscricoes: Number.isFinite(histQtd) && histQtd > 0 ? histQtd : 1,
                 quantidadeBonus: Number.isFinite(histBonus) && histBonus > 0 ? histBonus : 0,
-                pendenciaPagamento:
-                    row.hist_pendencia_pagamento === true || String(row.hist_pendencia_pagamento).toLowerCase() === 'true',
+                pendenciaPagamento: row.hist_pendencia_pagamento === true || String(row.hist_pendencia_pagamento).toLowerCase() === 'true',
                 valorTotalVenda: Number.isFinite(histReceita) && histReceita > 0 ? histReceita : 0,
             };
         }
@@ -4335,8 +4640,7 @@ export class DocumentosService {
         const outrosClientesRaw = (turmaAlunoDados as { outros_clientes?: unknown })?.outros_clientes ?? row.outros_clientes;
         const contratoMapeado = {
             turma_aluno: {
-                quantidade_inscricoes:
-                    Number((turmaAlunoDados as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
+                quantidade_inscricoes: Number((turmaAlunoDados as { quantidade_inscricoes?: number })?.quantidade_inscricoes ?? row.quantidade_inscricoes ?? 1) || 1,
                 pendencia_pagamento:
                     row.pendencia_pagamento === true ||
                     String(row.pendencia_pagamento).toLowerCase() === 'true' ||
@@ -4353,9 +4657,9 @@ export class DocumentosService {
         };
     }
 
-    private async carregarLinhasHistoricoVendas(baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>): Promise<
-        LinhaHistoricoVendasResumo[]
-    > {
+    private async carregarLinhasHistoricoVendas(
+        baseQb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
+    ): Promise<LinhaHistoricoVendasResumo[]> {
         // Preferência: colunas materializadas (sem JSON/blobs). Fallback de ids
         // de turma ainda vem das FKs para resolver times/líder.
         const resumoRowsRaw = await baseQb
@@ -4463,10 +4767,7 @@ export class DocumentosService {
         return timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorId) || '';
     }
 
-    private aplicarFiltroStaffLiderNoQb(
-        qb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>,
-        staffLiderId?: string,
-    ): void {
+    private aplicarFiltroStaffLiderNoQb(qb: ReturnType<typeof this.uow.turmasAlunosTreinamentosContratosRP.createQueryBuilder>, staffLiderId?: string): void {
         const valor = String(staffLiderId || '').trim();
         if (!valor) return;
         if (valor === this.staffLiderSemVinculoSentinela) {
@@ -4507,7 +4808,7 @@ export class DocumentosService {
         const [subSql, subParams] = distinctQb.getQueryAndParameters();
         const manager = this.uow.turmasAlunosTreinamentosContratosRP.manager;
 
-        const [totaisRow] = (await manager.query(
+        const [totaisRow] = await manager.query(
             `
             SELECT
                 COALESCE(SUM(q.hist_qtd_inscricoes), 0)::float AS total_inscricoes_vendidas,
@@ -4517,14 +4818,9 @@ export class DocumentosService {
             FROM (${subSql}) q
             `,
             subParams,
-        )) as Array<{
-            total_inscricoes_vendidas: number;
-            total_inscricoes_bonus: number;
-            total_com_pendencia: number;
-            receita_total: number;
-        }>;
+        );
 
-        const rankingRows = (await manager.query(
+        const rankingRows = await manager.query(
             `
             SELECT
                 q.hist_staff_lider_id AS lider_id,
@@ -4535,12 +4831,7 @@ export class DocumentosService {
             GROUP BY q.hist_staff_lider_id, q.hist_vendedor_id
             `,
             subParams,
-        )) as Array<{
-            lider_id: string | number | null;
-            vendedor_id: string | number | null;
-            total_inscricoes: number;
-            total_vendas: number;
-        }>;
+        );
 
         const { timesPorLider } = await this.obterMapaLiderIprCacheado();
         const idsUsuarios = Array.from(
@@ -4608,8 +4899,7 @@ export class DocumentosService {
             registroLider.totalInscricoes += inscricoes;
             registroLider.totalVendas += vendas;
             const vendedorAtual =
-                registroLider.vendedores[vendedorId] ||
-                ({ id: vendedorId, nome: vendedorNome, totalInscricoes: 0, totalVendas: 0 } as TVendedorAgrupado);
+                registroLider.vendedores[vendedorId] || ({ id: vendedorId, nome: vendedorNome, totalInscricoes: 0, totalVendas: 0 } as TVendedorAgrupado);
             vendedorAtual.totalInscricoes += inscricoes;
             vendedorAtual.totalVendas += vendas;
             registroLider.vendedores[vendedorId] = vendedorAtual;
@@ -4658,10 +4948,7 @@ export class DocumentosService {
     }
 
     /** Fallback legado quando hist_staff_lider_id ainda não está disponível nas linhas. */
-    private async calcularResumoHistoricoVendasEmMemoria(
-        resumoRows: LinhaHistoricoVendasResumo[],
-        staffLiderId: string,
-    ): Promise<ResumoHistoricoVendas> {
+    private async calcularResumoHistoricoVendasEmMemoria(resumoRows: LinhaHistoricoVendasResumo[], staffLiderId: string): Promise<ResumoHistoricoVendas> {
         const { timesPorTurma, liderPorMembroGlobal } = await this.montarMapasTimesHistorico(resumoRows);
         const filtrandoSemLider = staffLiderId === this.staffLiderSemVinculoSentinela;
         const linhasAtivas = staffLiderId
@@ -4735,8 +5022,7 @@ export class DocumentosService {
             }
             const liderNome = nomeUsuarioPorId.get(Number(liderId)) || (liderId === vendedorId ? vendedorNome : `Líder ID ${liderId}`);
             const registroLider =
-                mapaLider.get(liderId) ||
-                ({ liderId, liderNome, totalInscricoes: 0, totalVendas: 0, vendedores: {}, times: new Set<string>() } as TLiderAgrupado);
+                mapaLider.get(liderId) || ({ liderId, liderNome, totalInscricoes: 0, totalVendas: 0, vendedores: {}, times: new Set<string>() } as TLiderAgrupado);
             registroLider.totalInscricoes += inscricoesDaVenda;
             registroLider.totalVendas += 1;
             const idsTurmaDaVenda = this.obterIdsTurmasResumoHistorico(row);
@@ -4775,7 +5061,10 @@ export class DocumentosService {
                         total_inscricoes: dados.totalInscricoes,
                         total_vendas: dados.totalVendas,
                     }))
-                    .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR')),
+                    .sort(
+                        (a, b) =>
+                            b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR'),
+                    ),
             },
         };
     }
@@ -4871,16 +5160,12 @@ export class DocumentosService {
             // Default TRUE: listagem do histórico nunca precisa dos blobs na grade.
             // Opt-in explícito: omitir_comprovantes=false|0.
             const incluirComprovantesExplicit =
-                filtros?.omitir_comprovantes === false ||
-                filtros?.omitir_comprovantes === 'false' ||
-                filtros?.omitir_comprovantes === '0';
+                filtros?.omitir_comprovantes === false || filtros?.omitir_comprovantes === 'false' || filtros?.omitir_comprovantes === '0';
             const omitirComprovantes = !incluirComprovantesExplicit;
-            const apenasResumo =
-                filtros?.apenas_resumo === true || filtros?.apenas_resumo === 'true' || filtros?.apenas_resumo === '1';
+            const apenasResumo = filtros?.apenas_resumo === true || filtros?.apenas_resumo === 'true' || filtros?.apenas_resumo === '1';
             // Default TRUE para compatibilidade com o front atual. Passe false e
             // chame GET .../resumo em paralelo para liberar a tabela mais cedo.
-            const omitirResumoExplicit =
-                filtros?.incluir_resumo === false || filtros?.incluir_resumo === 'false' || filtros?.incluir_resumo === '0';
+            const omitirResumoExplicit = filtros?.incluir_resumo === false || filtros?.incluir_resumo === 'false' || filtros?.incluir_resumo === '0';
             const incluirResumo = apenasResumo || !omitirResumoExplicit;
             const marcadorAtualizacao = this.obterMarcadorAtualizacaoHistorico();
             const chaveFiltrosResumo = {
@@ -5201,9 +5486,7 @@ export class DocumentosService {
 
                 const [paginacao, resumoParalelo] = await Promise.all([
                     paginacaoPromise,
-                    incluirResumo
-                        ? this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, { staff_lider_id: staffLiderId })
-                        : Promise.resolve(null),
+                    incluirResumo ? this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, { staff_lider_id: staffLiderId }) : Promise.resolve(null),
                 ]);
                 total = paginacao.total;
                 totalPages = paginacao.totalPages;
@@ -5863,9 +6146,7 @@ export class DocumentosService {
                     const comprovantesPagamentoCompletos = omitirComprovantes
                         ? []
                         : this.resolverComprovantesDoContrato(contrato, turmaAlunoDadosContrato, turmaAluno);
-                    const possuiComprovantes = omitirComprovantes
-                        ? idsComComprovantes.has(String(contrato.id))
-                        : comprovantesPagamentoCompletos.length > 0;
+                    const possuiComprovantes = omitirComprovantes ? idsComComprovantes.has(String(contrato.id)) : comprovantesPagamentoCompletos.length > 0;
                     const comprovantesPagamento = omitirComprovantes ? [] : comprovantesPagamentoCompletos;
                     const comprovantePagamentoBase64 = omitirComprovantes ? '' : this.serializarComprovantes(comprovantesPagamento);
                     const criadoPorContrato = contrato?.criado_por ?? null;

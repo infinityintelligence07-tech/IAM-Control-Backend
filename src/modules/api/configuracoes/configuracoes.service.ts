@@ -16,6 +16,7 @@ export const CONFIG_KEYS = {
     TESTEMUNHA_TELEFONE_PADRAO: 'testemunha_telefone_padrao',
     ASSESSORES_CUIDADO_ALUNOS: 'assessores_cuidado_alunos',
     ASSESSORES_FINANCEIROS: 'assessores_financeiros',
+    FINANCEIRO_NOTIFICACOES_VENDAS: 'financeiro_notificacoes_vendas_usuario',
 } as const;
 
 /** Defaults dos acessores financeiros (Peterson, Luana, Elaine). */
@@ -26,6 +27,9 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
     [CONFIG_KEYS.TESTEMUNHA_TELEFONE_PADRAO]: '(19) 98317-3941',
     [CONFIG_KEYS.ASSESSORES_CUIDADO_ALUNOS]: '[]',
     [CONFIG_KEYS.ASSESSORES_FINANCEIROS]: JSON.stringify(DEFAULT_ASSESSORES_FINANCEIROS_IDS),
+    // Pessoa do FINANCEIRO que recebe as notificações de mudanças de venda
+    // (exclusão/atualização de contrato no Histórico de Vendas). Vazio = ninguém.
+    [CONFIG_KEYS.FINANCEIRO_NOTIFICACOES_VENDAS]: '',
 };
 
 @Injectable()
@@ -62,6 +66,17 @@ export class ConfiguracoesService {
         return ids;
     }
 
+    /**
+     * Id do usuário do FINANCEIRO configurado para receber as notificações de
+     * mudanças de venda (exclusão/atualização no Histórico de Vendas), ou null
+     * quando não configurado.
+     */
+    async getFinanceiroNotificacoesVendasUsuarioId(): Promise<number | null> {
+        const config = await this.findAll();
+        const id = Number(String(config[CONFIG_KEYS.FINANCEIRO_NOTIFICACOES_VENDAS] ?? '').trim());
+        return Number.isInteger(id) && id > 0 ? id : null;
+    }
+
     async findAll(): Promise<ConfiguracoesResponseDto> {
         const registros = await this.uow.configuracoesSistemaRP.find();
 
@@ -84,6 +99,18 @@ export class ConfiguracoesService {
                 const ids = this.parseIdsJson(valor);
                 await this.validarIdsAssessores(ids, chave === CONFIG_KEYS.ASSESSORES_CUIDADO_ALUNOS);
                 valor = JSON.stringify(ids);
+            }
+
+            if (chave === CONFIG_KEYS.FINANCEIRO_NOTIFICACOES_VENDAS) {
+                const id = Number(String(valor ?? '').trim());
+                if (String(valor ?? '').trim() === '') {
+                    valor = '';
+                } else if (!Number.isInteger(id) || id <= 0) {
+                    throw new BadRequestException('Usuário do financeiro inválido.');
+                } else {
+                    await this.validarIdsAssessores([id], false);
+                    valor = String(id);
+                }
             }
 
             const existente = await this.uow.configuracoesSistemaRP.findOne({ where: { chave } });

@@ -392,8 +392,10 @@ export class DocumentosController {
             outros_clientes?: Array<{ id?: string; nome?: string; email?: string; telefone?: string }>;
             pendencia_pagamento?: boolean;
         },
+        @Req() req: Request,
     ) {
-        return this.documentosService.atualizarDadosVendaContratoHistorico(id, body || {});
+        const userId = (req.user as any)?.sub;
+        return this.documentosService.atualizarDadosVendaContratoHistorico(id, body || {}, userId);
     }
 
     // Ações do card de pendência no dashboard de vendas (quitar / reabrir / obs / cancel).
@@ -461,10 +463,12 @@ export class DocumentosController {
     }
 
     // Endpoint para buscar contrato completo (para compatibilidade com frontend)
+    // `incluir_excluidos=true` permite abrir os detalhes de contratos soft-deletados
+    // (aba "Contratos excluídos" do Histórico de Vendas).
     @Get('contrato/:id')
-    async buscarContratoCompleto(@Param('id') id: string) {
+    async buscarContratoCompleto(@Param('id') id: string, @Query('incluir_excluidos') incluirExcluidos?: string) {
         console.log('Buscando contrato completo:', id);
-        return this.documentosService.buscarContratoCompleto(id);
+        return this.documentosService.buscarContratoCompleto(id, incluirExcluidos === 'true');
     }
 
     // Endpoint para salvar assinatura (para compatibilidade com frontend)

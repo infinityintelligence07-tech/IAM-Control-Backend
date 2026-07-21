@@ -21,6 +21,9 @@ import {
     UpdateDocumentoDto,
     DocumentoResponseDto,
     DocumentosListResponseDto,
+    DocumentoVersaoResumoDto,
+    DocumentoVersaoDetalheDto,
+    DocumentoVersoesListResponseDto,
     GerarContratoDto,
     CampoDocumentoDto,
     DocumentosFilterDto,
@@ -42,6 +45,7 @@ import { CONFIG_KEYS } from '../configuracoes/configuracoes.service';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { Usuarios } from '@/modules/config/entities/usuarios.entity';
+import { DocumentosVersoes } from '@/modules/config/entities/documentosVersoes.entity';
 import { resolverDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
 
 const parsePositiveIntEnv = (value: string | undefined, fallback: number): number => {
@@ -291,7 +295,11 @@ export class DocumentosService {
                 updatePayload.clausulas = this.aplicarEstiloPadraoClausulas(updatePayload.clausulas);
             }
 
+            // Versionamento: arquiva o estado ANTERIOR antes de aplicar a edição.
+            await this.arquivarVersaoDocumento(documento);
+
             Object.assign(documento, updatePayload);
+            documento.versao = (documento.versao || 1) + 1;
             documento.atualizado_por = userId;
             documento.atualizado_em = new Date();
 
@@ -305,6 +313,138 @@ export class DocumentosService {
             this.logger.error('doc.repo.update | Erro ao atualizar documento', error instanceof Error ? error.stack : undefined);
             throw new BadRequestException('Erro ao atualizar documento');
         }
+    }
+
+    /**
+     * Arquiva o estado ATUAL do documento em `documentos_versoes` (snapshot da
+     * versão vigente antes de uma edição/restauração sobrescrevê-la).
+     */
+    private async arquivarVersaoDocumento(documento: Documentos): Promise<void> {
+        const snapshot = this.uow.documentosVersoesRP.create({
+            id_documento: documento.id,
+            versao: documento.versao || 1,
+            documento: documento.documento,
+            tipo_documento: documento.tipo_documento,
+            campos: documento.campos || [],
+            clausulas: documento.clausulas || '',
+            treinamentos_relacionados: documento.treinamentos_relacionados || [],
+            conteudo_alterado_em: documento.atualizado_em ?? documento.criado_em ?? null,
+            conteudo_alterado_por: documento.atualizado_por ?? documento.criado_por ?? null,
+        });
+        await this.uow.documentosVersoesRP.save(snapshot);
+    }
+
+    /** Resolve nomes de usuários das versões (autor do conteúdo e quem arquivou). */
+    private async montarNomesUsuariosVersoes(versoes: DocumentosVersoes[]): Promise<Record<number, string>> {
+        const ids = [
+            ...new Set(
+                versoes.flatMap((versao) => [versao.conteudo_alterado_por, versao.criado_por]).filter((id): id is number => typeof id === 'number' && id > 0),
+            ),
+        ];
+        if (ids.length === 0) return {};
+        try {
+            const usuarios = await this.uow.usuariosRP.find({
+                where: { id: In(ids) },
+                select: ['id', 'nome'],
+                withDeleted: true,
+            });
+            return Object.fromEntries(usuarios.map((usuario) => [usuario.id, usuario.nome]));
+        } catch (error) {
+            this.logger.warn(
+                `doc.versoes.usuarios | Falha ao resolver nomes de usuários das versões: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+            return {};
+        }
+    }
+
+    private mapVersaoToResumoDto(versao: DocumentosVersoes, nomesUsuarios: Record<number, string>): DocumentoVersaoResumoDto {
+        return {
+            id: versao.id,
+            versao: versao.versao,
+            documento: versao.documento,
+            tipo_documento: versao.tipo_documento,
+            total_campos: Array.isArray(versao.campos) ? versao.campos.length : 0,
+            conteudo_alterado_em: versao.conteudo_alterado_em ?? null,
+            conteudo_alterado_por_nome: (versao.conteudo_alterado_por && nomesUsuarios[versao.conteudo_alterado_por]) || null,
+            arquivada_em: versao.criado_em,
+            arquivada_por_nome: (versao.criado_por && nomesUsuarios[versao.criado_por]) || null,
+        };
+    }
+
+    /** Lista o histórico de versões arquivadas de um documento (mais recentes primeiro). */
+    async listarVersoesDocumento(id: number): Promise<DocumentoVersoesListResponseDto> {
+        const documento = await this.uow.documentosRP.findOne({ where: { id, deletado_em: null } });
+        if (!documento) {
+            throw new NotFoundException('Documento não encontrado');
+        }
+
+        const versoes = await this.uow.documentosVersoesRP.find({
+            where: { id_documento: id },
+            order: { versao: 'DESC', id: 'DESC' },
+        });
+        const nomesUsuarios = await this.montarNomesUsuariosVersoes(versoes);
+
+        return {
+            id_documento: documento.id,
+            documento: documento.documento,
+            versao_atual: documento.versao || 1,
+            data: versoes.map((versao) => this.mapVersaoToResumoDto(versao, nomesUsuarios)),
+        };
+    }
+
+    /** Conteúdo completo de uma versão arquivada (pré-visualização no histórico). */
+    async getVersaoDocumento(id: number, idVersao: number): Promise<DocumentoVersaoDetalheDto> {
+        const versao = await this.uow.documentosVersoesRP.findOne({
+            where: { id: idVersao, id_documento: id },
+        });
+        if (!versao) {
+            throw new NotFoundException('Versão do documento não encontrada');
+        }
+        const nomesUsuarios = await this.montarNomesUsuariosVersoes([versao]);
+        return {
+            ...this.mapVersaoToResumoDto(versao, nomesUsuarios),
+            campos: versao.campos || [],
+            clausulas: versao.clausulas || '',
+            treinamentos_relacionados: versao.treinamentos_relacionados || [],
+        };
+    }
+
+    /**
+     * Restaura uma versão arquivada: o estado atual é arquivado como uma nova
+     * versão (nada se perde) e o conteúdo da versão escolhida volta a vigorar,
+     * com a versão vigente incrementada.
+     */
+    async restaurarVersaoDocumento(id: number, idVersao: number, userId?: number): Promise<DocumentoResponseDto> {
+        const documento = await this.uow.documentosRP.findOne({ where: { id, deletado_em: null } });
+        if (!documento) {
+            throw new NotFoundException('Documento não encontrado');
+        }
+        const versao = await this.uow.documentosVersoesRP.findOne({
+            where: { id: idVersao, id_documento: id },
+        });
+        if (!versao) {
+            throw new NotFoundException('Versão do documento não encontrada');
+        }
+
+        // Arquiva o estado atual antes de sobrescrevê-lo com a versão restaurada.
+        await this.arquivarVersaoDocumento(documento);
+
+        documento.documento = versao.documento ?? documento.documento;
+        documento.campos = versao.campos || [];
+        documento.clausulas = versao.clausulas || '';
+        documento.treinamentos_relacionados = versao.treinamentos_relacionados || [];
+        if (versao.tipo_documento && Object.values(ETipoDocumento).includes(versao.tipo_documento as ETipoDocumento)) {
+            documento.tipo_documento = versao.tipo_documento as ETipoDocumento;
+        }
+        documento.versao = (documento.versao || 1) + 1;
+        documento.atualizado_por = userId;
+        documento.atualizado_em = new Date();
+
+        const savedDocumento = await this.uow.documentosRP.save(documento);
+        this.logger.log(`doc.versoes.restore | Documento ${id} restaurado para a versão ${versao.versao} (nova versão ${savedDocumento.versao})`);
+
+        const nomesUsuarios = await this.montarNomesUsuariosDocumentos([savedDocumento]);
+        return this.mapToResponseDto(savedDocumento, nomesUsuarios);
     }
 
     async deleteDocumento(id: number, userId?: number): Promise<void> {
@@ -7226,6 +7366,7 @@ export class DocumentosService {
             criado_por: documento.criado_por,
             atualizado_por: documento.atualizado_por,
             atualizado_por_nome: (idUltimaAlteracao && nomesUsuarios?.[idUltimaAlteracao]) || null,
+            versao: documento.versao || 1,
             deletado_em: documento.deletado_em,
         };
     }
@@ -7235,13 +7376,7 @@ export class DocumentosService {
      * documentos (log "quem e quando alterou" exibido nos cards de documentos).
      */
     private async montarNomesUsuariosDocumentos(documentos: Documentos[]): Promise<Record<number, string>> {
-        const ids = [
-            ...new Set(
-                documentos
-                    .flatMap((doc) => [doc.atualizado_por, doc.criado_por])
-                    .filter((id): id is number => typeof id === 'number' && id > 0),
-            ),
-        ];
+        const ids = [...new Set(documentos.flatMap((doc) => [doc.atualizado_por, doc.criado_por]).filter((id): id is number => typeof id === 'number' && id > 0))];
         if (ids.length === 0) return {};
         try {
             const usuarios = await this.uow.usuariosRP.find({
@@ -7252,9 +7387,7 @@ export class DocumentosService {
             return Object.fromEntries(usuarios.map((usuario) => [usuario.id, usuario.nome]));
         } catch (error) {
             this.logger.warn(
-                `doc.repo.usuarios | Falha ao resolver nomes de usuários dos documentos: ${
-                    error instanceof Error ? error.message : 'Erro desconhecido'
-                }`,
+                `doc.repo.usuarios | Falha ao resolver nomes de usuários dos documentos: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
             );
             return {};
         }

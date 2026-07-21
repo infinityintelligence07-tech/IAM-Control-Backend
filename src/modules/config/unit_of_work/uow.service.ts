@@ -5,6 +5,7 @@ import { Repository, EntityManager, DataSource, QueryRunner } from 'typeorm';
 /*                             Postgres Entities                             */
 import { Alunos } from '../entities/alunos.entity';
 import { Documentos } from '../entities/documentos.entity';
+import { DocumentosVersoes } from '../entities/documentosVersoes.entity';
 import { PasswordRecoveryTokens } from '../entities/passwordRecoveryTokens.entity';
 import { Polos } from '../entities/polos.entity';
 import { Produtos } from '../entities/produtos.entity';
@@ -123,6 +124,12 @@ export class UnitOfWorkService {
     get documentosRP(): Repository<Documentos> {
         if (!this._documentosRP) this._documentosRP = this.postgresEM.getRepository(Documentos);
         return this._documentosRP;
+    }
+
+    private _documentosVersoesRP?: Repository<DocumentosVersoes>;
+    get documentosVersoesRP(): Repository<DocumentosVersoes> {
+        if (!this._documentosVersoesRP) this._documentosVersoesRP = this.postgresEM.getRepository(DocumentosVersoes);
+        return this._documentosVersoesRP;
     }
 
     private _passRecTokenRP?: Repository<PasswordRecoveryTokens>;

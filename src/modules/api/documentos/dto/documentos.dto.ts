@@ -90,7 +90,38 @@ export class DocumentoResponseDto {
     atualizado_por?: number;
     /** Nome do usuário que realizou a última alteração (log exibido no card). */
     atualizado_por_nome?: string | null;
+    /** Versão vigente do documento (histórico em documentos_versoes). */
+    versao?: number;
     deletado_em?: Date;
+}
+
+/** Resumo de uma versão arquivada do documento (histórico de alterações). */
+export class DocumentoVersaoResumoDto {
+    id: number;
+    versao: number;
+    documento: string;
+    tipo_documento: string;
+    total_campos: number;
+    /** Quem e quando produziu o conteúdo desta versão. */
+    conteudo_alterado_em: Date | null;
+    conteudo_alterado_por_nome: string | null;
+    /** Quando esta versão foi substituída (arquivada) e por quem. */
+    arquivada_em: Date;
+    arquivada_por_nome: string | null;
+}
+
+/** Conteúdo completo de uma versão arquivada (para pré-visualizar/restaurar). */
+export class DocumentoVersaoDetalheDto extends DocumentoVersaoResumoDto {
+    campos: CampoDocumentoDto[];
+    clausulas: string;
+    treinamentos_relacionados: number[];
+}
+
+export class DocumentoVersoesListResponseDto {
+    id_documento: number;
+    documento: string;
+    versao_atual: number;
+    data: DocumentoVersaoResumoDto[];
 }
 
 export class DocumentosListResponseDto {

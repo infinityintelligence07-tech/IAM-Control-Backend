@@ -27,6 +27,11 @@ export class Documentos extends BaseEntity {
     @Column({ type: 'jsonb', name: 'treinamentos_relacionados', nullable: true })
     treinamentos_relacionados: number[];
 
+    // Versão vigente do documento (incrementada a cada edição/restauração;
+    // versões anteriores ficam arquivadas em documentos_versoes).
+    @Column({ type: 'int', name: 'versao', nullable: false, default: 1 })
+    versao: number;
+
     @OneToMany(() => Alunos, (alunos) => alunos.id_polo_fk)
     alunos: Alunos[];
 

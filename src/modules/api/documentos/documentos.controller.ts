@@ -6,6 +6,8 @@ import {
     UpdateDocumentoDto,
     DocumentoResponseDto,
     DocumentosListResponseDto,
+    DocumentoVersaoDetalheDto,
+    DocumentoVersoesListResponseDto,
     DocumentosFilterDto,
     CriarContratoZapSignDto,
     RespostaContratoZapSignDto,
@@ -75,6 +77,32 @@ export class DocumentosController {
         const userId = (req.user as any)?.sub;
         await this.documentosService.deleteDocumento(id, userId);
         return { message: 'Documento removido com sucesso' };
+    }
+
+    // Histórico de versões do documento (controle de versão dos modelos).
+    @Get(':id/versoes')
+    @UseGuards(JwtAuthGuard)
+    async listarVersoesDocumento(@Param('id', ParseIntPipe) id: number): Promise<DocumentoVersoesListResponseDto> {
+        return this.documentosService.listarVersoesDocumento(id);
+    }
+
+    @Get(':id/versoes/:idVersao')
+    @UseGuards(JwtAuthGuard)
+    async getVersaoDocumento(@Param('id', ParseIntPipe) id: number, @Param('idVersao', ParseIntPipe) idVersao: number): Promise<DocumentoVersaoDetalheDto> {
+        return this.documentosService.getVersaoDocumento(id, idVersao);
+    }
+
+    // Restaurar versão anterior: mesma permissão da edição do documento.
+    @Post(':id/versoes/:idVersao/restaurar')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'documentos', action: 'edit' })
+    async restaurarVersaoDocumento(
+        @Param('id', ParseIntPipe) id: number,
+        @Param('idVersao', ParseIntPipe) idVersao: number,
+        @Req() req: Request,
+    ): Promise<DocumentoResponseDto> {
+        const userId = (req.user as any)?.sub;
+        return this.documentosService.restaurarVersaoDocumento(id, idVersao, userId);
     }
 
     @Get('contratos')

@@ -814,7 +814,7 @@ export class TurmasService {
         id_turma: number,
         idAcessora: number | null,
         userId?: number,
-    ): Promise<{ id_acessora: number | null; acessora: { id: number; nome: string } | null }> {
+    ): Promise<{ id_acessora: number | null; acessora: { id: number; nome: string } | null; acessora_definida_em: Date | null }> {
         if (!userId) {
             throw new ForbiddenException('Não autorizado');
         }
@@ -857,6 +857,8 @@ export class TurmasService {
         }
 
         turma.id_acessora = idAcessora ?? null;
+        // Registra quando a acessora foi definida (removida = limpa a data).
+        turma.acessora_definida_em = idAcessora ? new Date() : null;
         turma.atualizado_por = userId;
         turma.atualizado_em = new Date();
         await this.uow.turmasRP.save(turma);
@@ -864,6 +866,7 @@ export class TurmasService {
         return {
             id_acessora: turma.id_acessora,
             acessora: acessora ? { id: acessora.id, nome: acessora.nome } : null,
+            acessora_definida_em: turma.acessora_definida_em,
         };
     }
 
@@ -1938,6 +1941,7 @@ export class TurmasService {
                               nome: turma.id_acessora_fk.nome,
                           }
                         : null,
+                    acessora_definida_em: turma.acessora_definida_em ?? null,
                     meta_pico_inscritos: picosPorTurma[turma.id]?.meta_pico_inscritos ?? null,
                     meta_pico_extras: picosPorTurma[turma.id]?.meta_pico_extras ?? null,
                     // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, contagens agregadas
@@ -2059,6 +2063,7 @@ export class TurmasService {
                           nome: turma.id_acessora_fk.nome,
                       }
                     : null,
+                acessora_definida_em: turma.acessora_definida_em ?? null,
                 // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
                 alunos_count: alunosCountCalc,
                 alunos_inscricoes_extras_count: extrasCountCalc,

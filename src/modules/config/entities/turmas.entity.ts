@@ -47,6 +47,10 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'id_acessora', nullable: true })
     id_acessora: number | null;
 
+    // Quando a acessora atual foi definida (limpo ao remover a acessora).
+    @Column({ type: 'timestamp', name: 'acessora_definida_em', nullable: true })
+    acessora_definida_em: Date | null;
+
     @Column({ type: 'varchar', name: 'edicao_turma', nullable: true })
     edicao_turma: string;
 

@@ -733,6 +733,8 @@ export class TurmaResponseDto {
         id: number;
         nome: string;
     } | null;
+    /** Quando a acessora atual foi definida (null quando não há acessora). */
+    acessora_definida_em?: Date | string | null;
     alunos_count?: number;
     alunos_inscricoes_extras_count?: number;
     alunos_confirmados_count?: number;

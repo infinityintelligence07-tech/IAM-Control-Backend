@@ -563,6 +563,24 @@ export class DemografiaFatiaDto {
     percentual: number;
 }
 
+export class DemografiaEstadoDto {
+    uf: string;
+    nome: string;
+    quantidade: number;
+    percentual: number;
+}
+
+export class DemografiaPoloDto {
+    id_polo: number | null;
+    polo: string;
+    sigla_polo: string | null;
+    cidade: string | null;
+    uf: string;
+    estado_nome: string;
+    quantidade: number;
+    percentual: number;
+}
+
 export class GetDemografiaDto {
     @IsOptional()
     @IsString()
@@ -588,7 +606,11 @@ export class DemografiaAlunosResponseDto {
     total: number;
     porGenero: DemografiaFatiaDto[];
     porFaixaEtaria: DemografiaFatiaDto[];
+    /** @deprecated preferir porEstado/porPolo — mantido vazio por compatibilidade */
     porLocal: DemografiaFatiaDto[];
+    porEstado: DemografiaEstadoDto[];
+    porPolo: DemografiaPoloDto[];
+    semPolo: number;
     porPresenca: DemografiaFatiaDto[];
     porVendas: DemografiaFatiaDto[];
     totalMatriculas: number;

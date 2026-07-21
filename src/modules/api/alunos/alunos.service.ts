@@ -13,6 +13,8 @@ import {
     AlunoEmpresaResponseDto,
     DemografiaAlunosResponseDto,
     DemografiaFatiaDto,
+    DemografiaEstadoDto,
+    DemografiaPoloDto,
     GetDemografiaDto,
 } from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike, IsNull, Not, In } from 'typeorm';
@@ -146,6 +148,102 @@ export class AlunosService {
         return cidadeNorm || estadoNorm;
     }
 
+    private static readonly UF_POR_NOME: Record<string, string> = {
+        ACRE: 'AC',
+        ALAGOAS: 'AL',
+        AMAPA: 'AP',
+        AMAPÁ: 'AP',
+        AMAZONAS: 'AM',
+        BAHIA: 'BA',
+        CEARA: 'CE',
+        CEARÁ: 'CE',
+        'DISTRITO FEDERAL': 'DF',
+        'ESPIRITO SANTO': 'ES',
+        'ESPÍRITO SANTO': 'ES',
+        GOIAS: 'GO',
+        GOIÁS: 'GO',
+        MARANHAO: 'MA',
+        MARANHÃO: 'MA',
+        'MATO GROSSO': 'MT',
+        'MATO GROSSO DO SUL': 'MS',
+        'MINAS GERAIS': 'MG',
+        PARA: 'PA',
+        PARÁ: 'PA',
+        PARAIBA: 'PB',
+        PARAÍBA: 'PB',
+        PARANA: 'PR',
+        PARANÁ: 'PR',
+        PERNAMBUCO: 'PE',
+        PIAUI: 'PI',
+        PIAUÍ: 'PI',
+        'RIO DE JANEIRO': 'RJ',
+        'RIO GRANDE DO NORTE': 'RN',
+        'RIO GRANDE DO SUL': 'RS',
+        RONDONIA: 'RO',
+        RONDÔNIA: 'RO',
+        RORAIMA: 'RR',
+        'SANTA CATARINA': 'SC',
+        'SAO PAULO': 'SP',
+        'SÃO PAULO': 'SP',
+        SERGIPE: 'SE',
+        TOCANTINS: 'TO',
+    };
+
+    private static readonly NOME_POR_UF: Record<string, string> = {
+        AC: 'Acre',
+        AL: 'Alagoas',
+        AP: 'Amapá',
+        AM: 'Amazonas',
+        BA: 'Bahia',
+        CE: 'Ceará',
+        DF: 'Distrito Federal',
+        ES: 'Espírito Santo',
+        GO: 'Goiás',
+        MA: 'Maranhão',
+        MT: 'Mato Grosso',
+        MS: 'Mato Grosso do Sul',
+        MG: 'Minas Gerais',
+        PA: 'Pará',
+        PB: 'Paraíba',
+        PR: 'Paraná',
+        PE: 'Pernambuco',
+        PI: 'Piauí',
+        RJ: 'Rio de Janeiro',
+        RN: 'Rio Grande do Norte',
+        RS: 'Rio Grande do Sul',
+        RO: 'Rondônia',
+        RR: 'Roraima',
+        SC: 'Santa Catarina',
+        SP: 'São Paulo',
+        SE: 'Sergipe',
+        TO: 'Tocantins',
+    };
+
+    private normalizarUf(estado?: string | null): string | null {
+        const raw = String(estado || '')
+            .trim()
+            .toUpperCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+        if (!raw) return null;
+        if (/^[A-Z]{2}$/.test(raw)) {
+            return AlunosService.NOME_POR_UF[raw] ? raw : null;
+        }
+        const semAcentoKey = raw;
+        const comAcento = String(estado || '')
+            .trim()
+            .toUpperCase();
+        return (
+            AlunosService.UF_POR_NOME[comAcento] ||
+            AlunosService.UF_POR_NOME[semAcentoKey] ||
+            null
+        );
+    }
+
+    private nomeEstadoPorUf(uf: string): string {
+        return AlunosService.NOME_POR_UF[uf] || uf;
+    }
+
     /** Top N locais + Outros + Não informado (quando houver). */
     private montarFatiasLocais(
         contagem: Map<string, number>,
@@ -258,6 +356,9 @@ export class AlunosService {
                     porGenero: [],
                     porFaixaEtaria: [],
                     porLocal: [],
+                    porEstado: [],
+                    porPolo: [],
+                    semPolo: 0,
                     porPresenca: [],
                     porVendas: [],
                     totalMatriculas: 0,
@@ -271,8 +372,14 @@ export class AlunosService {
 
         const alunos = await this.uow.alunosRP.find({
             where: alunosWhere,
-            select: ['id', 'genero', 'data_nascimento', 'cidade', 'estado'],
+            select: ['id', 'genero', 'data_nascimento', 'cidade', 'estado', 'id_polo'],
         });
+
+        const polos = await this.uow.polosRP.find({
+            where: { deletado_em: IsNull() },
+            select: ['id', 'polo', 'sigla_polo', 'cidade', 'estado'],
+        });
+        const poloPorId = new Map(polos.map((p) => [p.id, p]));
 
         const total = alunos.length;
         const generoOrdem = ['Masculino', 'Feminino', 'Não informado'];
@@ -280,7 +387,8 @@ export class AlunosService {
 
         const contagemGenero = new Map<string, number>(generoOrdem.map((l) => [l, 0]));
         const contagemFaixa = new Map<string, number>(faixaOrdem.map((l) => [l, 0]));
-        const contagemLocal = new Map<string, number>();
+        const contagemPorPoloId = new Map<number, number>();
+        let semPolo = 0;
 
         for (const aluno of alunos) {
             const generoRaw = String(aluno.genero || '').trim();
@@ -293,8 +401,14 @@ export class AlunosService {
             const faixa = this.faixaEtariaLabel(this.calcularIdadeAnos(aluno.data_nascimento));
             contagemFaixa.set(faixa, (contagemFaixa.get(faixa) || 0) + 1);
 
-            const local = this.localLabel(aluno.cidade, aluno.estado);
-            contagemLocal.set(local, (contagemLocal.get(local) || 0) + 1);
+            if (aluno.id_polo != null && poloPorId.has(aluno.id_polo)) {
+                contagemPorPoloId.set(
+                    aluno.id_polo,
+                    (contagemPorPoloId.get(aluno.id_polo) || 0) + 1,
+                );
+            } else {
+                semPolo += 1;
+            }
         }
 
         const porGenero = this.montarFatias(contagemGenero, generoOrdem, total).filter(
@@ -303,7 +417,47 @@ export class AlunosService {
         const porFaixaEtaria = this.montarFatias(contagemFaixa, faixaOrdem, total).filter(
             (f) => f.quantidade > 0,
         );
-        const porLocal = this.montarFatiasLocais(contagemLocal, total);
+
+        const porPolo: DemografiaPoloDto[] = [];
+        const contagemPorUf = new Map<string, number>();
+
+        for (const [idPoloItem, quantidade] of contagemPorPoloId.entries()) {
+            const polo = poloPorId.get(idPoloItem);
+            if (!polo) continue;
+            const uf = this.normalizarUf(polo.estado) || 'NI';
+            const estadoNome = uf === 'NI' ? 'Não identificado' : this.nomeEstadoPorUf(uf);
+            porPolo.push({
+                id_polo: polo.id,
+                polo: polo.polo,
+                sigla_polo: polo.sigla_polo || null,
+                cidade: polo.cidade || null,
+                uf,
+                estado_nome: estadoNome,
+                quantidade,
+                percentual: total > 0 ? Number(((quantidade / total) * 100).toFixed(1)) : 0,
+            });
+            contagemPorUf.set(uf, (contagemPorUf.get(uf) || 0) + quantidade);
+        }
+
+        porPolo.sort(
+            (a, b) =>
+                b.quantidade - a.quantidade ||
+                a.polo.localeCompare(b.polo, 'pt-BR'),
+        );
+
+        const porEstado: DemografiaEstadoDto[] = [...contagemPorUf.entries()]
+            .map(([uf, quantidade]) => ({
+                uf,
+                nome: uf === 'NI' ? 'Não identificado' : this.nomeEstadoPorUf(uf),
+                quantidade,
+                percentual: total > 0 ? Number(((quantidade / total) * 100).toFixed(1)) : 0,
+            }))
+            .sort(
+                (a, b) =>
+                    b.quantidade - a.quantidade || a.nome.localeCompare(b.nome, 'pt-BR'),
+            );
+
+        const porLocal: DemografiaFatiaDto[] = [];
 
         // ---- Presença (matrículas em turmas) ----
         const presencaQb = this.uow.turmasAlunosRP
@@ -445,6 +599,9 @@ export class AlunosService {
             porGenero,
             porFaixaEtaria,
             porLocal,
+            porEstado,
+            porPolo,
+            semPolo,
             porPresenca,
             porVendas,
             totalMatriculas,

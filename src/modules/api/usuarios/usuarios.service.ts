@@ -2,8 +2,6 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
 import { ILike, IsNull, Not, ArrayContains, Raw } from 'typeorm';
-import { Usuarios } from '../../config/entities/usuarios.entity';
-import { ESetores, EFuncoes } from '../../config/entities/enum';
 
 @Injectable()
 export class UsuariosService {
@@ -60,7 +58,7 @@ export class UsuariosService {
         }
 
         if (setor) {
-            whereConditions.setor = setor;
+            whereConditions.setor = ArrayContains([setor]);
         }
 
         if (funcao) {
@@ -231,7 +229,11 @@ export class UsuariosService {
             }
 
             if (updateUsuarioDto.setor !== undefined) {
-                usuario.setor = updateUsuarioDto.setor;
+                const setores = updateUsuarioDto.setor;
+                if (!Array.isArray(setores) || setores.length === 0) {
+                    throw new BadRequestException('Informe ao menos um setor');
+                }
+                usuario.setor = setores;
             }
 
             if (updateUsuarioDto.funcao !== undefined) {

@@ -1,6 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../modules/config/unit_of_work/uow.service';
 import { EFuncoes, ESetores } from '../../modules/config/entities/enum';
+import { userHasAnySetor } from '../utils/setor.util';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -38,9 +39,9 @@ export class RolesGuard implements CanActivate {
                 allowedFunctions.length === 0 ||
                 allowedFunctions.some((funcao) => usuario.funcao && Array.isArray(usuario.funcao) && usuario.funcao.includes(funcao));
 
-            // Verificar setores permitidos
+            // Verificar setores permitidos (interseção com os setores do usuário)
             const allowedSectors = this.getAllowedSectors(request);
-            const hasSector = allowedSectors.length === 0 || allowedSectors.includes(usuario.setor);
+            const hasSector = allowedSectors.length === 0 || userHasAnySetor(usuario, allowedSectors);
 
             // Verificar se tem função E setor (se ambos estiverem definidos)
             if (allowedFunctions.length > 0 && allowedSectors.length > 0) {

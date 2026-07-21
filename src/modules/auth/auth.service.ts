@@ -8,6 +8,7 @@ import { MailService } from '../mail/mail.service';
 import { PasswordValidator } from '../../common/validators/password.validator';
 import { EncryptionService } from '../../common/services/encryption.service';
 import { EFuncoes, ESetores } from '../config/entities/enum';
+import { normalizeSetores } from '../../common/utils/setor.util';
 
 @Injectable()
 export class AuthService {
@@ -31,7 +32,7 @@ export class AuthService {
         email: string,
         senha: string,
         telefone: string,
-        setor: ESetores,
+        setor: ESetores | ESetores[],
         funcao?: EFuncoes[],
         provider: 'google' | 'credentials' = 'credentials',
         providerId?: string,
@@ -57,6 +58,11 @@ export class AuthService {
         // Para credenciais normais, criptografamos a senha
         const hash = await bcrypt.hash(plainSecret, 10);
 
+        const setores = normalizeSetores(setor);
+        if (setores.length === 0) {
+            throw new BadRequestException('Informe ao menos um setor');
+        }
+
         const user = this.uow.usuariosRP.create({
             nome: fullName,
             primeiro_nome,
@@ -64,7 +70,7 @@ export class AuthService {
             email,
             senha: hash,
             telefone,
-            setor,
+            setor: setores,
             funcao: funcao || [EFuncoes.COLABORADOR],
             url_foto: picture,
             provider: provider,
@@ -90,7 +96,7 @@ export class AuthService {
             primeiro_nome: string;
             sobrenome: string;
             telefone: string;
-            setor: ESetores;
+            setor: ESetores[];
             url_foto?: string;
             provider: string;
         };
@@ -121,7 +127,7 @@ export class AuthService {
                     primeiro_nome: exists.primeiro_nome,
                     sobrenome: exists.sobrenome,
                     telefone: exists.telefone,
-                    setor: exists.setor,
+                    setor: normalizeSetores(exists.setor),
                     url_foto: exists.url_foto,
                     provider: exists.provider || 'google',
                 },
@@ -134,7 +140,7 @@ export class AuthService {
                 email,
                 providerId,
                 '', // telefone vazio para Google OAuth
-                ESetores.CUIDADO_DE_ALUNOS, // setor padrão
+                [ESetores.CUIDADO_DE_ALUNOS], // setor padrão
                 undefined, // função não definida para Google OAuth
                 'google',
                 providerId,
@@ -168,7 +174,7 @@ export class AuthService {
                 primeiro_nome: user.primeiro_nome,
                 sobrenome: user.sobrenome,
                 telefone: user.telefone,
-                setor: user.setor,
+                setor: normalizeSetores(user.setor),
                 funcao: user.funcao,
                 url_foto: user.url_foto,
             },
@@ -209,7 +215,11 @@ export class AuthService {
         });
         this.ensureUserApproved(user?.aprovado);
 
-        return user;
+        if (!user) return user;
+        return {
+            ...user,
+            setor: normalizeSetores(user.setor),
+        };
     }
 
     async requestPasswordReset(email: string, frontendUrl: string) {
@@ -313,7 +323,7 @@ export class AuthService {
         sobrenome: string,
         email: string,
         telefone: string,
-        setor: ESetores,
+        setor: ESetores | ESetores[],
         funcao: EFuncoes[],
         cep?: string,
         logradouro?: string,
@@ -394,13 +404,18 @@ export class AuthService {
                 console.log('Email não mudou, pulando validação de duplicação');
             }
 
+            const setores = normalizeSetores(setor);
+            if (setores.length === 0) {
+                throw new BadRequestException('Informe ao menos um setor');
+            }
+
             // Usar updateQueryBuilder para atualizar apenas os campos necessários
             const updateData: any = {
                 primeiro_nome,
                 sobrenome,
                 nome: `${primeiro_nome} ${sobrenome}`,
                 telefone,
-                setor,
+                setor: setores,
                 funcao,
                 atualizado_em: new Date(),
             };
@@ -478,7 +493,7 @@ export class AuthService {
                     sobrenome: updatedUser.sobrenome,
                     email: updatedUser.email,
                     telefone: updatedUser.telefone,
-                    setor: updatedUser.setor,
+                    setor: normalizeSetores(updatedUser.setor),
                     funcao: updatedUser.funcao,
                     url_foto: updatedUser.url_foto,
                     cep: updatedUser.cep,

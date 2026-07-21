@@ -45,8 +45,8 @@ export class Usuarios extends BaseEntity {
     @Column({ type: 'varchar', name: 'senha', nullable: false })
     senha: string;
 
-    @Column({ type: 'enum', enum: ESetores, enumName: 'ESetores', name: 'setor', default: ESetores.CUIDADO_DE_ALUNOS, nullable: false })
-    setor: ESetores;
+    @Column({ type: 'enum', enum: ESetores, enumName: 'ESetores', name: 'setor', array: true, nullable: false, default: [ESetores.CUIDADO_DE_ALUNOS] })
+    setor: ESetores[];
 
     @Column({ type: 'enum', enum: EFuncoes, enumName: 'EFuncoes', name: 'funcao', array: true, nullable: false, default: [EFuncoes.COLABORADOR] })
     funcao: EFuncoes[];

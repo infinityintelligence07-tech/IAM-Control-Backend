@@ -1,6 +1,7 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsArray, IsEmail, IsNotEmpty } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsEnum, IsArray, ArrayMinSize, IsEmail, IsNotEmpty } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ESetores, EFuncoes } from '../../../config/entities/enum';
+import { normalizeSetores } from '../../../../common/utils/setor.util';
 
 export class GetUsuariosDto {
     @IsOptional()
@@ -44,7 +45,7 @@ export class UsuarioResponseDto {
     email: string;
     cpf?: string;
     telefone: string;
-    setor: ESetores;
+    setor: ESetores[];
     funcao: EFuncoes[];
     url_foto?: string;
     aprovado: boolean;
@@ -84,8 +85,11 @@ export class UpdateUsuarioDto {
     telefone?: string;
 
     @IsOptional()
-    @IsEnum(ESetores)
-    setor?: ESetores;
+    @Transform(({ value }) => (value === undefined ? undefined : normalizeSetores(value)))
+    @IsArray({ message: 'Setor deve ser uma lista' })
+    @ArrayMinSize(1, { message: 'Informe ao menos um setor' })
+    @IsEnum(ESetores, { each: true })
+    setor?: ESetores[];
 
     @IsOptional()
     @IsArray()

@@ -3,6 +3,7 @@ import { In } from 'typeorm';
 
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { ESetores } from '@/modules/config/entities/enum';
+import { normalizeSetores, userHasSetor } from '@/common/utils/setor.util';
 import { NotificacaoResponseDto, NotificacoesListResponseDto } from './dto/notificacoes.dto';
 
 /** Janela de exibição das notificações: última quinzena (15 dias). */
@@ -60,7 +61,7 @@ export class NotificacoesService {
         }
 
         const funcoes = Array.isArray(usuario.funcao) ? usuario.funcao : [];
-        const isAdmin = funcoes.includes('ADMINISTRADOR' as any) || usuario.setor === ESetores.ADMINISTRADOR;
+        const isAdmin = funcoes.includes('ADMINISTRADOR' as any) || userHasSetor(usuario, ESetores.ADMINISTRADOR);
 
         const dataLimite = new Date();
         dataLimite.setDate(dataLimite.getDate() - JANELA_NOTIFICACOES_DIAS);
@@ -72,7 +73,11 @@ export class NotificacoesService {
             .orderBy('notificacao.criado_em', 'DESC');
 
         if (!isAdmin) {
-            query.andWhere('notificacao.setor_destino = :setor', { setor: usuario.setor });
+            const setoresUsuario = normalizeSetores(usuario.setor).map(String);
+            if (setoresUsuario.length === 0) {
+                return { data: [], total: 0, nao_lidas: 0 };
+            }
+            query.andWhere('notificacao.setor_destino IN (:...setoresUsuario)', { setoresUsuario });
         }
 
         const notificacoes = await query.getMany();

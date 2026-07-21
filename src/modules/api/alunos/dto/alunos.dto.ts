@@ -556,3 +556,15 @@ export class AlunoEmpresaResponseDto {
     cidade: string | null;
     estado: string | null;
 }
+
+export class DemografiaFatiaDto {
+    label: string;
+    quantidade: number;
+    percentual: number;
+}
+
+export class DemografiaAlunosResponseDto {
+    total: number;
+    porGenero: DemografiaFatiaDto[];
+    porFaixaEtaria: DemografiaFatiaDto[];
+}

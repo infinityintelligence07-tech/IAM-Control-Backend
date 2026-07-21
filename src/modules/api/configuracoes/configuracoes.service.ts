@@ -3,6 +3,7 @@ import { In } from 'typeorm';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { ESetores } from '../../config/entities/enum';
 import { ConfiguracoesResponseDto, UpdateConfiguracoesDto } from './dto/configuracoes.dto';
+import { userHasSetor } from '@/common/utils/setor.util';
 
 /**
  * Chaves de configuração conhecidas e seus valores padrão de fallback.
@@ -122,7 +123,7 @@ export class ConfiguracoesService {
         }
 
         if (exigirCuidadoDeAlunos) {
-            const foraDoSetor = usuarios.filter((u) => u.setor !== ESetores.CUIDADO_DE_ALUNOS);
+            const foraDoSetor = usuarios.filter((u) => !userHasSetor(u, ESetores.CUIDADO_DE_ALUNOS));
             if (foraDoSetor.length > 0) {
                 const nomes = foraDoSetor.map((u) => u.nome).join(', ');
                 throw new BadRequestException(

@@ -11,9 +11,11 @@ import {
     AlunoVinculoResponseDto,
     SaveAlunoEmpresasDto,
     AlunoEmpresaResponseDto,
+    DemografiaAlunosResponseDto,
 } from './dto/alunos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
+import { AdminOrLiderGuard } from '@/modules/auth/guards/admin-or-lider.guard';
 import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 
 // Leitura, criação e edição de alunos ficam liberadas a qualquer autenticado:
@@ -30,6 +32,13 @@ export class AlunosController {
     async findAll(@Query() filters: GetAlunosDto): Promise<AlunosListResponseDto> {
         console.log('Buscando alunos com filtros:', filters);
         return this.alunosService.findAll(filters);
+    }
+
+    /** Demografia agregada — somente Admin ou Líder. Deve ficar antes de :id. */
+    @Get('demografia')
+    @UseGuards(AdminOrLiderGuard)
+    async getDemografia(): Promise<DemografiaAlunosResponseDto> {
+        return this.alunosService.getDemografia();
     }
 
     @Get(':id/vinculos')

@@ -1,6 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EFuncoes } from '../../config/entities/enum';
+import { userHasSetor } from '../../../common/utils/setor.util';
 
 @Injectable()
 export class AdminOrLiderGuard implements CanActivate {
@@ -29,7 +30,7 @@ export class AdminOrLiderGuard implements CanActivate {
             const isAdmin =
                 funcoes.includes(String(EFuncoes.ADMINISTRADOR)) ||
                 funcoes.includes('ADMINISTRADOR') ||
-                String(usuario.setor || '').toUpperCase() === 'ADMINISTRADOR';
+                userHasSetor(usuario, 'ADMINISTRADOR');
 
             const liderFunctions: string[] = [
                 String(EFuncoes.LIDER),

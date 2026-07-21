@@ -1,5 +1,7 @@
-import { IsEmail, IsString, IsOptional, IsEnum, MinLength, MaxLength, Matches, ValidateIf } from 'class-validator';
+import { IsEmail, IsString, IsOptional, IsEnum, IsArray, ArrayMinSize, MinLength, MaxLength, Matches, ValidateIf } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ESetores, EFuncoes } from '../../modules/config/entities/enum';
+import { normalizeSetores } from '../utils/setor.util';
 
 export class SignupDto {
     @IsString()
@@ -27,8 +29,11 @@ export class SignupDto {
     @Matches(/^\(\d{2}\)\s\d{4,5}-\d{4}$/, { message: 'Telefone deve estar no formato (XX) XXXX-XXXX ou (XX) XXXXX-XXXX' })
     telefone: string;
 
-    @IsEnum(ESetores, { message: 'Setor inválido' })
-    setor: ESetores;
+    @Transform(({ value }) => normalizeSetores(value))
+    @IsArray({ message: 'Setor deve ser uma lista' })
+    @ArrayMinSize(1, { message: 'Informe ao menos um setor' })
+    @IsEnum(ESetores, { each: true, message: 'Setor inválido' })
+    setor: ESetores[];
 
     @IsOptional()
     @IsEnum(EFuncoes, { each: true, message: 'Função inválida' })

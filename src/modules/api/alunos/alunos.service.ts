@@ -11,6 +11,8 @@ import {
     AlunoVinculoResponseDto,
     SaveAlunoEmpresasDto,
     AlunoEmpresaResponseDto,
+    DemografiaAlunosResponseDto,
+    DemografiaFatiaDto,
 } from './dto/alunos.dto';
 import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
@@ -67,6 +69,102 @@ export class AlunosService {
             .getRawMany<{ id_aluno: string | number }>();
 
         return new Set<number>(rows.map((row) => Number(row.id_aluno)));
+    }
+
+    private calcularIdadeAnos(dataNascimento?: string | null): number | null {
+        if (dataNascimento == null || String(dataNascimento).trim() === '') {
+            return null;
+        }
+        const somenteData = String(dataNascimento).slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(somenteData)) {
+            return null;
+        }
+        const [ano, mes, dia] = somenteData.split('-').map(Number);
+        const nasc = new Date(ano, mes - 1, dia);
+        if (
+            Number.isNaN(nasc.getTime()) ||
+            nasc.getFullYear() !== ano ||
+            nasc.getMonth() !== mes - 1 ||
+            nasc.getDate() !== dia
+        ) {
+            return null;
+        }
+        const hoje = new Date();
+        let idade = hoje.getFullYear() - nasc.getFullYear();
+        const diffMes = hoje.getMonth() - nasc.getMonth();
+        if (diffMes < 0 || (diffMes === 0 && hoje.getDate() < nasc.getDate())) {
+            idade -= 1;
+        }
+        if (idade < 0 || idade > 120) {
+            return null;
+        }
+        return idade;
+    }
+
+    private faixaEtariaLabel(idade: number | null): string {
+        if (idade == null) return 'Não informado';
+        if (idade <= 17) return 'Até 17';
+        if (idade <= 24) return '18–24';
+        if (idade <= 34) return '25–34';
+        if (idade <= 44) return '35–44';
+        if (idade <= 54) return '45–54';
+        return '55+';
+    }
+
+    private montarFatias(
+        contagem: Map<string, number>,
+        ordem: string[],
+        total: number,
+    ): DemografiaFatiaDto[] {
+        return ordem
+            .map((label) => {
+                const quantidade = contagem.get(label) || 0;
+                return {
+                    label,
+                    quantidade,
+                    percentual: total > 0 ? Number(((quantidade / total) * 100).toFixed(1)) : 0,
+                };
+            })
+            .filter((fatia) => fatia.quantidade > 0 || fatia.label === 'Não informado');
+    }
+
+    /**
+     * Agrega demografia dos alunos ativos (gênero e faixa etária).
+     * Restrito a Admin/Líder via guard no controller.
+     */
+    async getDemografia(): Promise<DemografiaAlunosResponseDto> {
+        const alunos = await this.uow.alunosRP.find({
+            where: { deletado_em: IsNull() },
+            select: ['id', 'genero', 'data_nascimento'],
+        });
+
+        const total = alunos.length;
+        const generoOrdem = ['Masculino', 'Feminino', 'Não informado'];
+        const faixaOrdem = ['Até 17', '18–24', '25–34', '35–44', '45–54', '55+', 'Não informado'];
+
+        const contagemGenero = new Map<string, number>(generoOrdem.map((l) => [l, 0]));
+        const contagemFaixa = new Map<string, number>(faixaOrdem.map((l) => [l, 0]));
+
+        for (const aluno of alunos) {
+            const generoRaw = String(aluno.genero || '').trim();
+            const generoLabel =
+                generoRaw === 'Masculino' || generoRaw === 'Feminino'
+                    ? generoRaw
+                    : 'Não informado';
+            contagemGenero.set(generoLabel, (contagemGenero.get(generoLabel) || 0) + 1);
+
+            const faixa = this.faixaEtariaLabel(this.calcularIdadeAnos(aluno.data_nascimento));
+            contagemFaixa.set(faixa, (contagemFaixa.get(faixa) || 0) + 1);
+        }
+
+        const porGenero = this.montarFatias(contagemGenero, generoOrdem, total).filter(
+            (f) => f.quantidade > 0,
+        );
+        const porFaixaEtaria = this.montarFatias(contagemFaixa, faixaOrdem, total).filter(
+            (f) => f.quantidade > 0,
+        );
+
+        return { total, porGenero, porFaixaEtaria };
     }
 
     async findAll(filters: GetAlunosDto): Promise<AlunosListResponseDto> {

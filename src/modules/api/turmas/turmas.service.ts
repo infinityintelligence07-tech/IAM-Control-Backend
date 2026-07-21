@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { getRequestUserId } from '@/common/context/request-user.context';
+import { userHasSetor } from '@/common/utils/setor.util';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import {
     EFuncoes,
@@ -759,7 +760,7 @@ export class TurmasService {
 
     private isUsuarioAdministrador(usuario: Pick<Usuarios, 'setor' | 'funcao'> | null | undefined): boolean {
         const funcoes = Array.isArray(usuario?.funcao) ? usuario.funcao : [];
-        return funcoes.includes(EFuncoes.ADMINISTRADOR) || usuario?.setor === ESetores.ADMINISTRADOR;
+        return funcoes.includes(EFuncoes.ADMINISTRADOR) || userHasSetor(usuario, ESetores.ADMINISTRADOR);
     }
 
     private static readonly FUNCOES_LIDERANCA = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
@@ -788,7 +789,7 @@ export class TurmasService {
 
         if (this.isUsuarioAdministrador(usuario)) return;
 
-        if (usuario?.setor !== ESetores.CUIDADO_DE_ALUNOS) {
+        if (!userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS)) {
             throw new ForbiddenException(`Somente o time do Cuidado de Alunos pode ${acao} alunos da turma.`);
         }
 
@@ -823,7 +824,9 @@ export class TurmasService {
             select: ['id', 'setor', 'funcao'] as any,
         });
         const funcoes = Array.isArray(usuario?.funcao) ? usuario.funcao : [];
-        const isLiderCuidadoDeAlunos = usuario?.setor === ESetores.CUIDADO_DE_ALUNOS && TurmasService.FUNCOES_LIDERANCA.some((funcao) => funcoes.includes(funcao));
+        const isLiderCuidadoDeAlunos =
+            userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS) &&
+            TurmasService.FUNCOES_LIDERANCA.some((funcao) => funcoes.includes(funcao));
 
         if (!this.isUsuarioAdministrador(usuario) && !isLiderCuidadoDeAlunos) {
             throw new ForbiddenException('Somente a líder do Cuidado de Alunos pode definir a acessora da turma.');
@@ -843,7 +846,7 @@ export class TurmasService {
             if (!acessora) {
                 throw new NotFoundException('Acessora não encontrada');
             }
-            if (acessora.setor !== ESetores.CUIDADO_DE_ALUNOS) {
+            if (!userHasSetor(acessora, ESetores.CUIDADO_DE_ALUNOS)) {
                 throw new BadRequestException('A acessora da turma deve ser uma colaboradora do Cuidado de Alunos.');
             }
             // Se houver whitelist em Configurações, só aceita IDs da lista.

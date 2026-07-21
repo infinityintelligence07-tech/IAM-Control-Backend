@@ -17,6 +17,7 @@ import {
     type PermissionsMatrix,
     type RolePermissions,
 } from './permissions.constants';
+import { normalizeSetores } from '../../common/utils/setor.util';
 
 export type PermissionsMatrixPayload = {
     version: number;
@@ -28,6 +29,8 @@ type StoredPayload = {
     version: number;
     matrix: PermissionsMatrix;
 };
+
+type SetorInput = string | string[] | undefined | null;
 
 @Injectable()
 export class PermissionsMatrixService {
@@ -106,13 +109,13 @@ export class PermissionsMatrixService {
         };
     }
 
-    async hasPermission(setor: string | undefined | null, funcoes: string[] | undefined | null, key: PermissionKey): Promise<boolean> {
+    async hasPermission(setor: SetorInput, funcoes: string[] | undefined | null, key: PermissionKey): Promise<boolean> {
         const mapping = PERMISSION_KEY_MAP[key];
         return this.hasModuleAction(setor, funcoes, mapping.module, mapping.action);
     }
 
     async hasModuleAction(
-        setor: string | undefined | null,
+        setor: SetorInput,
         funcoes: string[] | undefined | null,
         module: ModuleKey,
         action: ActionKey,
@@ -123,7 +126,7 @@ export class PermissionsMatrixService {
 
     evaluateModuleAction(
         matrix: PermissionsMatrix,
-        setor: string | undefined | null,
+        setor: SetorInput,
         funcoes: string[] | undefined | null,
         module: ModuleKey,
         action: ActionKey,
@@ -133,9 +136,31 @@ export class PermissionsMatrixService {
         return Boolean(role[module]?.[action]);
     }
 
+    /**
+     * Resolve o papel efetivo do usuário.
+     * Com múltiplos setores: união (OR) das permissões de cada setor
+     * (função de maior prioridade / __PADRAO_SETOR__ em cada um).
+     */
     resolveEffectiveRole(
         matrix: PermissionsMatrix,
-        setor: string | undefined | null,
+        setor: SetorInput,
+        funcoes: string[] | undefined | null,
+    ): RolePermissions | null {
+        const setores = normalizeSetores(setor).map(String);
+        if (setores.length === 0) return null;
+
+        let merged: RolePermissions | null = null;
+        for (const s of setores) {
+            const role = this.resolveRoleForSingleSetor(matrix, s, funcoes);
+            if (!role) continue;
+            merged = merged ? this.mergeRolesOr(merged, role) : { ...this.cloneRole(role) };
+        }
+        return merged;
+    }
+
+    private resolveRoleForSingleSetor(
+        matrix: PermissionsMatrix,
+        setor: string,
         funcoes: string[] | undefined | null,
     ): RolePermissions | null {
         if (!setor || !matrix[setor]) return null;
@@ -145,6 +170,26 @@ export class PermissionsMatrixService {
             return matrix[setor][winning];
         }
         return matrix[setor][PADRAO_SETOR_KEY] ?? null;
+    }
+
+    private cloneRole(role: RolePermissions): RolePermissions {
+        const clone = createEmptyRolePermissions();
+        for (const module of MODULE_KEYS) {
+            for (const action of ACTION_KEYS) {
+                clone[module][action] = Boolean(role[module]?.[action]);
+            }
+        }
+        return clone;
+    }
+
+    private mergeRolesOr(a: RolePermissions, b: RolePermissions): RolePermissions {
+        const merged = this.cloneRole(a);
+        for (const module of MODULE_KEYS) {
+            for (const action of ACTION_KEYS) {
+                merged[module][action] = Boolean(merged[module][action] || b[module]?.[action]);
+            }
+        }
+        return merged;
     }
 
     invalidateCache(): void {

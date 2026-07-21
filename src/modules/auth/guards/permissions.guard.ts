@@ -5,6 +5,7 @@ import { EFuncoes } from '../../config/entities/enum';
 import type { PermissionRequirement } from '../decorators/require-permission.decorator';
 import { PERMISSION_METADATA_KEY, PERMISSION_KEY_MAP, type PermissionKey } from '../permissions.constants';
 import { PermissionsMatrixService } from '../permissions-matrix.service';
+import { userHasSetor } from '../../../common/utils/setor.util';
 
 function isPermissionKey(value: PermissionRequirement): value is PermissionKey {
     return typeof value === 'string';
@@ -48,7 +49,7 @@ export class PermissionsGuard implements CanActivate {
         const isAdmin =
             funcoes.includes(EFuncoes.ADMINISTRADOR) ||
             funcoes.includes('ADMINISTRADOR') ||
-            String(usuario.setor || '').toUpperCase() === 'ADMINISTRADOR';
+            userHasSetor(usuario, 'ADMINISTRADOR');
         if (isAdmin) {
             return true;
         }

@@ -275,10 +275,7 @@ export class DocumentosController {
                 categoria_exclusao,
             });
         } catch (error) {
-            this.logger.error(
-                'contract.public.list.excluidos | Erro ao listar contratos excluídos',
-                error instanceof Error ? error.stack : undefined,
-            );
+            this.logger.error('contract.public.list.excluidos | Erro ao listar contratos excluídos', error instanceof Error ? error.stack : undefined);
             throw error;
         }
     }
@@ -350,6 +347,19 @@ export class DocumentosController {
             status,
             treinamento_origem,
             tipo_filtro_busca,
+        });
+    }
+
+    // Compras vinculáveis ao comprovante de pagamento da venda em andamento:
+    // contratos com a mesma turma de ORIGEM e/ou criados no mesmo dia, com
+    // busca pelo nome do aluno pagante (autocomplete da etapa de comprovantes).
+    @Get('public/contratos-banco/compras-vinculaveis')
+    @UseGuards(JwtAuthGuard)
+    async listarComprasVinculaveisComprovante(@Query('id_turma_origem') id_turma_origem?: string, @Query('data') data?: string, @Query('termo') termo?: string) {
+        return this.documentosService.listarComprasVinculaveisComprovante({
+            id_turma_origem: id_turma_origem ? parseInt(id_turma_origem, 10) : undefined,
+            data,
+            termo,
         });
     }
 
@@ -569,11 +579,7 @@ export class DocumentosController {
     // Body obrigatório: categoria + observação (auditoria no Histórico de Vendas).
     @Delete('excluir-zapsign/:contratoId')
     @UseGuards(JwtAuthGuard)
-    async excluirDocumentoZapSign(
-        @Param('contratoId') contratoId: string,
-        @Body() body: ExcluirContratoDto,
-        @Req() req: Request,
-    ): Promise<{ message: string }> {
+    async excluirDocumentoZapSign(@Param('contratoId') contratoId: string, @Body() body: ExcluirContratoDto, @Req() req: Request): Promise<{ message: string }> {
         try {
             console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
             console.log('ID do contrato:', contratoId);

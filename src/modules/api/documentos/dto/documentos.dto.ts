@@ -263,6 +263,18 @@ export class CriarContratoZapSignDto {
     @Type(() => CompradorAdicionalDto)
     compradores_adicionais?: CompradorAdicionalDto[];
 
+    /**
+     * Comprovante de pagamento compartilhado: outras compras (contratos do
+     * Histórico de Vendas) pagas pelo MESMO comprovante anexado nesta venda.
+     * Usado para identificar quem está pagando para quem — o vínculo é gravado
+     * nas observações internas desta venda e das compras relacionadas.
+     */
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => ComprovanteVinculoCompraDto)
+    comprovante_vinculos_compras?: ComprovanteVinculoCompraDto[];
+
     @IsOptional()
     @IsBoolean()
     pendencia_pagamento?: boolean; // Pendência de pagamento marcada no ato da venda
@@ -387,6 +399,16 @@ export class CompradorAdicionalDto {
     @IsOptional()
     @IsString()
     telefone?: string;
+}
+
+/** Compra (contrato) paga pelo mesmo comprovante de pagamento desta venda. */
+export class ComprovanteVinculoCompraDto {
+    @IsNumber()
+    contrato_id: number;
+
+    @IsOptional()
+    @IsString()
+    aluno_nome?: string;
 }
 
 export class RespostaContratoZapSignDto {

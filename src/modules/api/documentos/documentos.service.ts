@@ -939,6 +939,9 @@ export class DocumentosService {
                     turma_origem: idTurmaOrigemContrato ? { id: idTurmaOrigemContrato } : null,
                     fluxo_evento_destino_id_turma: criarContratoDto.id_turma_destino ? Number(criarContratoDto.id_turma_destino) : null,
                     compradores_adicionais: criarContratoDto.compradores_adicionais || [],
+                    // Comprovante compartilhado: outras compras pagas pelo mesmo
+                    // comprovante desta venda (identifica quem paga para quem).
+                    comprovante_vinculos_compras: criarContratoDto.comprovante_vinculos_compras || [],
                     // Snapshot da venda usado pelo Histórico de Vendas como fonte da
                     // pendência/quantidade quando a matrícula vinculada ao contrato é
                     // a de origem (e não a de destino onde a pendência foi marcada).
@@ -987,6 +990,18 @@ export class DocumentosService {
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
             this.invalidarCachesHistoricoVendas();
+
+            // Comprovante compartilhado: registra nas compras relacionadas quem
+            // está pagando por elas (best-effort: falha não derruba a venda).
+            try {
+                await this.registrarComprovanteCompartilhadoNasCompras(savedContrato.id, aluno?.nome || '', criarContratoDto.comprovante_vinculos_compras);
+            } catch (error) {
+                this.logger.warn(
+                    `zapsign.create.contract | Falha ao registrar vínculo de comprovante compartilhado: ${
+                        error instanceof Error ? error.message : 'Erro desconhecido'
+                    }`,
+                );
+            }
 
             // Mapear signers com informações completas incluindo testemunhas
             const signersResponse = signers.map((signer, index) => {
@@ -3976,6 +3991,146 @@ export class DocumentosService {
         this.invalidarCachesHistoricoVendas();
 
         return { atualizado: true, total: comprovantesArray.length };
+    }
+
+    /**
+     * Lista compras (contratos ativos) que podem estar ligadas ao MESMO
+     * comprovante de pagamento de uma venda em andamento: contratos com a
+     * mesma turma de ORIGEM e/ou criados no mesmo dia. Usado pelo autocomplete
+     * da etapa de comprovantes do fluxo de venda para identificar quem está
+     * pagando para quem.
+     */
+    async listarComprasVinculaveisComprovante(params: { id_turma_origem?: number; data?: string; termo?: string }): Promise<{
+        data: Array<{
+            id: string;
+            aluno_nome: string;
+            treinamento: string;
+            turma_destino: string | null;
+            criado_em: Date | string;
+            valor_total: string | number | null;
+            mesma_turma_origem: boolean;
+            mesmo_dia: boolean;
+        }>;
+    }> {
+        const idTurma = Number(params.id_turma_origem);
+        const temTurma = Number.isFinite(idTurma) && idTurma > 0;
+        const dia = String(params.data || '').trim();
+        const temDia = /^\d{4}-\d{2}-\d{2}$/.test(dia);
+        if (!temTurma && !temDia) {
+            return { data: [] };
+        }
+
+        const sqlAlunoNome = `COALESCE(NULLIF(TRIM(contrato.dados_contrato->'aluno'->>'nome'), ''), aluno.nome, '')`;
+        const sqlTreinamento = `COALESCE(
+            NULLIF(TRIM(contrato.dados_contrato->'treinamento'->>'nome'), ''),
+            NULLIF(TRIM(contrato.dados_contrato->'treinamento'->>'treinamento'), ''),
+            NULLIF(TRIM(contrato.dados_contrato->'campos_variaveis'->>'Nome do Treinamento Contratado'), ''),
+            ''
+        )`;
+
+        const qb = this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('contrato')
+            .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+            .leftJoin('tat.id_turma_aluno_fk', 'ta')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .select('contrato.id', 'id')
+            .addSelect(sqlAlunoNome, 'aluno_nome')
+            .addSelect(sqlTreinamento, 'treinamento')
+            .addSelect('contrato.hist_turma_destino', 'turma_destino')
+            .addSelect('contrato.criado_em', 'criado_em')
+            .addSelect('contrato.hist_receita_total', 'valor_total')
+            .addSelect('ta.id_turma', 'id_turma_matricula')
+            .addSelect(this.sqlIdTurmaOrigemHistorico, 'id_turma_origem_snapshot')
+            .where('contrato.deletado_em IS NULL')
+            .andWhere(
+                new Brackets((w) => {
+                    if (temTurma) {
+                        w.orWhere(`(ta.id_turma = :idTurmaVinculo OR ${this.sqlIdTurmaOrigemHistorico} = :idTurmaVinculo)`, { idTurmaVinculo: idTurma });
+                    }
+                    if (temDia) {
+                        w.orWhere('contrato.criado_em::date = :diaVinculo', { diaVinculo: dia });
+                    }
+                }),
+            );
+
+        const termo = String(params.termo || '').trim();
+        if (termo) {
+            qb.andWhere(`${sqlAlunoNome} ILIKE :termoVinculo`, { termoVinculo: `%${this.escaparLikeSql(termo)}%` });
+        }
+
+        const rows = await qb.orderBy('contrato.criado_em', 'DESC').limit(200).getRawMany<{
+            id: string;
+            aluno_nome: string;
+            treinamento: string;
+            turma_destino: string | null;
+            criado_em: Date | string;
+            valor_total: string | number | null;
+            id_turma_matricula: string | number | null;
+            id_turma_origem_snapshot: string | number | null;
+        }>();
+
+        return {
+            data: rows.map((row) => {
+                const idsOrigem = [Number(row.id_turma_matricula), Number(row.id_turma_origem_snapshot)].filter((v) => Number.isFinite(v) && v > 0);
+                const criadoEmDia = row.criado_em ? new Date(row.criado_em).toISOString().slice(0, 10) : '';
+                return {
+                    id: String(row.id),
+                    aluno_nome: row.aluno_nome || '',
+                    treinamento: row.treinamento || '',
+                    turma_destino: row.turma_destino || null,
+                    criado_em: row.criado_em,
+                    valor_total: row.valor_total ?? null,
+                    mesma_turma_origem: temTurma && idsOrigem.includes(idTurma),
+                    mesmo_dia: temDia && criadoEmDia === dia,
+                };
+            }),
+        };
+    }
+
+    /**
+     * Comprovante de pagamento compartilhado: grava nas observações internas de
+     * cada compra relacionada quem está pagando por ela (comprador + id do novo
+     * contrato). Chamado ao criar o contrato da venda que anexou o comprovante.
+     */
+    private async registrarComprovanteCompartilhadoNasCompras(
+        contratoNovoId: string,
+        nomeCompradorPagante: string,
+        vinculos?: Array<{ contrato_id: number; aluno_nome?: string }>,
+    ): Promise<void> {
+        const lista = (vinculos || []).filter((v) => Number.isFinite(Number(v?.contrato_id)) && Number(v.contrato_id) > 0);
+        if (lista.length === 0) return;
+
+        const agora = new Date();
+        const chaveObs = 'Observações Internas (uso do sistema)';
+        for (const vinculo of lista) {
+            try {
+                const contratoRelacionado = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                    where: { id: String(vinculo.contrato_id), deletado_em: IsNull() },
+                });
+                if (!contratoRelacionado) continue;
+
+                const dadosContrato = { ...(contratoRelacionado.dados_contrato || {}) };
+                const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
+                const linhaVinculo =
+                    `Comprovante de pagamento compartilhado: o pagamento desta compra está no comprovante anexado na venda de ` +
+                    `${nomeCompradorPagante || 'comprador não identificado'} (contrato ID ${contratoNovoId}) - ${this.formatarDataHoraBr(agora)}`;
+                const textoAtual = String(camposVariaveis[chaveObs] || '').trim();
+                const textoBase = textoAtual && textoAtual !== '—' ? textoAtual : '';
+                camposVariaveis[chaveObs] = [textoBase, linhaVinculo].filter(Boolean).join('\n');
+                dadosContrato.campos_variaveis = camposVariaveis;
+
+                await this.uow.turmasAlunosTreinamentosContratosRP.update(contratoRelacionado.id, {
+                    dados_contrato: dadosContrato,
+                });
+            } catch (error) {
+                this.logger.warn(
+                    `contract.comprovante.vinculo | Falha ao registrar vínculo no contrato ${vinculo.contrato_id}: ${
+                        error instanceof Error ? error.message : 'Erro desconhecido'
+                    }`,
+                );
+            }
+        }
+        this.invalidarCachesHistoricoVendas();
     }
 
     // Atualiza os dados DA VENDA (quantidade de inscrições, outros clientes e

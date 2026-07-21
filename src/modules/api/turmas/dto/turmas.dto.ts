@@ -1215,9 +1215,7 @@ export class SoftDeleteTurmaDto {
 const transformToNumberArray = ({ value }: { value: unknown }): number[] => {
     if (value === null || value === undefined || value === '') return [];
     const raw = Array.isArray(value) ? value : String(value).split(',');
-    return raw
-        .map((item) => parseInt(String(item).trim(), 10))
-        .filter((n) => !Number.isNaN(n));
+    return raw.map((item) => parseInt(String(item).trim(), 10)).filter((n) => !Number.isNaN(n));
 };
 
 /** Filtros do extrato de movimentação de turmas (acompanhamento extratificado). */

@@ -2,7 +2,7 @@ import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from 't
 
 import { BaseEntity } from './baseEntity.entity';
 import { type_schema } from '../database/typeORM.provider';
-import { EStatusAssinaturasContratos } from './enum';
+import { ECategoriaExclusaoContrato, EStatusAssinaturasContratos } from './enum';
 import { TurmasAlunosTreinamentos } from './turmasAlunosTreinamentos.entity';
 import { Usuarios } from './usuarios.entity';
 import { Documentos } from './documentos.entity';
@@ -155,6 +155,25 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
         document_id: string; // id e token do documento
         signing_url: string; // url de assinatura do documento
     }; // Objeto com status completo do documento
+
+    // Auditoria da exclusão no Histórico de Vendas (obrigatória nas exclusões novas).
+    @Column({
+        type: 'enum',
+        enum: ECategoriaExclusaoContrato,
+        enumName: 'ECategoriaExclusaoContrato',
+        name: 'categoria_exclusao',
+        nullable: true,
+    })
+    categoria_exclusao: ECategoriaExclusaoContrato | null;
+
+    @Column({ type: 'varchar', length: 150, name: 'observacao_exclusao', nullable: true })
+    observacao_exclusao: string | null;
+
+    @Column({ type: 'int', name: 'excluido_por', nullable: true })
+    excluido_por: number | null;
+
+    @Column({ type: 'timestamp', name: 'excluido_em', nullable: true })
+    excluido_em: Date | null;
 
     @ManyToOne(() => TurmasAlunosTreinamentos, (turmasAlunosTreinamentos) => turmasAlunosTreinamentos.turmasAlunosTreinamentosContratos)
     @JoinColumn([{ name: 'id_turma_aluno_treinamento', referencedColumnName: 'id' }])

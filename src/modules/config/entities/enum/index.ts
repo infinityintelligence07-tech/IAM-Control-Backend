@@ -67,6 +67,13 @@ export enum EOrigemAlunos {
     TRANSFERENCIA = 'TRANSFERENCIA',
 }
 
+/** Motivo/categoria obrigatória ao excluir um contrato no Histórico de Vendas. */
+export enum ECategoriaExclusaoContrato {
+    ERRO_PREENCHIMENTO = 'ERRO_PREENCHIMENTO',
+    CANCELAMENTO_ALUNO = 'CANCELAMENTO_ALUNO',
+    OUTRO_MOTIVO = 'OUTRO_MOTIVO',
+}
+
 export enum EPresencaTurmas {
     NO_SHOW = 'NO_SHOW',
     PRESENTE = 'PRESENTE',

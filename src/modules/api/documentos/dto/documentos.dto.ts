@@ -1,6 +1,6 @@
-import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber, IsBoolean, MaxLength, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ETipoDocumento } from '@/modules/config/entities/enum';
+import { ECategoriaExclusaoContrato, ETipoDocumento } from '@/modules/config/entities/enum';
 
 export class CampoDocumentoDto {
     @IsString()
@@ -523,4 +523,17 @@ export class RespostaTermoZapSignDto {
     }>;
     created_at: string;
     file_url?: string;
+}
+
+/** Body obrigatório ao excluir venda/contrato no Histórico de Vendas. */
+export class ExcluirContratoDto {
+    @IsEnum(ECategoriaExclusaoContrato)
+    @IsNotEmpty()
+    categoria_exclusao: ECategoriaExclusaoContrato;
+
+    @IsString()
+    @IsNotEmpty({ message: 'Informe a observação da exclusão.' })
+    @MinLength(5, { message: 'A observação deve ter pelo menos 5 caracteres.' })
+    @MaxLength(150, { message: 'A observação deve ter no máximo 150 caracteres.' })
+    observacao_exclusao: string;
 }

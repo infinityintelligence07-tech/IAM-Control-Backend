@@ -11,6 +11,7 @@ import {
     RespostaContratoZapSignDto,
     CriarTermoZapSignDto,
     RespostaTermoZapSignDto,
+    ExcluirContratoDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
@@ -253,6 +254,31 @@ export class DocumentosController {
             return resultado;
         } catch (error) {
             this.logger.error('contract.public.list | Erro ao listar contratos do banco', error instanceof Error ? error.stack : undefined);
+            throw error;
+        }
+    }
+
+    // Contratos excluídos (auditoria do Histórico de Vendas).
+    @Get('public/contratos-banco/excluidos')
+    @UseGuards(JwtAuthGuard)
+    async listarContratosExcluidosPublico(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('search') search?: string,
+        @Query('categoria_exclusao') categoria_exclusao?: string,
+    ) {
+        try {
+            return await this.documentosService.listarContratosExcluidos({
+                page: page ? parseInt(page, 10) : 1,
+                limit: limit ? parseInt(limit, 10) : 20,
+                search,
+                categoria_exclusao,
+            });
+        } catch (error) {
+            this.logger.error(
+                'contract.public.list.excluidos | Erro ao listar contratos excluídos',
+                error instanceof Error ? error.stack : undefined,
+            );
             throw error;
         }
     }
@@ -536,15 +562,20 @@ export class DocumentosController {
     }
 
     // Excluir venda/contrato: qualquer usuário autenticado (CRUD de vendas sem matriz).
+    // Body obrigatório: categoria + observação (auditoria no Histórico de Vendas).
     @Delete('excluir-zapsign/:contratoId')
     @UseGuards(JwtAuthGuard)
-    async excluirDocumentoZapSign(@Param('contratoId') contratoId: string, @Req() req: Request): Promise<{ message: string }> {
+    async excluirDocumentoZapSign(
+        @Param('contratoId') contratoId: string,
+        @Body() body: ExcluirContratoDto,
+        @Req() req: Request,
+    ): Promise<{ message: string }> {
         try {
             console.log('=== EXCLUINDO CONTRATO ZAPSIGN ===');
             console.log('ID do contrato:', contratoId);
 
             const userId = (req.user as any)?.sub;
-            return await this.documentosService.excluirDocumentoZapSign(contratoId, userId);
+            return await this.documentosService.excluirDocumentoZapSign(contratoId, userId, body);
         } catch (error) {
             console.error('Erro ao excluir contrato:', error);
             throw error;

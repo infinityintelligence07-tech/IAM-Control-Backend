@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
 import { TurmasAlunosTreinamentosContratos } from '@/modules/config/entities/turmasAlunosTreinamentosContratos.entity';
-import { EStatusAssinaturasContratos, EOrigemAlunos, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
+import { EStatusAssinaturasContratos, EOrigemAlunos, EStatusAlunosTurmas, ETipoDocumento, EFormasPagamento, ECategoriaExclusaoContrato, ESetores } from '@/modules/config/entities/enum';
 import * as crypto from 'crypto';
 import axios from 'axios';
 import { Not, IsNull, In, Between } from 'typeorm';
@@ -20,8 +20,8 @@ import {
     AtualizarStatusContratoDto,
     CriarTermoZapSignDto,
     RespostaTermoZapSignDto,
+    ExcluirContratoDto,
 } from './dto/documentos.dto';
-import { ETipoDocumento, EFormasPagamento } from '@/modules/config/entities/enum';
 import { ZapSignService, ZapSignResponse } from './zapsign.service';
 import { ContractTemplateService } from './contract-template.service';
 import { TermTemplateService } from './term-template.service';
@@ -29,9 +29,9 @@ import PDFDocument from 'pdfkit';
 import { MailService } from '@/modules/mail/mail.service';
 import { TurmasService } from '../turmas/turmas.service';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
-import { ESetores } from '@/modules/config/entities/enum';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
+import { Usuarios } from '@/modules/config/entities/usuarios.entity';
 import { resolverDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
 
 const parsePositiveIntEnv = (value: string | undefined, fallback: number): number => {
@@ -1936,12 +1936,35 @@ export class DocumentosService {
     /**
      * Exclui um contrato do ZapSign e faz soft delete no banco
      */
-    async excluirDocumentoZapSign(contratoId: string, userId?: number): Promise<{ message: string }> {
+    async excluirDocumentoZapSign(
+        contratoId: string,
+        userId?: number,
+        motivo?: ExcluirContratoDto,
+    ): Promise<{ message: string }> {
         try {
             this.logger.log(`zapsign.delete | Excluindo contrato ZapSign contratoId=${contratoId}`);
             const contratoIdNumerico = Number(contratoId);
             if (!Number.isInteger(contratoIdNumerico)) {
                 throw new BadRequestException('ID de contrato inválido');
+            }
+
+            if (!motivo?.categoria_exclusao || !motivo?.observacao_exclusao?.trim()) {
+                throw new BadRequestException(
+                    'Informe a categoria e a observação da exclusão antes de apagar o contrato.',
+                );
+            }
+
+            const observacaoExclusao = motivo.observacao_exclusao.trim();
+            if (observacaoExclusao.length < 5) {
+                throw new BadRequestException('A observação da exclusão deve ter pelo menos 5 caracteres.');
+            }
+            if (observacaoExclusao.length > 150) {
+                throw new BadRequestException('A observação da exclusão deve ter no máximo 150 caracteres.');
+            }
+
+            const categoriasValidas = Object.values(ECategoriaExclusaoContrato);
+            if (!categoriasValidas.includes(motivo.categoria_exclusao)) {
+                throw new BadRequestException('Categoria de exclusão inválida.');
             }
 
             // Buscar o contrato no banco de dados com relacionamentos
@@ -2046,11 +2069,19 @@ export class DocumentosService {
                 }
             }
 
-            // 3) Fazer soft delete do contrato (por ID do contrato)
+            const agora = new Date();
+
+            // 3) Soft delete do contrato + auditoria obrigatória (categoria, obs, quem, quando)
             await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
-                deletado_em: new Date(),
+                deletado_em: agora,
                 atualizado_por: userId,
+                categoria_exclusao: motivo.categoria_exclusao,
+                observacao_exclusao: observacaoExclusao,
+                excluido_por: userId ?? null,
+                excluido_em: agora,
             });
+
+            this.invalidarCachesHistoricoVendas();
 
             // 4) Notificar o Cuidado de Alunos: os alunos/bônus permanecem nas turmas
             // e o time decide manualmente se devem ser removidos.
@@ -2073,8 +2104,11 @@ export class DocumentosService {
                 nomeUsuarioExclusao = usuarioExclusao?.nome || null;
             }
 
+            const categoriaLabel = this.labelCategoriaExclusaoContrato(motivo.categoria_exclusao);
+
             const partesMensagem = [
                 `O contrato #${contrato.id} do aluno ${nomeAluno}${turmaLabel ? ` (turma ${turmaLabel})` : ''} foi excluído${nomeUsuarioExclusao ? ` por ${nomeUsuarioExclusao}` : ''} no Histórico de Vendas.`,
+                `Motivo: ${categoriaLabel}. Observação: ${observacaoExclusao}`,
                 'As matrículas do aluno e os bônus vinculados à venda NÃO foram removidos das turmas.',
                 `Matrículas vinculadas à venda: ${idsTurmasAlunosVinculados.size}${quantidadeMatriculasBonus > 0 ? ` (sendo ${quantidadeMatriculasBonus} de bônus)` : ''}.`,
                 'Avalie na tela da turma se o aluno e os bônus devem ser removidos manualmente.',
@@ -2096,6 +2130,10 @@ export class DocumentosService {
                     quantidade_matriculas_bonus: quantidadeMatriculasBonus,
                     excluido_por: userId ?? null,
                     excluido_por_nome: nomeUsuarioExclusao,
+                    categoria_exclusao: motivo.categoria_exclusao,
+                    categoria_exclusao_label: categoriaLabel,
+                    observacao_exclusao: observacaoExclusao,
+                    excluido_em: agora.toISOString(),
                 },
             });
 
@@ -2105,8 +2143,187 @@ export class DocumentosService {
             };
         } catch (error) {
             this.logger.error('zapsign.delete | Erro ao excluir contrato', error instanceof Error ? error.stack : undefined);
-            throw new BadRequestException(`Erro ao excluir contrato: ${(error as Error).message}`);
+            if (error instanceof BadRequestException || error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new BadRequestException(
+                `Erro ao excluir contrato: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
         }
+    }
+
+    private labelCategoriaExclusaoContrato(categoria: ECategoriaExclusaoContrato | string | null | undefined): string {
+        switch (categoria) {
+            case ECategoriaExclusaoContrato.ERRO_PREENCHIMENTO:
+                return 'Erro de preenchimento';
+            case ECategoriaExclusaoContrato.CANCELAMENTO_ALUNO:
+                return 'Cancelamento de aluno';
+            case ECategoriaExclusaoContrato.OUTRO_MOTIVO:
+                return 'Outro motivo';
+            default:
+                return 'Não informado';
+        }
+    }
+
+    /**
+     * Listagem de contratos já excluídos no Histórico de Vendas (consulta de auditoria).
+     */
+    async listarContratosExcluidos(filtros?: {
+        page?: number;
+        limit?: number;
+        search?: string;
+        categoria_exclusao?: string;
+    }): Promise<{
+        data: Array<{
+            id: string;
+            aluno_nome: string;
+            aluno_email: string | null;
+            aluno_cpf: string | null;
+            treinamento: string | null;
+            turma_origem: string | null;
+            turma_destino: string | null;
+            receita: number;
+            categoria_exclusao: ECategoriaExclusaoContrato | null;
+            categoria_exclusao_label: string;
+            observacao_exclusao: string | null;
+            excluido_em: Date | null;
+            excluido_por: number | null;
+            excluido_por_nome: string | null;
+            criado_em: Date;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    }> {
+        const page = Math.max(1, Number(filtros?.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(filtros?.limit) || 20));
+        const offset = (page - 1) * limit;
+        const termoBusca = this.normalizarTexto(filtros?.search);
+        const categoriaFiltro = String(filtros?.categoria_exclusao || '').trim();
+
+        const qb = this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('contrato')
+            .withDeleted()
+            .leftJoin('contrato.id_turma_aluno_treinamento_fk', 'tat')
+            .leftJoin('tat.id_turma_aluno_fk', 'ta')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .leftJoin(Usuarios, 'usuario_exclusao', 'usuario_exclusao.id = contrato.excluido_por')
+            .where('contrato.deletado_em IS NOT NULL');
+
+        if (categoriaFiltro && Object.values(ECategoriaExclusaoContrato).includes(categoriaFiltro as ECategoriaExclusaoContrato)) {
+            qb.andWhere('contrato.categoria_exclusao = :categoriaFiltro', { categoriaFiltro });
+        }
+
+        if (termoBusca) {
+            const termoBuscaDigitos = termoBusca.replace(/\D/g, '');
+            const condicoesBusca = [
+                `LOWER(COALESCE(aluno.nome, '')) LIKE :termoBusca`,
+                `LOWER(COALESCE(contrato.dados_contrato->'aluno'->>'nome', '')) LIKE :termoBusca`,
+                `LOWER(COALESCE(contrato.observacao_exclusao, '')) LIKE :termoBusca`,
+                `CAST(contrato.id AS text) LIKE :termoBuscaId`,
+            ];
+            const parametrosBusca: Record<string, string> = {
+                termoBusca: `%${termoBusca}%`,
+                termoBuscaId: `%${termoBusca}%`,
+            };
+            if (termoBuscaDigitos.length >= 3) {
+                condicoesBusca.push(`REGEXP_REPLACE(COALESCE(aluno.cpf, ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`);
+                condicoesBusca.push(
+                    `REGEXP_REPLACE(COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''), '[^0-9]', '', 'g') LIKE :termoBuscaCpf`,
+                );
+                parametrosBusca.termoBuscaCpf = `%${termoBuscaDigitos}%`;
+            }
+            qb.andWhere(`(${condicoesBusca.join(' OR ')})`, parametrosBusca);
+        }
+
+        const total = await qb.clone().getCount();
+
+        const rows = await qb
+            .select([
+                'contrato.id AS id',
+                'contrato.criado_em AS criado_em',
+                'contrato.deletado_em AS deletado_em',
+                'contrato.excluido_em AS excluido_em',
+                'contrato.excluido_por AS excluido_por',
+                'contrato.categoria_exclusao AS categoria_exclusao',
+                'contrato.observacao_exclusao AS observacao_exclusao',
+                'contrato.hist_receita_total AS hist_receita_total',
+                'contrato.hist_turma_origem AS hist_turma_origem',
+                'contrato.hist_turma_destino AS hist_turma_destino',
+                'contrato.hist_treinamento_origem AS hist_treinamento_origem',
+                'contrato.dados_contrato AS dados_contrato',
+                'aluno.nome AS aluno_nome_rel',
+                'aluno.email AS aluno_email_rel',
+                'aluno.cpf AS aluno_cpf_rel',
+                'usuario_exclusao.nome AS excluido_por_nome',
+            ])
+            .orderBy('contrato.excluido_em', 'DESC', 'NULLS LAST')
+            .addOrderBy('contrato.deletado_em', 'DESC')
+            .offset(offset)
+            .limit(limit)
+            .getRawMany();
+
+        const data = rows.map((row) => {
+            const dadosContrato =
+                typeof row.dados_contrato === 'string'
+                    ? (() => {
+                          try {
+                              return JSON.parse(row.dados_contrato);
+                          } catch {
+                              return {};
+                          }
+                      })()
+                    : row.dados_contrato || {};
+            const alunoSnapshot = dadosContrato?.aluno || {};
+            const alunoNome =
+                alunoSnapshot?.nome || row.aluno_nome_rel || 'Aluno não identificado';
+            const alunoEmail = alunoSnapshot?.email || row.aluno_email_rel || null;
+            const alunoCpf = alunoSnapshot?.cpf || row.aluno_cpf_rel || null;
+            const treinamento =
+                dadosContrato?.treinamento?.nome ||
+                dadosContrato?.treinamento?.treinamento ||
+                row.hist_treinamento_origem ||
+                null;
+            const turmaOrigem =
+                dadosContrato?.fluxo_evento_origem_label ||
+                dadosContrato?.turma_origem?.edicao_turma ||
+                row.hist_turma_origem ||
+                null;
+            const turmaDestino =
+                dadosContrato?.fluxo_evento_destino_label ||
+                dadosContrato?.turma?.edicao_turma ||
+                row.hist_turma_destino ||
+                null;
+            const receita = Number(row.hist_receita_total || dadosContrato?.pagamento?.valor_total || 0) || 0;
+            const categoria = (row.categoria_exclusao as ECategoriaExclusaoContrato | null) || null;
+
+            return {
+                id: String(row.id),
+                aluno_nome: String(alunoNome),
+                aluno_email: alunoEmail ? String(alunoEmail) : null,
+                aluno_cpf: alunoCpf ? String(alunoCpf) : null,
+                treinamento: treinamento ? String(treinamento) : null,
+                turma_origem: turmaOrigem ? String(turmaOrigem) : null,
+                turma_destino: turmaDestino ? String(turmaDestino) : null,
+                receita,
+                categoria_exclusao: categoria,
+                categoria_exclusao_label: this.labelCategoriaExclusaoContrato(categoria),
+                observacao_exclusao: row.observacao_exclusao ? String(row.observacao_exclusao) : null,
+                excluido_em: row.excluido_em || row.deletado_em || null,
+                excluido_por: row.excluido_por != null ? Number(row.excluido_por) : null,
+                excluido_por_nome: row.excluido_por_nome ? String(row.excluido_por_nome) : null,
+                criado_em: row.criado_em,
+            };
+        });
+
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages: Math.max(1, Math.ceil(total / limit)),
+        };
     }
 
     /**

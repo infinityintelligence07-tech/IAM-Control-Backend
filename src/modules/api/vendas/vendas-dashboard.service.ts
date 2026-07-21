@@ -23,12 +23,15 @@ import {
     calcularResumoStatusDashboard,
     codigoEventoDashboard,
     ContratoDashboardLinha,
+    contratoCorrespondeOrigem,
+    contratoCorrespondeProduto,
     criarMapaAquisicaoVazio,
     isProcessoVendaContrato,
     listarItensStatusRecebivel,
     metricasVazia,
     obterDadosEventoContrato,
     resumoStatusVazio,
+    rotuloTreinamentoDashboard,
     rotuloTurmaIamControl,
     TurmaRankingInput,
 } from './vendas-dashboard.aggregator';
@@ -48,6 +51,8 @@ type LinhaContratoRaw = {
     id_turma_destino?: string | number | null;
     sigla_destino?: string | null;
     nome_destino?: string | null;
+    sigla_origem?: string | null;
+    nome_origem?: string | null;
 };
 
 @Injectable()
@@ -59,6 +64,8 @@ export class VendasDashboardService {
         const eventoFiltro = filtros.evento || null;
         const liderIdFiltro = filtros.lider_id != null && Number.isFinite(Number(filtros.lider_id)) ? Number(filtros.lider_id) : null;
         const turmaIdFiltro = filtros.turma_id != null && Number.isFinite(Number(filtros.turma_id)) ? Number(filtros.turma_id) : null;
+        const origemFiltro = String(filtros.origem || '').trim() || null;
+        const produtoFiltro = String(filtros.produto || '').trim() || null;
 
         const filtrosAplicados = {
             data_inicio: dataInicio.toISOString(),
@@ -66,6 +73,8 @@ export class VendasDashboardService {
             evento: eventoFiltro,
             lider_id: liderIdFiltro,
             turma_id: turmaIdFiltro,
+            origem: origemFiltro,
+            produto: produtoFiltro,
         };
 
         const linhasRaw = await this.carregarLinhasContratos(dataInicio, dataFim, turmaIdFiltro);
@@ -75,6 +84,12 @@ export class VendasDashboardService {
 
         if (eventoFiltro) {
             contratos = contratos.filter((c) => obterDadosEventoContrato(c).codigo === eventoFiltro);
+        }
+        if (origemFiltro) {
+            contratos = contratos.filter((c) => contratoCorrespondeOrigem(c, origemFiltro));
+        }
+        if (produtoFiltro) {
+            contratos = contratos.filter((c) => contratoCorrespondeProduto(c, produtoFiltro));
         }
         if (turmaIdFiltro) {
             contratos = contratos.filter((c) => c.ids_turma.includes(turmaIdFiltro));
@@ -204,10 +219,36 @@ export class VendasDashboardService {
             lideres.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
         }
 
+        const opcoesTreinamento = new Map<string, { value: string; label: string }>();
+        for (const codigo of EVENTOS_DASHBOARD) {
+            opcoesTreinamento.set(codigo, { value: codigo, label: codigo });
+        }
+        for (const turma of turmas) {
+            if (turma.id_treinamento_fk?.tipo_mentoria === true) continue;
+            const nome = String(turma.id_treinamento_fk?.treinamento || '').trim();
+            const sigla = String(turma.id_treinamento_fk?.sigla_treinamento || '').trim();
+            if (!nome && !sigla) continue;
+            const codigo = codigoEventoDashboard(nome, sigla);
+            const value = codigo || rotuloTreinamentoDashboard(nome || sigla, sigla);
+            if (!value || value === 'Não informado') continue;
+            const label = codigo && nome && !nome.toUpperCase().includes(codigo)
+                ? `${codigo} — ${nome}`
+                : value;
+            if (!opcoesTreinamento.has(value)) {
+                opcoesTreinamento.set(value, { value, label });
+            }
+        }
+        const origens = Array.from(opcoesTreinamento.values()).sort((a, b) =>
+            a.label.localeCompare(b.label, 'pt-BR'),
+        );
+        const produtos = [...origens];
+
         return {
             eventos: [...EVENTOS_DASHBOARD],
             lideres,
             turmas: turmasFiltro,
+            origens,
+            produtos,
         };
     }
 
@@ -268,6 +309,8 @@ export class VendasDashboardService {
             filtros.turma_id != null && Number.isFinite(Number(filtros.turma_id))
                 ? Number(filtros.turma_id)
                 : null;
+        const origemFiltro = String(filtros.origem || '').trim() || null;
+        const produtoFiltro = String(filtros.produto || '').trim() || null;
 
         const linhasRaw = await this.carregarLinhasContratos(dataInicio, dataFim, turmaIdFiltro);
         const contratosEnriquecidos = await this.enriquecerComStaffLider(linhasRaw);
@@ -276,6 +319,12 @@ export class VendasDashboardService {
 
         if (eventoFiltro) {
             contratos = contratos.filter((c) => obterDadosEventoContrato(c).codigo === eventoFiltro);
+        }
+        if (origemFiltro) {
+            contratos = contratos.filter((c) => contratoCorrespondeOrigem(c, origemFiltro));
+        }
+        if (produtoFiltro) {
+            contratos = contratos.filter((c) => contratoCorrespondeProduto(c, produtoFiltro));
         }
         if (turmaIdFiltro) {
             contratos = contratos.filter((c) => c.ids_turma.includes(turmaIdFiltro));
@@ -414,6 +463,8 @@ export class VendasDashboardService {
             .leftJoin('tat.id_turma_aluno_fk', 'ta')
             .leftJoin(Turmas, 'turma_destino_evento', `turma_destino_evento.id = ${idTurmaDestino}`)
             .leftJoin('turma_destino_evento.id_treinamento_fk', 'treinamento_destino_evento')
+            .leftJoin(Turmas, 'turma_origem_evento', `turma_origem_evento.id = ${idTurmaOrigem}`)
+            .leftJoin('turma_origem_evento.id_treinamento_fk', 'treinamento_origem_evento')
             .where('contrato.deletado_em IS NULL')
             .andWhere('contrato.criado_em BETWEEN :dataInicio AND :dataFim', { dataInicio, dataFim });
 
@@ -436,6 +487,8 @@ export class VendasDashboardService {
             .addSelect('tat.id_turma_destino', 'id_turma_destino')
             .addSelect('treinamento_destino_evento.sigla_treinamento', 'sigla_destino')
             .addSelect('treinamento_destino_evento.treinamento', 'nome_destino')
+            .addSelect('treinamento_origem_evento.sigla_treinamento', 'sigla_origem')
+            .addSelect('treinamento_origem_evento.treinamento', 'nome_origem')
             .distinct(true)
             .getRawMany<LinhaContratoRaw>();
 
@@ -570,6 +623,19 @@ export class VendasDashboardService {
             }
             if (!dadosContrato.treinamento.treinamento && !dadosContrato.treinamento.nome && row.nome_destino) {
                 dadosContrato.treinamento.treinamento = row.nome_destino;
+            }
+
+            // Enriquece origem (onde a venda aconteceu).
+            if (!dadosContrato.treinamento_origem) dadosContrato.treinamento_origem = {};
+            if (!dadosContrato.treinamento_origem.sigla_treinamento && row.sigla_origem) {
+                dadosContrato.treinamento_origem.sigla_treinamento = row.sigla_origem;
+            }
+            if (
+                !dadosContrato.treinamento_origem.treinamento &&
+                !dadosContrato.treinamento_origem.nome &&
+                row.nome_origem
+            ) {
+                dadosContrato.treinamento_origem.treinamento = row.nome_origem;
             }
 
             return {

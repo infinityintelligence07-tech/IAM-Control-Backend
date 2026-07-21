@@ -42,6 +42,18 @@ export class VendasDashboardQueryDto {
     })
     @IsInt()
     turma_id?: number;
+
+    /** Treinamento/turma de origem da venda (onde vendeu). */
+    @IsOptional()
+    @IsString()
+    @Transform(emptyToUndefined)
+    origem?: string;
+
+    /** Produto / treinamento vendido (rótulo fino, ex. CONF, PNL). */
+    @IsOptional()
+    @IsString()
+    @Transform(emptyToUndefined)
+    produto?: string;
 }
 
 export class FatiaDashboardDto {
@@ -172,6 +184,8 @@ export class VendasDashboardResponseDto {
         evento?: CodigoEventoDashboard | null;
         lider_id?: number | null;
         turma_id?: number | null;
+        origem?: string | null;
+        produto?: string | null;
     };
     metricas: MetricasDashboardVendasDto;
     formasPagamento: FatiaDashboardDto[];
@@ -194,8 +208,17 @@ export class VendasDashboardFiltroTurmaDto {
     evento: CodigoEventoDashboard | null;
 }
 
+export class VendasDashboardFiltroOpcaoDto {
+    value: string;
+    label: string;
+}
+
 export class VendasDashboardFiltrosResponseDto {
     eventos: CodigoEventoDashboard[];
     lideres: VendasDashboardFiltroLiderDto[];
     turmas: VendasDashboardFiltroTurmaDto[];
+    /** Treinamentos de origem (onde a venda aconteceu). */
+    origens: VendasDashboardFiltroOpcaoDto[];
+    /** Produtos / treinamentos vendidos. */
+    produtos: VendasDashboardFiltroOpcaoDto[];
 }

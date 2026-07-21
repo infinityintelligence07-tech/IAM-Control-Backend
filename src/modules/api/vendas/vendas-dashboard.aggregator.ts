@@ -209,6 +209,35 @@ export const obterDadosEventoContrato = (
     };
 };
 
+/** Treinamento de origem (onde a venda foi feita), distinto do destino/produto. */
+export const obterDadosOrigemContrato = (
+    contrato: ContratoDashboardLinha,
+): { nome: string; sigla: string; codigo: CodigoEventoDashboard | null; chave: string } => {
+    const dadosContrato = contrato.dados_contrato || {};
+    const treinamentoOrigem = dadosContrato.treinamento_origem || {};
+    const camposVariaveis = dadosContrato.campos_variaveis || {};
+    const limpar = (valor: unknown) => String(valor ?? '').trim();
+    const nome =
+        limpar(treinamentoOrigem.treinamento) ||
+        limpar(treinamentoOrigem.nome) ||
+        limpar(camposVariaveis['Treinamento de Origem']) ||
+        limpar(camposVariaveis['Nome do Treinamento de Origem']) ||
+        limpar(camposVariaveis['Origem']) ||
+        limpar(dadosContrato.fluxo_evento_origem_treinamento) ||
+        limpar(dadosContrato.turma_origem?.treinamento) ||
+        limpar(dadosContrato.turma_origem?.nome_treinamento) ||
+        '';
+    const sigla =
+        limpar(treinamentoOrigem.sigla_treinamento) ||
+        limpar(treinamentoOrigem.sigla) ||
+        limpar(camposVariaveis['Sigla do Treinamento de Origem']) ||
+        limpar(dadosContrato.fluxo_evento_origem_sigla) ||
+        '';
+    const codigo = codigoEventoDashboard(nome || undefined, sigla || undefined);
+    const chave = codigo || rotuloTreinamentoDashboard(nome || 'Não informado', sigla || undefined);
+    return { nome: nome || 'Não informado', sigla, codigo, chave };
+};
+
 const mapearParaFatias = (mapa: Map<string, { quantidade: number; valor: number }>, ordenarPor: (label: string) => number): FatiaDashboardDto[] => {
     const totalValor = Array.from(mapa.values()).reduce((acc, item) => acc + item.valor, 0);
 
@@ -777,6 +806,37 @@ export const obterTurmaOrigemContrato = (
         return rotuloPorIdTurma.get(idOrigem) || '—';
     }
     return '—';
+};
+
+export const contratoCorrespondeOrigem = (
+    contrato: ContratoDashboardLinha,
+    origemFiltro?: string | null,
+): boolean => {
+    const filtro = String(origemFiltro || '').trim();
+    if (!filtro) return true;
+    const filtroNorm = normalizeForSearch(filtro);
+    const dados = obterDadosOrigemContrato(contrato);
+    if (dados.codigo && normalizeForSearch(dados.codigo) === filtroNorm) return true;
+    if (normalizeForSearch(dados.chave) === filtroNorm) return true;
+    if (normalizeForSearch(dados.nome).includes(filtroNorm)) return true;
+    if (normalizeForSearch(dados.sigla) === filtroNorm) return true;
+    const turmaOrigem = obterTurmaOrigemContrato(contrato);
+    return normalizeForSearch(turmaOrigem).includes(filtroNorm);
+};
+
+export const contratoCorrespondeProduto = (
+    contrato: ContratoDashboardLinha,
+    produtoFiltro?: string | null,
+): boolean => {
+    const filtro = String(produtoFiltro || '').trim();
+    if (!filtro) return true;
+    const filtroNorm = normalizeForSearch(filtro);
+    const produto = obterProdutoContrato(contrato);
+    if (normalizeForSearch(produto) === filtroNorm) return true;
+    const { nome, sigla, codigo } = obterDadosEventoContrato(contrato);
+    if (codigo && normalizeForSearch(codigo) === filtroNorm) return true;
+    if (normalizeForSearch(sigla) === filtroNorm) return true;
+    return normalizeForSearch(nome).includes(filtroNorm);
 };
 
 export const obterTurmaDestinoContrato = (

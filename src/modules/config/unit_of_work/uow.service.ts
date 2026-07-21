@@ -30,6 +30,10 @@ import { ConfiguracoesSistema } from '../entities/configuracoesSistema.entity';
 import { Empresas } from '../entities/empresas.entity';
 import { Notificacoes } from '../entities/notificacoes.entity';
 import { NotificacoesLeituras } from '../entities/notificacoesLeituras.entity';
+import { DuvidasArtigos } from '../entities/duvidasArtigos.entity';
+import { DuvidasConversas } from '../entities/duvidasConversas.entity';
+import { DuvidasMensagens } from '../entities/duvidasMensagens.entity';
+import { DuvidasSugestoes } from '../entities/duvidasSugestoes.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -263,6 +267,30 @@ export class UnitOfWorkService {
     get notificacoesRP(): Repository<Notificacoes> {
         if (!this._notificacoesRP) this._notificacoesRP = this.postgresEM.getRepository(Notificacoes);
         return this._notificacoesRP;
+    }
+
+    private _duvidasArtigosRP?: Repository<DuvidasArtigos>;
+    get duvidasArtigosRP(): Repository<DuvidasArtigos> {
+        if (!this._duvidasArtigosRP) this._duvidasArtigosRP = this.postgresEM.getRepository(DuvidasArtigos);
+        return this._duvidasArtigosRP;
+    }
+
+    private _duvidasConversasRP?: Repository<DuvidasConversas>;
+    get duvidasConversasRP(): Repository<DuvidasConversas> {
+        if (!this._duvidasConversasRP) this._duvidasConversasRP = this.postgresEM.getRepository(DuvidasConversas);
+        return this._duvidasConversasRP;
+    }
+
+    private _duvidasMensagensRP?: Repository<DuvidasMensagens>;
+    get duvidasMensagensRP(): Repository<DuvidasMensagens> {
+        if (!this._duvidasMensagensRP) this._duvidasMensagensRP = this.postgresEM.getRepository(DuvidasMensagens);
+        return this._duvidasMensagensRP;
+    }
+
+    private _duvidasSugestoesRP?: Repository<DuvidasSugestoes>;
+    get duvidasSugestoesRP(): Repository<DuvidasSugestoes> {
+        if (!this._duvidasSugestoesRP) this._duvidasSugestoesRP = this.postgresEM.getRepository(DuvidasSugestoes);
+        return this._duvidasSugestoesRP;
     }
 
     private _notificacoesLeiturasRP?: Repository<NotificacoesLeituras>;

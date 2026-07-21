@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
-import { ILike, IsNull } from 'typeorm';
+import { IsNull } from 'typeorm';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -332,7 +332,12 @@ export class DuvidasService {
         const q = query.trim();
         if (!q) return [];
 
+        const tokens = this.extrairTokensBusca(q);
+        if (tokens.length === 0) return [];
+
+        // 1) FTS com OR entre tokens (não exige todas as palavras)
         try {
+            const tsQuery = tokens.map((t) => `${t}:*`).join(' | ');
             const rows: DuvidasArtigos[] = await this.uow.duvidasArtigosRP.query(
                 `
                 SELECT a.*
@@ -340,33 +345,104 @@ export class DuvidasService {
                 WHERE a.deletado_em IS NULL
                   AND a.status = 'publicado'
                   AND to_tsvector('portuguese', coalesce(a.titulo, '') || ' ' || coalesce(a.conteudo_md, ''))
-                      @@ plainto_tsquery('portuguese', $1)
-                ORDER BY ts_rank(
+                      @@ to_tsquery('portuguese', $1)
+                ORDER BY
+                  CASE
+                    WHEN lower(a.titulo) LIKE ANY($4) THEN 0
+                    WHEN lower(a.caminho_origem) LIKE '%/manuais/%' THEN 1
+                    ELSE 2
+                  END,
+                  ts_rank(
                     to_tsvector('portuguese', coalesce(a.titulo, '') || ' ' || coalesce(a.conteudo_md, '')),
-                    plainto_tsquery('portuguese', $1)
-                ) DESC
+                    to_tsquery('portuguese', $1)
+                  ) DESC
                 LIMIT $2 OFFSET $3
                 `,
-                [q, limit, offset],
+                [tsQuery, limit, offset, tokens.map((t) => `%${t}%`)],
             );
             if (rows.length > 0) return rows;
         } catch (err) {
             this.logger.warn(`FTS falhou, usando ILIKE: ${err instanceof Error ? err.message : err}`);
         }
 
-        return this.uow.duvidasArtigosRP.find({
-            where: [
-                { status: 'publicado', deletado_em: IsNull(), titulo: ILike(`%${q}%`) },
-                { status: 'publicado', deletado_em: IsNull(), conteudo_md: ILike(`%${q}%`) },
-            ],
-            take: limit,
-            skip: offset,
-            order: { atualizado_em: 'DESC' },
-        });
+        // 2) Fallback: ILIKE por tokens (OR)
+        const likePatterns = tokens.map((t) => `%${t}%`);
+        const rows: DuvidasArtigos[] = await this.uow.duvidasArtigosRP.query(
+            `
+            SELECT a.*
+            FROM duvidas_artigos a
+            WHERE a.deletado_em IS NULL
+              AND a.status = 'publicado'
+              AND (
+                a.titulo ILIKE ANY($1)
+                OR a.conteudo_md ILIKE ANY($1)
+                OR a.caminho_origem ILIKE ANY($1)
+              )
+            ORDER BY
+              CASE
+                WHEN lower(a.titulo) LIKE ANY($4) THEN 0
+                WHEN lower(coalesce(a.caminho_origem, '')) LIKE '%/manuais/%' THEN 1
+                ELSE 2
+              END,
+              a.atualizado_em DESC
+            LIMIT $2 OFFSET $3
+            `,
+            [likePatterns, limit, offset, tokens.map((t) => `%${t}%`)],
+        );
+        return rows;
+    }
+
+    /** Extrai tokens úteis e adiciona sinônimos comuns do domínio. */
+    private extrairTokensBusca(query: string): string[] {
+        const stop = new Set([
+            'a', 'o', 'as', 'os', 'um', 'uma', 'uns', 'umas', 'de', 'da', 'do', 'das', 'dos',
+            'e', 'ou', 'em', 'no', 'na', 'nos', 'nas', 'para', 'por', 'com', 'sem', 'ao', 'à',
+            'como', 'faco', 'faço', 'fazer', 'quero', 'preciso', 'pode', 'me', 'meu', 'minha',
+            'aqui', 'isso', 'isto', 'esse', 'essa', 'este', 'esta', 'que', 'qual', 'quais',
+            'sobre', 'pra', 'pro', 'pelo', 'pela', 'ser', 'ter', 'há', 'eh', 'é',
+        ]);
+
+        const synonyms: Record<string, string[]> = {
+            cadastrar: ['registrar', 'criar', 'incluir', 'lancar', 'lançar'],
+            registrar: ['cadastrar', 'criar', 'incluir', 'lancar', 'lançar'],
+            venda: ['vendas', 'comercial'],
+            vendas: ['venda', 'comercial'],
+            aluno: ['alunos'],
+            alunos: ['aluno'],
+            turma: ['turmas'],
+            turmas: ['turma'],
+        };
+
+        const base = query
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+            .split(/\s+/)
+            .map((t) => t.trim())
+            .filter((t) => t.length >= 3 && !stop.has(t));
+
+        const expanded = new Set<string>();
+        for (const t of base) {
+            expanded.add(t);
+            for (const s of synonyms[t] || []) {
+                expanded.add(
+                    s
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .toLowerCase(),
+                );
+            }
+        }
+        return Array.from(expanded).slice(0, 12);
     }
 
     private async contarArtigosFts(query: string): Promise<number> {
+        const tokens = this.extrairTokensBusca(query);
+        if (tokens.length === 0) return 0;
+        const likePatterns = tokens.map((t) => `%${t}%`);
         try {
+            const tsQuery = tokens.map((t) => `${t}:*`).join(' | ');
             const rows: Array<{ count: string }> = await this.uow.duvidasArtigosRP.query(
                 `
                 SELECT COUNT(*)::text AS count
@@ -374,20 +450,30 @@ export class DuvidasService {
                 WHERE a.deletado_em IS NULL
                   AND a.status = 'publicado'
                   AND to_tsvector('portuguese', coalesce(a.titulo, '') || ' ' || coalesce(a.conteudo_md, ''))
-                      @@ plainto_tsquery('portuguese', $1)
+                      @@ to_tsquery('portuguese', $1)
                 `,
-                [query],
+                [tsQuery],
             );
-            return Number(rows[0]?.count || 0);
+            const n = Number(rows[0]?.count || 0);
+            if (n > 0) return n;
         } catch {
-            const [_, total] = await this.uow.duvidasArtigosRP.findAndCount({
-                where: [
-                    { status: 'publicado', deletado_em: IsNull(), titulo: ILike(`%${query}%`) },
-                    { status: 'publicado', deletado_em: IsNull(), conteudo_md: ILike(`%${query}%`) },
-                ],
-            });
-            return total;
+            /* fallback abaixo */
         }
+        const rows: Array<{ count: string }> = await this.uow.duvidasArtigosRP.query(
+            `
+            SELECT COUNT(*)::text AS count
+            FROM duvidas_artigos a
+            WHERE a.deletado_em IS NULL
+              AND a.status = 'publicado'
+              AND (
+                a.titulo ILIKE ANY($1)
+                OR a.conteudo_md ILIKE ANY($1)
+                OR a.caminho_origem ILIKE ANY($1)
+              )
+            `,
+            [likePatterns],
+        );
+        return Number(rows[0]?.count || 0);
     }
 
     /* ========================= Chat ========================= */
@@ -511,13 +597,14 @@ export class DuvidasService {
     ): Promise<{ texto: string; lacuna: boolean }> {
         const client = this.getAnthropic();
         const system = `Você é o assistente da Central de Dúvidas do IAM Control.
-Responda em português do Brasil, de forma clara e objetiva.
+Responda em português do Brasil, de forma clara e objetiva, em passo a passo quando for tutorial.
 Use APENAS as informações da DOCUMENTAÇÃO abaixo. Se a documentação não cobrir a pergunta, diga que não encontrou na base e termine a resposta com exatamente a marcação ${LACUNA_MARKER} (em uma linha própria).
 Quando usar informação da base, cite o título do artigo entre aspas.
+Priorize artigos de Manuais / passo a passo quando existirem no contexto.
 Não invente processos, telas ou regras que não estejam na documentação.
 
 Imagens: a documentação pode conter imagens em Markdown no formato ![descrição](url).
-Quando uma imagem ajudar a explicar (telas, fluxos, exemplos), inclua-a na resposta copiando exatamente a sintaxe ![descrição](url) da documentação.
+Quando uma imagem ajudar a explicar (telas, fluxos, exemplos), inclua-a na resposta copiando exatamente a sintaxe ![descrição](url) da documentação, na ordem dos passos.
 Não invente URLs de imagens. Não remova o protocolo/domínio das URLs existentes.
 
 DOCUMENTAÇÃO:

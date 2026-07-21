@@ -88,6 +88,8 @@ export class DocumentoResponseDto {
     updated_at: Date;
     criado_por?: number;
     atualizado_por?: number;
+    /** Nome do usuário que realizou a última alteração (log exibido no card). */
+    atualizado_por_nome?: string | null;
     deletado_em?: Date;
 }
 

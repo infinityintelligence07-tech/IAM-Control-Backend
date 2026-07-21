@@ -238,7 +238,8 @@ export class DocumentosService {
                 take: limit,
             });
 
-            const data = documentos.map((doc) => this.mapToResponseDto(doc));
+            const nomesUsuarios = await this.montarNomesUsuariosDocumentos(documentos);
+            const data = documentos.map((doc) => this.mapToResponseDto(doc, nomesUsuarios));
             const totalPages = Math.ceil(total / limit);
 
             return {
@@ -264,7 +265,8 @@ export class DocumentosService {
                 throw new NotFoundException('Documento não encontrado');
             }
 
-            return this.mapToResponseDto(documento);
+            const nomesUsuarios = await this.montarNomesUsuariosDocumentos([documento]);
+            return this.mapToResponseDto(documento, nomesUsuarios);
         } catch (error) {
             if (error instanceof NotFoundException) {
                 throw error;
@@ -294,7 +296,8 @@ export class DocumentosService {
             documento.atualizado_em = new Date();
 
             const savedDocumento = await this.uow.documentosRP.save(documento);
-            return this.mapToResponseDto(savedDocumento);
+            const nomesUsuarios = await this.montarNomesUsuariosDocumentos([savedDocumento]);
+            return this.mapToResponseDto(savedDocumento, nomesUsuarios);
         } catch (error) {
             if (error instanceof NotFoundException) {
                 throw error;
@@ -7209,7 +7212,8 @@ export class DocumentosService {
         return await this.termTemplateService.generateTermPDF(templateData);
     }
 
-    private mapToResponseDto(documento: Documentos): DocumentoResponseDto {
+    private mapToResponseDto(documento: Documentos, nomesUsuarios?: Record<number, string>): DocumentoResponseDto {
+        const idUltimaAlteracao = documento.atualizado_por ?? documento.criado_por ?? null;
         return {
             id: documento.id,
             documento: documento.documento,
@@ -7221,8 +7225,39 @@ export class DocumentosService {
             updated_at: documento.atualizado_em,
             criado_por: documento.criado_por,
             atualizado_por: documento.atualizado_por,
+            atualizado_por_nome: (idUltimaAlteracao && nomesUsuarios?.[idUltimaAlteracao]) || null,
             deletado_em: documento.deletado_em,
         };
+    }
+
+    /**
+     * Resolve os nomes dos usuários responsáveis pela última alteração dos
+     * documentos (log "quem e quando alterou" exibido nos cards de documentos).
+     */
+    private async montarNomesUsuariosDocumentos(documentos: Documentos[]): Promise<Record<number, string>> {
+        const ids = [
+            ...new Set(
+                documentos
+                    .flatMap((doc) => [doc.atualizado_por, doc.criado_por])
+                    .filter((id): id is number => typeof id === 'number' && id > 0),
+            ),
+        ];
+        if (ids.length === 0) return {};
+        try {
+            const usuarios = await this.uow.usuariosRP.find({
+                where: { id: In(ids) },
+                select: ['id', 'nome'],
+                withDeleted: true,
+            });
+            return Object.fromEntries(usuarios.map((usuario) => [usuario.id, usuario.nome]));
+        } catch (error) {
+            this.logger.warn(
+                `doc.repo.usuarios | Falha ao resolver nomes de usuários dos documentos: ${
+                    error instanceof Error ? error.message : 'Erro desconhecido'
+                }`,
+            );
+            return {};
+        }
     }
 
     /**

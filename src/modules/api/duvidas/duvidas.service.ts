@@ -8,6 +8,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { ILike, IsNull } from 'typeorm';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AdmZip = require('adm-zip') as typeof import('adm-zip');
 
@@ -24,6 +26,7 @@ import {
 const LACUNA_MARKER = '[[LACUNA]]';
 const MAX_CONTEXT_CHARS = 24000;
 const TOP_K_ARTIGOS = 8;
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']);
 
 @Injectable()
 export class DuvidasService {
@@ -137,9 +140,32 @@ export class DuvidasService {
         const entries = zip.getEntries();
         let importados = 0;
         let atualizados = 0;
+        let imagens = 0;
         let ignorados = 0;
         const erros: string[] = [];
 
+        // 1) Extrai imagens do vault → uploads/duvidas
+        const imageUrlByPath = new Map<string, string>();
+        for (const entry of entries) {
+            if (entry.isDirectory) continue;
+            const rawPath = entry.entryName.replace(/\\/g, '/');
+            if (this.shouldSkipObsidianPath(rawPath)) continue;
+            if (!this.isImagePath(rawPath)) continue;
+
+            try {
+                const caminho = this.normalizeVaultPath(rawPath);
+                const url = this.salvarImagemVault(caminho, entry.getData());
+                imageUrlByPath.set(caminho.toLowerCase(), url);
+                imageUrlByPath.set(path.basename(caminho).toLowerCase(), url);
+                imagens++;
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : 'erro desconhecido';
+                erros.push(`${rawPath}: ${msg}`);
+                this.logger.warn(`Falha ao importar imagem ${rawPath}: ${msg}`);
+            }
+        }
+
+        // 2) Importa notas Markdown e reescreve links de imagem
         for (const entry of entries) {
             if (entry.isDirectory) continue;
             const rawPath = entry.entryName.replace(/\\/g, '/');
@@ -148,13 +174,14 @@ export class DuvidasService {
                 continue;
             }
             if (!rawPath.toLowerCase().endsWith('.md')) {
-                ignorados++;
+                if (!this.isImagePath(rawPath)) ignorados++;
                 continue;
             }
 
             try {
-                const conteudo = entry.getData().toString('utf8');
                 const caminho = this.normalizeVaultPath(rawPath);
+                let conteudo = entry.getData().toString('utf8');
+                conteudo = this.reescreverImagensMarkdown(conteudo, caminho, imageUrlByPath);
                 const titulo = this.tituloFromPath(caminho, conteudo);
                 const slugBase = this.slugify(caminho.replace(/\.md$/i, ''));
 
@@ -191,11 +218,95 @@ export class DuvidasService {
             }
         }
 
-        return { importados, atualizados, ignorados, erros, total_md: importados + atualizados };
+        return {
+            importados,
+            atualizados,
+            imagens,
+            ignorados,
+            erros,
+            total_md: importados + atualizados,
+        };
     }
 
-    private shouldSkipObsidianPath(path: string): boolean {
-        const lower = path.toLowerCase();
+    private isImagePath(filePath: string): boolean {
+        return IMAGE_EXTS.has(path.extname(filePath).toLowerCase());
+    }
+
+    private getPublicBackendBase(): string {
+        return (
+            process.env.BACKEND_URL ||
+            this.config.get<string>('BACKEND_URL') ||
+            `http://localhost:${process.env.PORT || 3000}`
+        ).replace(/\/$/, '');
+    }
+
+    private salvarImagemVault(caminhoVault: string, data: Buffer): string {
+        const safeRel = caminhoVault
+            .replace(/^\/+/, '')
+            .split('/')
+            .map((p) => p.replace(/[<>:"|?*]/g, '_'))
+            .join('/');
+        const dest = path.join(process.cwd(), 'uploads', 'duvidas', safeRel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, data);
+        const urlPath = safeRel
+            .split('/')
+            .map((p) => encodeURIComponent(p))
+            .join('/');
+        return `${this.getPublicBackendBase()}/uploads/duvidas/${urlPath}`;
+    }
+
+    private resolveImageUrl(
+        ref: string,
+        mdPath: string,
+        imageUrlByPath: Map<string, string>,
+    ): string | null {
+        const cleaned = ref.trim().replace(/^<|>$/g, '').split('|')[0].trim();
+        if (!cleaned) return null;
+        if (/^https?:\/\//i.test(cleaned) || cleaned.startsWith('/uploads/')) {
+            return cleaned;
+        }
+
+        const mdDir = path.posix.dirname(mdPath.replace(/\\/g, '/'));
+        const candidates = [
+            cleaned,
+            path.posix.normalize(`${mdDir}/${cleaned}`),
+            path.posix.basename(cleaned),
+        ];
+
+        for (const c of candidates) {
+            const key = c.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+            const hit = imageUrlByPath.get(key);
+            if (hit) return hit;
+        }
+        return null;
+    }
+
+    private reescreverImagensMarkdown(
+        conteudo: string,
+        mdPath: string,
+        imageUrlByPath: Map<string, string>,
+    ): string {
+        // Obsidian: ![[arquivo.png]] ou ![[pasta/arquivo.png|400]]
+        let out = conteudo.replace(/!\[\[([^\]]+)\]\]/g, (_m, inner: string) => {
+            const url = this.resolveImageUrl(inner, mdPath, imageUrlByPath);
+            if (!url) return `![[${inner}]]`;
+            const alt = path.basename(inner.split('|')[0].trim());
+            return `![${alt}](${url})`;
+        });
+
+        // Markdown clássico: ![alt](path)
+        out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => {
+            const url = this.resolveImageUrl(src, mdPath, imageUrlByPath);
+            if (!url) return `![${alt}](${src})`;
+            return `![${alt}](${url})`;
+        });
+
+        return out;
+    }
+
+    private shouldSkipObsidianPath(pathName: string): boolean {
+        const lower = pathName.toLowerCase();
         if (lower.includes('/.obsidian/') || lower.startsWith('.obsidian/')) return true;
         if (lower.includes('/.trash/') || lower.startsWith('.trash/')) return true;
         if (lower.includes('__macosx/')) return true;
@@ -205,11 +316,6 @@ export class DuvidasService {
 
     private normalizeVaultPath(entryName: string): string {
         const parts = entryName.replace(/\\/g, '/').split('/').filter(Boolean);
-        // Se o zip tem uma pasta raiz única, remove para estabilizar caminho_origem
-        if (parts.length > 1) {
-            // Mantém path relativo completo (sem strip agressivo) — só limpa prefixo zip
-            return parts.join('/');
-        }
         return parts.join('/');
     }
 
@@ -409,6 +515,10 @@ Responda em português do Brasil, de forma clara e objetiva.
 Use APENAS as informações da DOCUMENTAÇÃO abaixo. Se a documentação não cobrir a pergunta, diga que não encontrou na base e termine a resposta com exatamente a marcação ${LACUNA_MARKER} (em uma linha própria).
 Quando usar informação da base, cite o título do artigo entre aspas.
 Não invente processos, telas ou regras que não estejam na documentação.
+
+Imagens: a documentação pode conter imagens em Markdown no formato ![descrição](url).
+Quando uma imagem ajudar a explicar (telas, fluxos, exemplos), inclua-a na resposta copiando exatamente a sintaxe ![descrição](url) da documentação.
+Não invente URLs de imagens. Não remova o protocolo/domínio das URLs existentes.
 
 DOCUMENTAÇÃO:
 ${contexto}`;

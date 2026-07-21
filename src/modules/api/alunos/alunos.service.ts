@@ -13,12 +13,13 @@ import {
     AlunoEmpresaResponseDto,
     DemografiaAlunosResponseDto,
     DemografiaFatiaDto,
+    GetDemografiaDto,
 } from './dto/alunos.dto';
-import { Like, FindManyOptions, ILike, IsNull, Not } from 'typeorm';
+import { Like, FindManyOptions, ILike, IsNull, Not, In } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
 import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
 import { AlunosEmpresas } from '../../config/entities/alunosEmpresas.entity';
-import { EProfissao } from '../../config/entities/enum';
+import { EPresencaTurmas, EProfissao, EStatusAlunosGeral } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 import { validarIdadeMinimaNascimentoAluno } from '../shared/aluno-idade.validator';
 
@@ -128,14 +129,149 @@ export class AlunosService {
             .filter((fatia) => fatia.quantidade > 0 || fatia.label === 'Não informado');
     }
 
+    private localLabel(cidade?: string | null, estado?: string | null): string {
+        const cidadeNorm = String(cidade || '')
+            .trim()
+            .replace(/\s+/g, ' ');
+        const estadoNorm = String(estado || '')
+            .trim()
+            .toUpperCase();
+
+        if (!cidadeNorm && !estadoNorm) {
+            return 'Não informado';
+        }
+        if (cidadeNorm && estadoNorm) {
+            return `${cidadeNorm} - ${estadoNorm}`;
+        }
+        return cidadeNorm || estadoNorm;
+    }
+
+    /** Top N locais + Outros + Não informado (quando houver). */
+    private montarFatiasLocais(
+        contagem: Map<string, number>,
+        total: number,
+        topN = 12,
+    ): DemografiaFatiaDto[] {
+        const naoInformado = contagem.get('Não informado') || 0;
+        const entradas = [...contagem.entries()]
+            .filter(([label]) => label !== 'Não informado')
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR'));
+
+        const top = entradas.slice(0, topN);
+        const resto = entradas.slice(topN);
+        const outrosQtd = resto.reduce((acc, [, qtd]) => acc + qtd, 0);
+
+        const fatias: DemografiaFatiaDto[] = top.map(([label, quantidade]) => ({
+            label,
+            quantidade,
+            percentual: total > 0 ? Number(((quantidade / total) * 100).toFixed(1)) : 0,
+        }));
+
+        if (outrosQtd > 0) {
+            fatias.push({
+                label: 'Outros',
+                quantidade: outrosQtd,
+                percentual: total > 0 ? Number(((outrosQtd / total) * 100).toFixed(1)) : 0,
+            });
+        }
+
+        if (naoInformado > 0) {
+            fatias.push({
+                label: 'Não informado',
+                quantidade: naoInformado,
+                percentual: total > 0 ? Number(((naoInformado / total) * 100).toFixed(1)) : 0,
+            });
+        }
+
+        return fatias;
+    }
+
+    private montarFatiasDeContagem(
+        contagem: Map<string, number>,
+        ordem: string[],
+        total: number,
+    ): DemografiaFatiaDto[] {
+        return ordem
+            .map((label) => {
+                const quantidade = contagem.get(label) || 0;
+                return {
+                    label,
+                    quantidade,
+                    percentual: total > 0 ? Number(((quantidade / total) * 100).toFixed(1)) : 0,
+                };
+            })
+            .filter((f) => f.quantidade > 0);
+    }
+
     /**
-     * Agrega demografia dos alunos ativos (gênero e faixa etária).
+     * Agrega demografia dos alunos (gênero, faixa etária, local),
+     * presença em turmas e status de vendas.
+     * Filtros opcionais: período (data da turma / criação da venda) e polo.
      * Restrito a Admin/Líder via guard no controller.
      */
-    async getDemografia(): Promise<DemografiaAlunosResponseDto> {
+    async getDemografia(filters: GetDemografiaDto = {}): Promise<DemografiaAlunosResponseDto> {
+        const dataInicio = filters.data_inicio || null;
+        const dataFim = filters.data_fim || null;
+        const idPolo =
+            filters.id_polo != null && Number.isFinite(Number(filters.id_polo))
+                ? Number(filters.id_polo)
+                : null;
+        const temFiltroPeriodo = Boolean(dataInicio || dataFim);
+
+        // ---- Alunos (demografia) ----
+        let alunosIdsEscopo: number[] | null = null;
+
+        if (temFiltroPeriodo) {
+            const escopoQb = this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .innerJoin('ta.id_turma_fk', 'turma')
+                .leftJoin('ta.id_aluno_fk', 'alunoEscopo')
+                .select('DISTINCT ta.id_aluno', 'id_aluno')
+                .where('ta.deletado_em IS NULL')
+                .andWhere('turma.deletado_em IS NULL')
+                .andWhere('ta.id_aluno IS NOT NULL');
+
+            if (idPolo != null) {
+                escopoQb.andWhere(
+                    '(turma.id_polo = :idPolo OR alunoEscopo.id_polo = :idPolo)',
+                    { idPolo },
+                );
+            }
+            if (dataInicio) {
+                escopoQb.andWhere('turma.data_inicio >= :dataInicio', { dataInicio });
+            }
+            if (dataFim) {
+                escopoQb.andWhere('(turma.data_inicio IS NULL OR turma.data_inicio <= :dataFim)', {
+                    dataFim,
+                });
+            }
+
+            const rows = await escopoQb.getRawMany<{ id_aluno: string | number }>();
+            alunosIdsEscopo = rows.map((r) => Number(r.id_aluno)).filter((id) => Number.isFinite(id));
+        }
+
+        const alunosWhere: any = { deletado_em: IsNull() };
+        if (alunosIdsEscopo) {
+            if (alunosIdsEscopo.length === 0) {
+                return {
+                    total: 0,
+                    porGenero: [],
+                    porFaixaEtaria: [],
+                    porLocal: [],
+                    porPresenca: [],
+                    porVendas: [],
+                    totalMatriculas: 0,
+                    totalVendas: 0,
+                };
+            }
+            alunosWhere.id = In(alunosIdsEscopo);
+        } else if (idPolo != null) {
+            alunosWhere.id_polo = idPolo;
+        }
+
         const alunos = await this.uow.alunosRP.find({
-            where: { deletado_em: IsNull() },
-            select: ['id', 'genero', 'data_nascimento'],
+            where: alunosWhere,
+            select: ['id', 'genero', 'data_nascimento', 'cidade', 'estado'],
         });
 
         const total = alunos.length;
@@ -144,6 +280,7 @@ export class AlunosService {
 
         const contagemGenero = new Map<string, number>(generoOrdem.map((l) => [l, 0]));
         const contagemFaixa = new Map<string, number>(faixaOrdem.map((l) => [l, 0]));
+        const contagemLocal = new Map<string, number>();
 
         for (const aluno of alunos) {
             const generoRaw = String(aluno.genero || '').trim();
@@ -155,6 +292,9 @@ export class AlunosService {
 
             const faixa = this.faixaEtariaLabel(this.calcularIdadeAnos(aluno.data_nascimento));
             contagemFaixa.set(faixa, (contagemFaixa.get(faixa) || 0) + 1);
+
+            const local = this.localLabel(aluno.cidade, aluno.estado);
+            contagemLocal.set(local, (contagemLocal.get(local) || 0) + 1);
         }
 
         const porGenero = this.montarFatias(contagemGenero, generoOrdem, total).filter(
@@ -163,8 +303,153 @@ export class AlunosService {
         const porFaixaEtaria = this.montarFatias(contagemFaixa, faixaOrdem, total).filter(
             (f) => f.quantidade > 0,
         );
+        const porLocal = this.montarFatiasLocais(contagemLocal, total);
 
-        return { total, porGenero, porFaixaEtaria };
+        // ---- Presença (matrículas em turmas) ----
+        const presencaQb = this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .innerJoin('ta.id_turma_fk', 'turma')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .select('ta.presenca_turma', 'presenca')
+            .addSelect('aluno.status_aluno_geral', 'status_geral')
+            .where('ta.deletado_em IS NULL')
+            .andWhere('turma.deletado_em IS NULL');
+
+        if (idPolo != null) {
+            presencaQb.andWhere('turma.id_polo = :idPoloPres', { idPoloPres: idPolo });
+        }
+        if (dataInicio) {
+            presencaQb.andWhere('turma.data_inicio >= :dataInicioPres', { dataInicioPres: dataInicio });
+        }
+        if (dataFim) {
+            presencaQb.andWhere('(turma.data_inicio IS NULL OR turma.data_inicio <= :dataFimPres)', {
+                dataFimPres: dataFim,
+            });
+        }
+        if (alunosIdsEscopo && alunosIdsEscopo.length > 0) {
+            presencaQb.andWhere('ta.id_aluno IN (:...alunosIdsPres)', {
+                alunosIdsPres: alunosIdsEscopo,
+            });
+        }
+
+        const presencaRows = await presencaQb.getRawMany<{
+            presenca: string | null;
+            status_geral: string | null;
+        }>();
+
+        const contagemPresenca = new Map<string, number>([
+            ['Presente', 0],
+            ['No-show', 0],
+            ['Não marcado', 0],
+        ]);
+
+        for (const row of presencaRows) {
+            const isInadimplente = row.status_geral === EStatusAlunosGeral.INADIMPLENTE;
+            if (row.presenca === EPresencaTurmas.PRESENTE && !isInadimplente) {
+                contagemPresenca.set('Presente', (contagemPresenca.get('Presente') || 0) + 1);
+            } else if (row.presenca === EPresencaTurmas.NO_SHOW) {
+                contagemPresenca.set('No-show', (contagemPresenca.get('No-show') || 0) + 1);
+            } else if (row.presenca === EPresencaTurmas.PRESENTE && isInadimplente) {
+                // Presente marcado mas inadimplente: conta como no-show operacional
+                contagemPresenca.set('No-show', (contagemPresenca.get('No-show') || 0) + 1);
+            } else {
+                contagemPresenca.set('Não marcado', (contagemPresenca.get('Não marcado') || 0) + 1);
+            }
+        }
+
+        const totalMatriculas = presencaRows.length;
+        const porPresenca = this.montarFatiasDeContagem(
+            contagemPresenca,
+            ['Presente', 'No-show', 'Não marcado'],
+            totalMatriculas,
+        );
+
+        // ---- Vendas (contratos) ----
+        const vendasQb = this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('c')
+            .withDeleted()
+            .innerJoin('c.id_turma_aluno_treinamento_fk', 'tat')
+            .innerJoin('tat.id_turma_aluno_fk', 'ta')
+            .leftJoin('ta.id_aluno_fk', 'aluno')
+            .leftJoin('ta.id_turma_fk', 'turma')
+            .select('c.id', 'id')
+            .addSelect('c.deletado_em', 'deletado_em')
+            .addSelect('c.hist_pendencia_pagamento', 'pendencia')
+            .addSelect('c.hist_receita_total', 'receita')
+            .addSelect('c.hist_canal_venda', 'canal')
+            .where(
+                '(c.hist_receita_total::numeric > 0 OR c.hist_canal_venda IS NOT NULL OR c.hist_pendencia_pagamento = true)',
+            );
+
+        if (idPolo != null) {
+            vendasQb.andWhere('(turma.id_polo = :idPoloVend OR aluno.id_polo = :idPoloVend)', {
+                idPoloVend: idPolo,
+            });
+        }
+        if (dataInicio) {
+            vendasQb.andWhere('c.criado_em >= :dataInicioVend', {
+                dataInicioVend: `${dataInicio}T00:00:00`,
+            });
+        }
+        if (dataFim) {
+            vendasQb.andWhere('c.criado_em <= :dataFimVend', {
+                dataFimVend: `${dataFim}T23:59:59.999`,
+            });
+        }
+        if (alunosIdsEscopo && alunosIdsEscopo.length > 0) {
+            vendasQb.andWhere('ta.id_aluno IN (:...alunosIdsVend)', {
+                alunosIdsVend: alunosIdsEscopo,
+            });
+        }
+
+        const vendasRows = await vendasQb.getRawMany<{
+            id: string;
+            deletado_em: Date | string | null;
+            pendencia: boolean | string | null;
+            receita: string | number | null;
+            canal: string | null;
+        }>();
+
+        const contagemVendas = new Map<string, number>([
+            ['Pagas', 0],
+            ['Com pendência', 0],
+            ['Canceladas', 0],
+        ]);
+
+        for (const row of vendasRows) {
+            if (row.deletado_em) {
+                contagemVendas.set('Canceladas', (contagemVendas.get('Canceladas') || 0) + 1);
+                continue;
+            }
+            const pendente =
+                row.pendencia === true ||
+                row.pendencia === 'true' ||
+                row.pendencia === 't' ||
+                row.pendencia === '1';
+            if (pendente) {
+                contagemVendas.set('Com pendência', (contagemVendas.get('Com pendência') || 0) + 1);
+            } else {
+                contagemVendas.set('Pagas', (contagemVendas.get('Pagas') || 0) + 1);
+            }
+        }
+
+        const totalVendas = vendasRows.length;
+        const porVendas = this.montarFatiasDeContagem(
+            contagemVendas,
+            ['Pagas', 'Com pendência', 'Canceladas'],
+            totalVendas,
+        );
+
+        return {
+            total,
+            porGenero,
+            porFaixaEtaria,
+            porLocal,
+            porPresenca,
+            porVendas,
+            totalMatriculas,
+            totalVendas,
+        };
     }
 
     async findAll(filters: GetAlunosDto): Promise<AlunosListResponseDto> {

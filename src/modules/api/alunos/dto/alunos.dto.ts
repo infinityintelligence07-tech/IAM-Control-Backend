@@ -563,8 +563,34 @@ export class DemografiaFatiaDto {
     percentual: number;
 }
 
+export class GetDemografiaDto {
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => (value ? String(value).trim().slice(0, 10) : undefined))
+    data_inicio?: string;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => (value ? String(value).trim().slice(0, 10) : undefined))
+    data_fim?: string;
+
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === undefined || value === null || value === '') return undefined;
+        const n = parseInt(String(value), 10);
+        return Number.isFinite(n) ? n : undefined;
+    })
+    id_polo?: number;
+}
+
 export class DemografiaAlunosResponseDto {
     total: number;
     porGenero: DemografiaFatiaDto[];
     porFaixaEtaria: DemografiaFatiaDto[];
+    porLocal: DemografiaFatiaDto[];
+    porPresenca: DemografiaFatiaDto[];
+    porVendas: DemografiaFatiaDto[];
+    totalMatriculas: number;
+    totalVendas: number;
 }

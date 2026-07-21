@@ -1,7 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { AppModule } from './app.module';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'node:path';
 import * as bodyParser from 'body-parser';
+import { AppModule } from './app.module';
 import { RequestUserContextInterceptor } from './common/interceptors/request-user-context.interceptor';
 import { installStructuredConsoleLogging } from './common/logging/structured-console';
 
@@ -23,7 +25,12 @@ async function bootstrap() {
     installStructuredConsoleLogging();
     configureProductionConsolePolicy();
 
-    const app = await NestFactory.create(AppModule);
+    const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+    // Arquivos estáticos (fotos, imagens da Central de Dúvidas) fora do prefixo /api
+    app.useStaticAssets(join(process.cwd(), 'uploads'), {
+        prefix: '/uploads',
+    });
 
     // Prefixo global para todas as rotas da API
     app.setGlobalPrefix('api');

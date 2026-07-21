@@ -12,6 +12,7 @@ import {
     SaveAlunoEmpresasDto,
     AlunoEmpresaResponseDto,
     DemografiaAlunosResponseDto,
+    GetDemografiaDto,
 } from './dto/alunos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
@@ -37,8 +38,8 @@ export class AlunosController {
     /** Demografia agregada — somente Admin ou Líder. Deve ficar antes de :id. */
     @Get('demografia')
     @UseGuards(AdminOrLiderGuard)
-    async getDemografia(): Promise<DemografiaAlunosResponseDto> {
-        return this.alunosService.getDemografia();
+    async getDemografia(@Query() filters: GetDemografiaDto): Promise<DemografiaAlunosResponseDto> {
+        return this.alunosService.getDemografia(filters);
     }
 
     @Get(':id/vinculos')

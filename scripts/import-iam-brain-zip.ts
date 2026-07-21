@@ -1,5 +1,5 @@
 /**
- * Importa o vault Obsidian "IAM Brain" direto no Postgres (sem HTTP).
+ * Importa o vault Obsidian "IAM Brain" (Markdown + imagens) direto no Postgres.
  *
  * Uso:
  *   npx ts-node -r tsconfig-paths/register scripts/import-iam-brain-zip.ts [caminho-zip]
@@ -12,6 +12,8 @@ const AdmZip = require('adm-zip');
 import { ds } from '../src/modules/config/database/typeORM.provider';
 import { DuvidasArtigos } from '../src/modules/config/entities/duvidasArtigos.entity';
 
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']);
+
 function shouldSkip(p: string): boolean {
     const lower = p.toLowerCase();
     return (
@@ -21,6 +23,10 @@ function shouldSkip(p: string): boolean {
         lower.includes('__macosx/') ||
         lower.endsWith('.ds_store')
     );
+}
+
+function isImage(filePath: string): boolean {
+    return IMAGE_EXTS.has(path.extname(filePath).toLowerCase());
 }
 
 function slugify(text: string): string {
@@ -41,7 +47,69 @@ function tituloFrom(caminho: string, conteudo: string): string {
     return (caminho.split('/').pop()?.replace(/\.md$/i, '') || 'Sem título').slice(0, 500);
 }
 
-async function uniqueSlug(repo: ReturnType<typeof ds.getRepository<DuvidasArtigos>>, base: string, ignoreId?: number) {
+function publicBase(): string {
+    return (process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, '');
+}
+
+function salvarImagem(caminhoVault: string, data: Buffer): string {
+    const safeRel = caminhoVault
+        .replace(/^\/+/, '')
+        .split('/')
+        .map((p) => p.replace(/[<>:"|?*]/g, '_'))
+        .join('/');
+    const dest = path.join(process.cwd(), 'uploads', 'duvidas', safeRel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, data);
+    const urlPath = safeRel
+        .split('/')
+        .map((p) => encodeURIComponent(p))
+        .join('/');
+    return `${publicBase()}/uploads/duvidas/${urlPath}`;
+}
+
+function resolveImageUrl(
+    ref: string,
+    mdPath: string,
+    map: Map<string, string>,
+): string | null {
+    const cleaned = ref.trim().replace(/^<|>$/g, '').split('|')[0].trim();
+    if (!cleaned) return null;
+    if (/^https?:\/\//i.test(cleaned) || cleaned.startsWith('/uploads/')) return cleaned;
+
+    const mdDir = path.posix.dirname(mdPath.replace(/\\/g, '/'));
+    const candidates = [
+        cleaned,
+        path.posix.normalize(`${mdDir}/${cleaned}`),
+        path.posix.basename(cleaned),
+    ];
+    for (const c of candidates) {
+        const key = c.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+        const hit = map.get(key);
+        if (hit) return hit;
+    }
+    return null;
+}
+
+function rewriteImages(conteudo: string, mdPath: string, map: Map<string, string>): string {
+    let out = conteudo.replace(/!\[\[([^\]]+)\]\]/g, (_m, inner: string) => {
+        const url = resolveImageUrl(inner, mdPath, map);
+        if (!url) return `![[${inner}]]`;
+        const alt = path.basename(inner.split('|')[0].trim());
+        return `![${alt}](${url})`;
+    });
+    out = out.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => {
+        const url = resolveImageUrl(src, mdPath, map);
+        if (!url) return `![${alt}](${src})`;
+        return `![${alt}](${url})`;
+    });
+    return out;
+}
+
+async function uniqueSlug(
+    repo: ReturnType<typeof ds.getRepository<DuvidasArtigos>>,
+    base: string,
+    ignoreId?: number,
+) {
     let slug = slugify(base);
     let n = 0;
     while (true) {
@@ -66,20 +134,42 @@ async function main() {
 
     const repo = ds.getRepository(DuvidasArtigos);
     const zip = new AdmZip(zipPath);
+    const entries = zip.getEntries();
+
     let importados = 0;
     let atualizados = 0;
+    let imagens = 0;
     let ignorados = 0;
 
-    for (const entry of zip.getEntries()) {
+    const imageUrlByPath = new Map<string, string>();
+
+    for (const entry of entries) {
         if (entry.isDirectory) continue;
         const rawPath = entry.entryName.replace(/\\/g, '/');
-        if (shouldSkip(rawPath) || !rawPath.toLowerCase().endsWith('.md')) {
+        if (shouldSkip(rawPath) || !isImage(rawPath)) continue;
+        const caminho = rawPath;
+        const url = salvarImagem(caminho, entry.getData());
+        imageUrlByPath.set(caminho.toLowerCase(), url);
+        imageUrlByPath.set(path.basename(caminho).toLowerCase(), url);
+        imagens++;
+        console.log('imagem:', caminho);
+    }
+
+    for (const entry of entries) {
+        if (entry.isDirectory) continue;
+        const rawPath = entry.entryName.replace(/\\/g, '/');
+        if (shouldSkip(rawPath)) {
             ignorados++;
+            continue;
+        }
+        if (!rawPath.toLowerCase().endsWith('.md')) {
+            if (!isImage(rawPath)) ignorados++;
             continue;
         }
 
         const caminho = rawPath;
-        const conteudo = entry.getData().toString('utf8');
+        let conteudo = entry.getData().toString('utf8');
+        conteudo = rewriteImages(conteudo, caminho, imageUrlByPath);
         const titulo = tituloFrom(caminho, conteudo);
         const existente = await repo.findOne({ where: { caminho_origem: caminho } as any });
 
@@ -107,7 +197,7 @@ async function main() {
         }
     }
 
-    console.log({ importados, atualizados, ignorados });
+    console.log({ importados, atualizados, imagens, ignorados });
     await ds.destroy();
 }
 

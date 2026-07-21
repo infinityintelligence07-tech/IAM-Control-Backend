@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { In, LessThanOrEqual } from 'typeorm';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { EStatusAlunosGeral } from '../../config/entities/enum';
+import { normalizarTermoBusca, sqlBuscaNormalizada } from '../shared/nome-aluno.helper';
 import { MasterclassPreCadastros } from '../../config/entities/masterclassPreCadastros.entity';
 import {
     CreateMasterclassEventoDto,
@@ -1082,12 +1083,16 @@ export class MasterclassService {
             return [];
         }
         const take = Math.min(Math.max(Number(limit) || 30, 1), 50);
-        const like = `%${busca}%`;
+        // Busca desconsiderando acentos e caracteres especiais (dos dois lados).
+        const like = `%${normalizarTermoBusca(busca)}%`;
 
         // O soft delete (deletado_em) é aplicado automaticamente pelo TypeORM.
         const preCadastros = await this.uow.masterclassPreCadastrosRP
             .createQueryBuilder('pc')
-            .where('(pc.nome_aluno ILIKE :like OR pc.email ILIKE :like OR pc.telefone ILIKE :like)', { like })
+            .where(
+                `(${sqlBuscaNormalizada('pc.nome_aluno')} LIKE :like OR ${sqlBuscaNormalizada('pc.email')} LIKE :like OR ${sqlBuscaNormalizada('pc.telefone')} LIKE :like)`,
+                { like },
+            )
             .orderBy('pc.nome_aluno', 'ASC')
             .addOrderBy('pc.data_evento', 'DESC')
             .take(take)

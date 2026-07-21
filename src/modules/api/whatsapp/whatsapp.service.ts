@@ -8,6 +8,7 @@ import * as jwt from 'jsonwebtoken';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 import { validarIdadeMinimaNascimentoAluno } from '../shared/aluno-idade.validator';
+import { nomeAlunoCaixaAlta } from '../shared/nome-aluno.helper';
 
 export interface CheckInStudentDto {
     alunoTurmaId: string;
@@ -1407,8 +1408,9 @@ Vamos Prosperar! 🙌`;
             await this.uow.alunosRP.update(
                 { id: aluno.id },
                 {
-                    nome: dados.nome || aluno.nome,
-                    nome_cracha: dados.nome_cracha || aluno.nome_cracha,
+                    // Nomes de alunos são sempre persistidos em caixa alta.
+                    nome: nomeAlunoCaixaAlta(dados.nome || aluno.nome),
+                    nome_cracha: nomeAlunoCaixaAlta(dados.nome_cracha || aluno.nome_cracha),
                     email: dados.email || aluno.email,
                     cpf: dados.cpf || aluno.cpf,
                     instagram: dados.instagram || aluno.instagram,

@@ -68,6 +68,7 @@ import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTrei
 import { TurmasAlunos } from '../../config/entities/turmasAlunos.entity';
 import { Usuarios } from '../../config/entities/usuarios.entity';
 import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
+import { nomeAlunoCaixaAlta, normalizarTermoBusca, sqlBuscaNormalizada } from '../shared/nome-aluno.helper';
 
 export interface PresenteSorteioPayload {
     descricao: string;
@@ -2248,10 +2249,14 @@ export class TurmasService {
                 };
             }
 
+            // Busca desconsiderando acentos e caracteres especiais (dos dois lados).
+            const searchNormalizado = normalizarTermoBusca(search);
             const qb = this.uow.alunosRP
                 .createQueryBuilder('aluno')
                 .where('aluno.deletado_em IS NULL')
-                .andWhere('(aluno.nome ILIKE :search OR aluno.email ILIKE :search)', { search: `%${search.trim()}%` });
+                .andWhere(`(${sqlBuscaNormalizada('aluno.nome')} LIKE :search OR ${sqlBuscaNormalizada('aluno.email')} LIKE :search)`, {
+                    search: `%${searchNormalizado}%`,
+                });
 
             if (id_turma) {
                 const alunosNaTurma = await this.uow.turmasAlunosRP.find({
@@ -4742,17 +4747,28 @@ export class TurmasService {
                 .getRawMany<{ id_turma: number; id_turma_aluno: string; tipo_acao: string; dia: string }>();
 
             // Movimentos de transferência (entrada/saída) no intervalo.
+            // Join na matrícula de origem para distinguir saída real (soft delete) de
+            // transferência réplica em turma congelada (aluno permanece na origem).
             const transferRows = await this.uow.historicoTransferenciasRP
                 .createQueryBuilder('h')
+                .leftJoin('turmas_alunos', 'ta_de', 'ta_de.id = h.id_turma_aluno_de')
                 .select('h.id_turma_de', 'id_turma_de')
                 .addSelect('h.id_turma_para', 'id_turma_para')
+                .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
+                .addSelect('ta_de.deletado_em', 'origem_deletado_em')
                 .addSelect(`to_char(h.criado_em, 'YYYY-MM-DD')`, 'dia')
                 .where('(h.id_turma_de IN (:...ids) OR h.id_turma_para IN (:...ids))', { ids })
                 .andWhere('h.id_turma_de <> h.id_turma_para')
                 .andWhere('h.deletado_em IS NULL')
                 .andWhere('h.criado_em >= :start', { start })
                 .andWhere('h.criado_em <= :reconUpper', { reconUpper })
-                .getRawMany<{ id_turma_de: number; id_turma_para: number; dia: string }>();
+                .getRawMany<{
+                    id_turma_de: number;
+                    id_turma_para: number;
+                    id_turma_aluno_de: string | null;
+                    origem_deletado_em: Date | string | null;
+                    dia: string;
+                }>();
 
             type Mov = { dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string; id_turma_aluno?: string; classificarCanal?: boolean };
             const movsPorTurma = new Map<number, Mov[]>();
@@ -4793,7 +4809,10 @@ export class TurmasService {
                     pushMov(para, { dia: row.dia, tipo: 'ENTRADA', categoria: 'Transferência' });
                 }
                 // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
-                if (idsSet.has(de) && !specialSet.has(para)) {
+                // Réplica (turma congelada/robô): matrícula de origem continua ativa → NÃO é saída.
+                const origemPermaneceuAtiva =
+                    row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
+                if (idsSet.has(de) && !specialSet.has(para) && !origemPermaneceuAtiva) {
                     pushMov(de, { dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência' });
                 }
             }
@@ -5084,13 +5103,16 @@ export class TurmasService {
             }
 
             // Transferências (entrada recebida / saída enviada) dentro do período.
+            // Join na matrícula de origem para ignorar réplicas (aluno permanece na origem).
             const transferRows = await this.uow.historicoTransferenciasRP
                 .createQueryBuilder('h')
+                .leftJoin('turmas_alunos', 'ta_de', 'ta_de.id = h.id_turma_aluno_de')
                 .select('h.id_aluno', 'id_aluno')
                 .addSelect('h.id_turma_de', 'id_turma_de')
                 .addSelect('h.id_turma_para', 'id_turma_para')
                 .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
                 .addSelect('h.id_turma_aluno_para', 'id_turma_aluno_para')
+                .addSelect('ta_de.deletado_em', 'origem_deletado_em')
                 .addSelect(`to_char(h.criado_em, 'YYYY-MM-DD')`, 'dia')
                 .where('(h.id_turma_de = :id_turma OR h.id_turma_para = :id_turma)', { id_turma })
                 .andWhere('h.id_turma_de <> h.id_turma_para')
@@ -5103,6 +5125,7 @@ export class TurmasService {
                     id_turma_para: number;
                     id_turma_aluno_de: string | null;
                     id_turma_aluno_para: string | null;
+                    origem_deletado_em: Date | string | null;
                     dia: string;
                 }>();
 
@@ -5121,7 +5144,10 @@ export class TurmasService {
                     });
                 }
                 // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
-                if (de === id_turma && !specialSet.has(para)) {
+                // Réplica (turma congelada/robô): matrícula de origem continua ativa → NÃO é saída.
+                const origemPermaneceuAtiva =
+                    row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
+                if (de === id_turma && !specialSet.has(para) && !origemPermaneceuAtiva) {
                     itens.push({
                         id_aluno: Number(row.id_aluno),
                         id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null,
@@ -6961,9 +6987,11 @@ export class TurmasService {
             // Atualizar campos fornecidos
             // O "como gostaria de ser chamado" agora vive apenas no cadastro do aluno.
             if (updateAlunoDto.nome_cracha !== undefined) {
-                if (turmaAluno.id_aluno_fk && turmaAluno.id_aluno_fk.nome_cracha !== updateAlunoDto.nome_cracha) {
-                    turmaAluno.id_aluno_fk.nome_cracha = updateAlunoDto.nome_cracha;
-                    await this.uow.alunosRP.update({ id: turmaAluno.id_aluno_fk.id }, { nome_cracha: updateAlunoDto.nome_cracha });
+                // Nomes de alunos são sempre persistidos em caixa alta.
+                const nomeCrachaNormalizado = nomeAlunoCaixaAlta(updateAlunoDto.nome_cracha);
+                if (turmaAluno.id_aluno_fk && turmaAluno.id_aluno_fk.nome_cracha !== nomeCrachaNormalizado) {
+                    turmaAluno.id_aluno_fk.nome_cracha = nomeCrachaNormalizado;
+                    await this.uow.alunosRP.update({ id: turmaAluno.id_aluno_fk.id }, { nome_cracha: nomeCrachaNormalizado });
                 }
             }
             if (updateAlunoDto.url_comprovante_pgto !== undefined) {

@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import { ILike, In } from 'typeorm';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { EOrigemAlunos, EStatusAlunosTurmas, ETipoVinculoAluno } from '@/modules/config/entities/enum';
+import { nomeAlunoCaixaAlta } from '@/modules/api/shared/nome-aluno.helper';
 
 /** Pasta "Alunos" no Drive: https://drive.google.com/drive/u/0/folders/1wF3z55eRG937fI3O5MXNNPP8nTUws3uD */
 const DRIVE_FOLDER_ALUNOS_ID = '1wF3z55eRG937fI3O5MXNNPP8nTUws3uD';
@@ -495,8 +496,8 @@ export class UploadService {
                         const base = candidates.find((c) => c.email === email);
                         if (!base) return null;
                         return this.uow.alunosRP.create({
-                            nome: base.nomeOriginal || 'Aluno',
-                            nome_cracha: base.nomeOriginal || 'Aluno',
+                            nome: nomeAlunoCaixaAlta(base.nomeOriginal || 'Aluno'),
+                            nome_cracha: nomeAlunoCaixaAlta(base.nomeOriginal || 'Aluno'),
                             email,
                             telefone_um: base.telefone || '00000000000',
                             possui_deficiencia: false,
@@ -540,8 +541,8 @@ export class UploadService {
                 for (const aluno of alunosParaAtualizar) {
                     const nomeDesejado = nomePreferencialPorEmail.get(aluno.email);
                     if (!nomeDesejado) continue;
-                    aluno.nome = nomeDesejado;
-                    aluno.nome_cracha = nomeDesejado;
+                    aluno.nome = nomeAlunoCaixaAlta(nomeDesejado);
+                    aluno.nome_cracha = nomeAlunoCaixaAlta(nomeDesejado);
                 }
                 await this.uow.alunosRP.save(alunosParaAtualizar, { chunk: alunosChunkSize });
             }
@@ -1154,8 +1155,8 @@ export class UploadService {
                     const base = firstCandidateByEmail.get(email);
                     if (!base) return null;
                     return this.uow.alunosRP.create({
-                        nome: base.nomeOriginal || 'Aluno',
-                        nome_cracha: base.nomeOriginal || 'Aluno',
+                        nome: nomeAlunoCaixaAlta(base.nomeOriginal || 'Aluno'),
+                        nome_cracha: nomeAlunoCaixaAlta(base.nomeOriginal || 'Aluno'),
                         email,
                         cpf: base.cpfCnpj || null,
                         telefone_um: base.telefone || '00000000000',
@@ -1199,8 +1200,8 @@ export class UploadService {
                 for (const aluno of alunosParaAtualizar) {
                     const nomeDesejado = nomePreferencialPorEmail.get(aluno.email);
                     if (!nomeDesejado) continue;
-                    aluno.nome = nomeDesejado;
-                    aluno.nome_cracha = nomeDesejado;
+                    aluno.nome = nomeAlunoCaixaAlta(nomeDesejado);
+                    aluno.nome_cracha = nomeAlunoCaixaAlta(nomeDesejado);
                 }
                 await this.uow.alunosRP.save(alunosParaAtualizar, { chunk: alunosChunkSize });
             }
@@ -2669,7 +2670,7 @@ export class UploadService {
             if (aluno.deletado_em) {
                 aluno.deletado_em = null;
             }
-            aluno.nome = params.nome || aluno.nome;
+            aluno.nome = nomeAlunoCaixaAlta(params.nome) || aluno.nome;
             aluno.telefone_um = params.telefone || aluno.telefone_um;
             aluno = await this.uow.alunosRP.save(aluno);
             return aluno;
@@ -2677,8 +2678,8 @@ export class UploadService {
 
         try {
             const novo = this.uow.alunosRP.create({
-                nome: params.nome,
-                nome_cracha: params.nome,
+                nome: nomeAlunoCaixaAlta(params.nome),
+                nome_cracha: nomeAlunoCaixaAlta(params.nome),
                 email: params.email,
                 telefone_um: params.telefone,
                 possui_deficiencia: false,

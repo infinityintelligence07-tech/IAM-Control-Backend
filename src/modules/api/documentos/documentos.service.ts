@@ -35,6 +35,7 @@ import {
     ExcluirContratoDto,
 } from './dto/documentos.dto';
 import { ZapSignService, ZapSignResponse } from './zapsign.service';
+import { normalizarTermoBusca, sqlBuscaNormalizada } from '../shared/nome-aluno.helper';
 import { ContractTemplateService } from './contract-template.service';
 import { TermTemplateService } from './term-template.service';
 import PDFDocument from 'pdfkit';
@@ -3313,6 +3314,9 @@ export class DocumentosService {
                         turma_bonus_info: dadosContrato.turma_bonus_info || null,
                     },
                     observacoes: dadosContrato.observacoes || '',
+                    // Contratante: 'PF' (CPF do aluno) ou 'PJ' (CNPJ da empresa do aluno).
+                    tipo_pessoa: dadosContrato.tipo_pessoa || 'PF',
+                    empresa_contratante: dadosContrato.empresa_contratante || null,
                     data_inicio_treinamento: dadosContrato.data_inicio_treinamento,
                     data_final_treinamento: dadosContrato.data_final_treinamento,
                     cidade_treinamento: dadosContrato.cidade_treinamento,
@@ -4196,9 +4200,10 @@ export class DocumentosService {
                 }),
             );
 
-        const termo = String(params.termo || '').trim();
+        const termo = normalizarTermoBusca(params.termo);
         if (termo) {
-            qb.andWhere(`${sqlAlunoNome} ILIKE :termoVinculo`, { termoVinculo: `%${this.escaparLikeSql(termo)}%` });
+            // Busca por nome desconsiderando acentos e caracteres especiais.
+            qb.andWhere(`${sqlBuscaNormalizada(`(${sqlAlunoNome})`)} LIKE :termoVinculo`, { termoVinculo: `%${termo}%` });
         }
 
         const rows = await qb.orderBy('contrato.criado_em', 'DESC').limit(200).getRawMany<{

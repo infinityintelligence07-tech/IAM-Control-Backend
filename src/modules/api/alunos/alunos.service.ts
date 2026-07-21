@@ -17,13 +17,14 @@ import {
     DemografiaPoloDto,
     GetDemografiaDto,
 } from './dto/alunos.dto';
-import { Like, FindManyOptions, ILike, IsNull, Not, In } from 'typeorm';
+import { Like, FindManyOptions, ILike, IsNull, Not, In, Raw } from 'typeorm';
 import { Alunos } from '../../config/entities/alunos.entity';
 import { AlunosVinculos } from '../../config/entities/alunosVinculos.entity';
 import { AlunosEmpresas } from '../../config/entities/alunosEmpresas.entity';
 import { EPresencaTurmas, EProfissao, EStatusAlunosGeral } from '../../config/entities/enum';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 import { validarIdadeMinimaNascimentoAluno } from '../shared/aluno-idade.validator';
+import { nomeAlunoCaixaAlta, normalizarTermoBusca, sqlBuscaNormalizada } from '../shared/nome-aluno.helper';
 
 /** Campos cadastrais monitorados para registrar alterações no histórico de observações do aluno. */
 const CAMPOS_CADASTRAIS_HISTORICO: Array<{ campo: keyof Alunos; label: string }> = [
@@ -618,7 +619,13 @@ export class AlunosService {
         const whereConditions: any = {};
 
         if (nome) {
-            whereConditions.nome = ILike(`%${nome}%`);
+            // Busca desconsiderando acentos e caracteres especiais (dos dois lados).
+            const nomeNormalizado = normalizarTermoBusca(nome);
+            if (nomeNormalizado) {
+                whereConditions.nome = Raw((alias) => `${sqlBuscaNormalizada(alias)} LIKE :nomeNormalizado`, {
+                    nomeNormalizado: `%${nomeNormalizado}%`,
+                });
+            }
         }
 
         if (email) {
@@ -799,6 +806,13 @@ export class AlunosService {
         try {
             validateBase64ImageField(createAlunoDto.url_foto_aluno, 'Foto do aluno');
             validarIdadeMinimaNascimentoAluno(createAlunoDto.data_nascimento);
+            // Nomes de alunos são sempre persistidos em caixa alta.
+            if (createAlunoDto.nome != null) {
+                createAlunoDto.nome = nomeAlunoCaixaAlta(createAlunoDto.nome);
+            }
+            if (createAlunoDto.nome_cracha != null) {
+                createAlunoDto.nome_cracha = nomeAlunoCaixaAlta(createAlunoDto.nome_cracha);
+            }
             // Verificar se já existe um aluno com esse email (incluindo deletados)
             // Usar query SQL direta para garantir que busca incluindo deletados
             const queryRunner = this.uow.alunosRP.manager.connection.createQueryRunner();
@@ -1093,6 +1107,13 @@ export class AlunosService {
             validateBase64ImageField(updateAlunoDto.url_foto_aluno, 'Foto do aluno');
             if (updateAlunoDto.data_nascimento !== undefined) {
                 validarIdadeMinimaNascimentoAluno(updateAlunoDto.data_nascimento);
+            }
+            // Nomes de alunos são sempre persistidos em caixa alta.
+            if (updateAlunoDto.nome != null) {
+                updateAlunoDto.nome = nomeAlunoCaixaAlta(updateAlunoDto.nome);
+            }
+            if (updateAlunoDto.nome_cracha != null) {
+                updateAlunoDto.nome_cracha = nomeAlunoCaixaAlta(updateAlunoDto.nome_cracha);
             }
             const aluno = await this.uow.alunosRP.findOne({
                 where: {

@@ -4809,6 +4809,57 @@ export class TurmasService {
                 }
             }
 
+            // Estratificação do saldo INICIAL por estratégia/canal: matrículas ativas no
+            // início do período (mesma reconstrução por criado_em/deletado_em do modal
+            // de alunos do saldo), classificadas pela regra unificada do dashboard.
+            const ORDEM_CANAIS_EXTRATO = [
+                'Vendas em Eventos',
+                'Masterclass',
+                'Time de Vendas',
+                'Transbordo',
+                'Liberty',
+                'Bônus',
+                'Cortesia/Sorteio',
+                'Transferência',
+                'Presente',
+            ];
+            const inicioRows = await this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .withDeleted()
+                .select('ta.id_turma', 'id_turma')
+                .addSelect('ta.id', 'id_turma_aluno')
+                .where('ta.id_turma IN (:...ids)', { ids })
+                .andWhere('ta.criado_em < :start', { start })
+                .andWhere('(ta.deletado_em IS NULL OR ta.deletado_em >= :start)', { start })
+                .getRawMany<{ id_turma: number; id_turma_aluno: string }>();
+            const inicioIdsPorTurma = new Map<number, string[]>();
+            for (const r of inicioRows) {
+                const idTurma = Number(r.id_turma);
+                const arr = inicioIdsPorTurma.get(idTurma) ?? [];
+                arr.push(String(r.id_turma_aluno));
+                inicioIdsPorTurma.set(idTurma, arr);
+            }
+            const inicioDetalhesPorTurma = new Map<number, ExtratoMovimentacaoDetalheDto[]>();
+            for (const [idTurma, idsAlunos] of inicioIdsPorTurma.entries()) {
+                const classif = await this.getClassificacaoOrigemPorTurmaAluno(idTurma, idsAlunos);
+                const contagem = new Map<string, number>();
+                for (const idAluno of idsAlunos) {
+                    const canal = classif.get(idAluno)?.canal || 'Vendas em Eventos';
+                    contagem.set(canal, (contagem.get(canal) ?? 0) + 1);
+                }
+                const detalhes = Array.from(contagem.entries())
+                    .map(([label, total]) => ({ label, total }))
+                    .sort((a, b) => {
+                        const ia = ORDEM_CANAIS_EXTRATO.indexOf(a.label);
+                        const ib = ORDEM_CANAIS_EXTRATO.indexOf(b.label);
+                        if (ia !== -1 && ib !== -1) return ia - ib;
+                        if (ia !== -1) return -1;
+                        if (ib !== -1) return 1;
+                        return b.total - a.total;
+                    });
+                inicioDetalhesPorTurma.set(idTurma, detalhes);
+            }
+
             // Dias do período (para a quebra diária encadeada).
             const diasPeriodo: string[] = [];
             {
@@ -4908,6 +4959,7 @@ export class TurmasService {
                     saida: saidaPeriodo,
                     resultado,
                     performance,
+                    inicio_detalhes: inicioDetalhesPorTurma.get(turma.id) ?? [],
                     entrada_detalhes: agruparDetalhes(movsPeriodo, 'ENTRADA', turma.id),
                     saida_detalhes: agruparDetalhes(movsPeriodo, 'SAIDA', turma.id),
                     por_dia,

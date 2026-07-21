@@ -1279,6 +1279,12 @@ export class ExtratoMovimentacaoTurmaDto {
     resultado: number;
     /** Performance do período: (entrada - saída) / saldo * 100. */
     performance: number;
+    /**
+     * Estratificação do saldo inicial por estratégia/canal de origem (mesma
+     * partição do modal de alunos do saldo): quantos alunos de cada estratégia
+     * compunham a turma no início do período.
+     */
+    inicio_detalhes: ExtratoMovimentacaoDetalheDto[];
     entrada_detalhes: ExtratoMovimentacaoDetalheDto[];
     saida_detalhes: ExtratoMovimentacaoDetalheDto[];
     por_dia: ExtratoMovimentacaoDiaDto[];

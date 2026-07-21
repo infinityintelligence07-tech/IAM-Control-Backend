@@ -189,7 +189,7 @@ export class WhatsAppBulkQueueService {
     /**
      * Aplica um teto de tempo à promise do envio: se o provedor travar, a
      * tentativa falha por timeout e a fila continua (o erro NÃO se propaga
-     * como "timeout exceeded" para a request HTTP, que já foi respondida).
+     * como "timeout exceeded" para a request HTTP, que já foi respondida)
      */
     private async comTimeout<T>(promise: Promise<T>, ms: number, contexto: string): Promise<T> {
         let timer: NodeJS.Timeout | undefined;

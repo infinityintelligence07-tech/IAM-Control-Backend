@@ -1135,6 +1135,43 @@ export class DocumentosService {
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
             this.invalidarCachesHistoricoVendas();
 
+            // CAUSA RAIZ das vendas sem aluno na turma: a matrícula do comprador
+            // na turma de destino era feita pelo FRONTEND em uma request separada
+            // (após o contrato), com falha engolida em console.warn — timeout/rede
+            // no navegador deixava a venda registrada sem matrícula. Agora a
+            // matrícula é criada aqui no servidor, na mesma request do contrato.
+            // "Aluno já está matriculado" não é erro (renovação de mentoria ou
+            // aluno já presente na turma). O resultado vai na resposta para o
+            // frontend decidir se precisa de fallback/aviso.
+            let matriculaDestino: { criada: boolean; ja_matriculado?: boolean; erro?: string } | undefined;
+            if (criarContratoDto.id_turma_destino) {
+                const idTurmaDestinoMatricula = Number(criarContratoDto.id_turma_destino);
+                try {
+                    await this.turmasService.addAlunoTurma(
+                        idTurmaDestinoMatricula,
+                        {
+                            id_aluno: parseInt(criarContratoDto.id_aluno),
+                            origem_aluno: 'COMPROU_INGRESSO',
+                            pendencia_pagamento: criarContratoDto.pendencia_pagamento ?? false,
+                            quantidade_inscricoes: criarContratoDto.quantidade_inscricoes && criarContratoDto.quantidade_inscricoes > 0 ? criarContratoDto.quantidade_inscricoes : 1,
+                            comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda) ?? undefined,
+                        },
+                        userId,
+                    );
+                    matriculaDestino = { criada: true };
+                } catch (error) {
+                    const mensagem = error instanceof Error ? error.message : 'Erro desconhecido';
+                    if (mensagem.toLowerCase().includes('já está matriculado')) {
+                        matriculaDestino = { criada: false, ja_matriculado: true };
+                    } else {
+                        this.logger.error(
+                            `zapsign.create.contract | Falha ao matricular comprador na turma de destino id=${idTurmaDestinoMatricula} contrato=${savedContrato.id}: ${mensagem}`,
+                        );
+                        matriculaDestino = { criada: false, erro: mensagem };
+                    }
+                }
+            }
+
             // Comprovante compartilhado: registra nas compras relacionadas quem
             // está pagando por elas (best-effort: falha não derruba a venda).
             try {
@@ -1172,6 +1209,7 @@ export class DocumentosService {
                 signers: signersResponse,
                 created_at: zapSignResponse?.created_at ?? new Date().toISOString(),
                 file_url: zapSignResponse?.original_file,
+                matricula_destino: matriculaDestino,
             };
         } catch (error: any) {
             this.logger.error('zapsign.create.contract | Erro ao criar contrato no ZapSign', error instanceof Error ? error.stack : undefined);

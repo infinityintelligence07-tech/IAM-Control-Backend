@@ -457,6 +457,16 @@ export class RespostaContratoZapSignDto {
     }>;
     created_at: string;
     file_url?: string;
+    /**
+     * Resultado da matrícula do comprador na turma de destino, criada pelo
+     * backend na mesma request do contrato (raiz das vendas que ficavam sem
+     * aluno na turma quando a matrícula dependia de uma request do frontend).
+     */
+    matricula_destino?: {
+        criada: boolean;
+        ja_matriculado?: boolean;
+        erro?: string;
+    };
 }
 
 export class AtualizarStatusContratoDto {

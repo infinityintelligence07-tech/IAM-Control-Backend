@@ -240,6 +240,12 @@ export class DuvidasService {
         ).replace(/\/$/, '');
     }
 
+    /** URL pública estável via API (funciona atrás de proxy /api). */
+    private buildMediaUrl(caminhoVault: string): string {
+        const safeRel = caminhoVault.replace(/^\/+/, '').replace(/\\/g, '/');
+        return `${this.getPublicBackendBase()}/api/duvidas-media?path=${encodeURIComponent(safeRel)}`;
+    }
+
     private salvarImagemVault(caminhoVault: string, data: Buffer): string {
         const safeRel = caminhoVault
             .replace(/^\/+/, '')
@@ -249,11 +255,7 @@ export class DuvidasService {
         const dest = path.join(process.cwd(), 'uploads', 'duvidas', safeRel);
         fs.mkdirSync(path.dirname(dest), { recursive: true });
         fs.writeFileSync(dest, data);
-        const urlPath = safeRel
-            .split('/')
-            .map((p) => encodeURIComponent(p))
-            .join('/');
-        return `${this.getPublicBackendBase()}/uploads/duvidas/${urlPath}`;
+        return this.buildMediaUrl(safeRel);
     }
 
     private resolveImageUrl(
@@ -523,7 +525,8 @@ export class DuvidasService {
             take: 20,
         });
 
-        const { texto, lacuna } = await this.chamarClaude(contexto, historico, mensagem);
+        const { texto: textoBruto, lacuna } = await this.chamarClaude(contexto, historico, mensagem);
+        const texto = this.normalizarImagensNaResposta(textoBruto, artigos);
 
         const fontes = artigos.map((a) => ({
             id: a.id,
@@ -576,7 +579,8 @@ export class DuvidasService {
         let total = 0;
         const parts: string[] = [];
         for (const a of artigos) {
-            const block = `### [${a.id}] ${a.titulo}\nCaminho: ${a.caminho_origem || 'n/a'}\n\n${a.conteudo_md}`;
+            const conteudo = this.reescreverUrlsAntigasParaMedia(a.conteudo_md);
+            const block = `### [${a.id}] ${a.titulo}\nCaminho: ${a.caminho_origem || 'n/a'}\n\n${conteudo}`;
             if (total + block.length > MAX_CONTEXT_CHARS) {
                 const remaining = MAX_CONTEXT_CHARS - total;
                 if (remaining > 200) {
@@ -588,6 +592,71 @@ export class DuvidasService {
             total += block.length;
         }
         return parts.join('\n\n---\n\n');
+    }
+
+    /** Converte URLs antigas /uploads/duvidas/... para o endpoint estável da API. */
+    private reescreverUrlsAntigasParaMedia(md: string): string {
+        return md.replace(
+            /!\[([^\]]*)\]\(([^)]+)\)/g,
+            (_m, alt: string, src: string) => {
+                const media = this.toMediaUrl(src.trim());
+                return `![${alt}](${media || src.trim()})`;
+            },
+        );
+    }
+
+    private toMediaUrl(src: string): string | null {
+        const marker = '/uploads/duvidas/';
+        const idx = src.indexOf(marker);
+        if (idx >= 0) {
+            let rel = src.slice(idx + marker.length).split('?')[0];
+            try {
+                rel = decodeURIComponent(rel);
+            } catch {
+                /* keep */
+            }
+            return this.buildMediaUrl(rel);
+        }
+        if (src.includes('/api/duvidas-media?path=')) {
+            return src;
+        }
+        return null;
+    }
+
+    /**
+     * Garante que imagens na resposta usem URLs válidas da documentação
+     * (o modelo às vezes altera/quebra o path).
+     */
+    private normalizarImagensNaResposta(texto: string, artigos: DuvidasArtigos[]): string {
+        const doc = artigos.map((a) => this.reescreverUrlsAntigasParaMedia(a.conteudo_md)).join('\n');
+        const docUrls = [...doc.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1].trim());
+        if (docUrls.length === 0) return this.reescreverUrlsAntigasParaMedia(texto);
+
+        let seq = 0;
+        return texto.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, (_full, alt: string, src: string) => {
+            const raw = (src || '').trim();
+            const asMedia = this.toMediaUrl(raw);
+            if (asMedia) return `![${alt}](${asMedia})`;
+
+            const base = path.basename(raw.split('?')[0] || '').toLowerCase();
+            if (base) {
+                const byBase = docUrls.find((u) => {
+                    try {
+                        const q = new URL(u, 'http://local').searchParams.get('path');
+                        if (q) return path.basename(decodeURIComponent(q)).toLowerCase() === decodeURIComponent(base).toLowerCase();
+                    } catch {
+                        /* ignore */
+                    }
+                    return path.basename(decodeURIComponent(u.split('?')[0])).toLowerCase() === decodeURIComponent(base).toLowerCase();
+                });
+                if (byBase) return `![${alt}](${byBase})`;
+            }
+
+            if (seq < docUrls.length) {
+                return `![${alt}](${docUrls[seq++]})`;
+            }
+            return alt ? `*(imagem: ${alt})*` : '';
+        });
     }
 
     private async chamarClaude(

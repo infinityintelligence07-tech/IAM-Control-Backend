@@ -7,6 +7,11 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * `contract-destination-profile.ts` / etiquetas) vão para Liberty; os demais
  * para IAM. O vínculo fica ajustável depois pela tela de cadastro de empresas.
  *
+ * Nota: a lista Liberty desta seed incluía também Mesa de Destino, Porsche e
+ * Líder XP. A visualização por empresa foi refinada depois em
+ * `1776900000000-RestringirTreinamentosLibertyEmpresa` (só liberty / legacy xp /
+ * imersão de negócios).
+ *
  * A tabela/coluna também são gerenciadas pelas entities (synchronize); a
  * migration garante a existência em ambientes sem synchronize e semeia os
  * registros iniciais. Todas as operações são idempotentes.

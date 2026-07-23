@@ -965,6 +965,8 @@ export type MetricasListaTipo =
     | 'fat_bruto'
     | 'liq_bruto'
     | 'liquidez_liq'
+    | 'cartao'
+    | 'link'
     | 'pix'
     | 'boleto'
     | 'pendencia';

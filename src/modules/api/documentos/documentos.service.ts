@@ -5483,7 +5483,16 @@ export class DocumentosService {
             // respeitadas.
             const buscaPorTextoAtiva = Boolean(this.normalizarTexto(filtros?.search));
             const temDatasExplicitas = Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
-            const aplicarFiltroPeriodo = (!filtroTurmaSemPeriodo || temDatasExplicitas) && (!buscaPorTextoAtiva || temDatasExplicitas);
+            // Filtro por aluno (aba Contratos / deep link): sem datas explícitas,
+            // não restringe aos últimos 30 dias — senão some o histórico antigo.
+            const filtroPorAlunoAtivo = (() => {
+                const id = Number(filtros?.id_aluno);
+                return Number.isFinite(id) && id > 0;
+            })();
+            const aplicarFiltroPeriodo =
+                (!filtroTurmaSemPeriodo || temDatasExplicitas) &&
+                (!buscaPorTextoAtiva || temDatasExplicitas) &&
+                (!filtroPorAlunoAtivo || temDatasExplicitas);
             const dataInicioPadrao = (() => {
                 const d = new Date();
                 d.setDate(d.getDate() - 30);
@@ -5686,7 +5695,19 @@ export class DocumentosService {
             if (filtros?.id_aluno) {
                 const idAluno = Number(filtros.id_aluno);
                 if (Number.isFinite(idAluno) && idAluno > 0) {
-                    baseQb.andWhere('aluno.id = :idAluno', { idAluno });
+                    // Matrícula vinculada OU id gravado no JSON do contrato
+                    // (cobre casos em que o join turma_aluno→aluno não resolve).
+                    baseQb.andWhere(
+                        `(aluno.id = :idAluno
+                          OR COALESCE(
+                            contrato.dados_contrato->'aluno'->>'id',
+                            contrato.dados_contrato->'aluno'->>'id_aluno'
+                          ) = :idAlunoTexto)`,
+                        {
+                            idAluno,
+                            idAlunoTexto: String(idAluno),
+                        },
+                    );
                 }
             }
 

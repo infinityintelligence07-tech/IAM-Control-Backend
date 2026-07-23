@@ -36,8 +36,8 @@ async function bootstrap() {
     app.setGlobalPrefix('api');
 
     // Configuração do body parser para payloads grandes (50MB)
-    app.use(bodyParser.json({ limit: '50mb' }));
-    app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+    app.use(bodyParser.json({ limit: '100mb' }));
+    app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
 
     // Configuração do CORS (development: localhost:3001 | production: iamcontrol.com.br)
     const corsOrigins = [

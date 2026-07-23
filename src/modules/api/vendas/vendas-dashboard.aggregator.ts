@@ -101,6 +101,135 @@ export const rotuloFormaPagamentoDashboard = (forma?: string, tipo?: string): st
     return (forma || tipo || 'Outros').trim() || 'Outros';
 };
 
+/** Taxas (%) da aba Configurações, usadas no cálculo da Liquidez liq. */
+export type TaxasLiquidezDashboard = {
+    taxaBoleto: number;
+    taxaCartaoCredito: number;
+    taxaCartaoDebito: number;
+    taxaPix: number;
+};
+
+export const TAXAS_LIQUIDEZ_ZERADAS: TaxasLiquidezDashboard = {
+    taxaBoleto: 0,
+    taxaCartaoCredito: 0,
+    taxaCartaoDebito: 0,
+    taxaPix: 0,
+};
+
+type ClasseTaxaFormaLiquidez =
+    | 'pix'
+    | 'boleto'
+    | 'cartao_credito'
+    | 'cartao_debito'
+    | 'link'
+    | 'ignorar';
+
+/** Classifica a forma para aplicar a taxa correspondente das configurações. */
+export const classificarFormaParaTaxaLiquidez = (
+    forma?: string,
+    tipo?: string,
+): ClasseTaxaFormaLiquidez => {
+    const base = normalizeForSearch(`${forma || ''} ${tipo || ''}`);
+    if (!base) return 'ignorar';
+    if (base.includes('pendencia') || base.includes('pendente')) return 'ignorar';
+    if (base.includes('link')) return 'link';
+    if (base.includes('boleto')) return 'boleto';
+    if (base.includes('pix') || base.includes('transferencia')) return 'pix';
+    if (base.includes('debit')) return 'cartao_debito';
+    if (base.includes('credit') || base.includes('cartao')) return 'cartao_credito';
+    return 'ignorar';
+};
+
+export const fatorAposTaxaPercentual = (taxaPercentual: number): number => {
+    const t = Number.isFinite(taxaPercentual) ? Math.min(100, Math.max(0, taxaPercentual)) : 0;
+    return 1 - t / 100;
+};
+
+const taxaPercentualDaClasse = (
+    classe: ClasseTaxaFormaLiquidez,
+    taxas: TaxasLiquidezDashboard,
+): number => {
+    switch (classe) {
+        case 'pix':
+            return taxas.taxaPix;
+        case 'boleto':
+            return taxas.taxaBoleto;
+        case 'cartao_debito':
+            return taxas.taxaCartaoDebito;
+        case 'link':
+        case 'cartao_credito':
+            return taxas.taxaCartaoCredito;
+        case 'ignorar':
+            return 0;
+        default: {
+            const _exhaustive: never = classe;
+            return Number(_exhaustive);
+        }
+    }
+};
+
+/**
+ * Formas que entram na Liquidez liq. (mesmo conjunto do Liq. bruto: Pix, Cartão, Link).
+ * Boleto/pendência ficam de fora — só recebem taxa se um dia entrarem nessa regra.
+ */
+const classeEntraNaLiquidezLiq = (classe: ClasseTaxaFormaLiquidez): boolean => {
+    switch (classe) {
+        case 'pix':
+        case 'cartao_credito':
+        case 'cartao_debito':
+        case 'link':
+            return true;
+        case 'boleto':
+        case 'ignorar':
+            return false;
+        default: {
+            const _exhaustive: never = classe;
+            return Boolean(_exhaustive);
+        }
+    }
+};
+
+export const valorLiquidoFormaAposTaxa = (
+    valor: number,
+    forma?: string,
+    tipo?: string,
+    taxas: TaxasLiquidezDashboard = TAXAS_LIQUIDEZ_ZERADAS,
+): number => {
+    if (valor <= 0) return 0;
+    const classe = classificarFormaParaTaxaLiquidez(forma, tipo);
+    if (!classeEntraNaLiquidezLiq(classe)) return 0;
+    return valor * fatorAposTaxaPercentual(taxaPercentualDaClasse(classe, taxas));
+};
+
+/** Soma a liquidez líquida de um contrato aplicando as taxas configuradas. */
+export const obterLiquidezLiqContrato = (
+    contrato: ContratoDashboardLinha,
+    taxas: TaxasLiquidezDashboard = TAXAS_LIQUIDEZ_ZERADAS,
+): number => {
+    const pagamento = contrato.dados_contrato?.pagamento || {};
+    const formas: FormaPagamentoItem[] = Array.isArray(pagamento.formas_pagamento)
+        ? pagamento.formas_pagamento
+        : [];
+    const valorTotal = obterValorTotalContrato(contrato);
+    const pendente = possuiPendenciaPagamento(contrato);
+
+    let liquidez = 0;
+    if (formas.length > 0) {
+        for (const forma of formas) {
+            liquidez += valorLiquidoFormaAposTaxa(
+                parseNumeroSeguro(forma.valor),
+                forma.forma,
+                forma.tipo,
+                taxas,
+            );
+        }
+        return liquidez;
+    }
+
+    if (pendente) return 0;
+    return valorLiquidoFormaAposTaxa(valorTotal > 0 ? valorTotal : 0, pagamento.forma_pagamento, undefined, taxas);
+};
+
 const ordemFormaPagamento = (label: string): number => {
     const ordem: Record<string, number> = {
         Pix: 0,
@@ -322,7 +451,11 @@ export const agregarVendasPorProduto = (contratos: ContratoDashboardLinha[]): Fa
 const valorFatia = (fatias: FatiaDashboardDto[], labels: string[]): number =>
     fatias.filter((f) => labels.includes(f.label)).reduce((acc, f) => acc + f.valor, 0);
 
-export const calcularMetricasDashboard = (contratos: ContratoDashboardLinha[], domManha = 0): MetricasDashboardVendasDto => {
+export const calcularMetricasDashboard = (
+    contratos: ContratoDashboardLinha[],
+    domManha = 0,
+    taxas: TaxasLiquidezDashboard = TAXAS_LIQUIDEZ_ZERADAS,
+): MetricasDashboardVendasDto => {
     let inscricoes = 0;
     let vendas = 0;
     let fatBruto = 0;
@@ -359,10 +492,14 @@ export const calcularMetricasDashboard = (contratos: ContratoDashboardLinha[], d
     const pendencia = valorFatia(formas, ['Pendência']);
     // Fat bruto = soma dos valores dos contratos
     // Liq. bruto = Pix + Cartão + Link
-    // Liquidez liq = (Cartão + Link) × 0,88 + Pix
+    // Liquidez liq = cada forma × (1 − taxa%/100), com taxas da aba Configurações
     // Percentual = Liquidez liq ÷ Fat bruto
     const liqBruto = pix + cartaoLink;
-    const liquidezLiq = cartaoLink * 0.88 + pix;
+    const liquidezLiq = contratos.reduce(
+        (acc, contrato) =>
+            isProcessoVendaContrato(contrato) ? acc + obterLiquidezLiqContrato(contrato, taxas) : acc,
+        0,
+    );
     const percentualLiquidez = fatBruto > 0 ? (liquidezLiq / fatBruto) * 100 : 0;
 
     return {
@@ -1077,6 +1214,7 @@ const contratoCorrespondeMetricaLista = (
 const valorRelevanteMetricaLista = (
     contrato: ContratoDashboardLinha,
     tipo: MetricasListaTipo,
+    taxas: TaxasLiquidezDashboard = TAXAS_LIQUIDEZ_ZERADAS,
 ): number => {
     if (tipo === 'vendas' || tipo === 'inscricoes' || tipo === 'fat_bruto') {
         return obterValorTotalContrato(contrato);
@@ -1095,11 +1233,8 @@ const valorRelevanteMetricaLista = (
             return valorFormas(mapa, ['Pendência']);
         case 'liq_bruto':
             return valorFormas(mapa, ['Pix', 'Cartão', 'Link']);
-        case 'liquidez_liq': {
-            const pix = valorFormas(mapa, ['Pix']);
-            const cartaoLink = valorFormas(mapa, ['Cartão', 'Link']);
-            return cartaoLink * 0.88 + pix;
-        }
+        case 'liquidez_liq':
+            return obterLiquidezLiqContrato(contrato, taxas);
         default: {
             const _exhaustive: never = tipo;
             return Number(_exhaustive);
@@ -1148,6 +1283,7 @@ export const listarItensMetricasDashboard = (
     contratos: ContratoDashboardLinha[],
     tipo: MetricasListaTipo,
     rotuloPorIdTurma?: Map<number, string>,
+    taxas: TaxasLiquidezDashboard = TAXAS_LIQUIDEZ_ZERADAS,
 ): {
     tipo: MetricasListaTipo;
     titulo: string;
@@ -1170,7 +1306,7 @@ export const listarItensMetricasDashboard = (
 
         const status = classificarStatusRecebivel(contrato, agora);
         const inscricoes = obterQuantidadeInscricoes(contrato);
-        const valor = valorRelevanteMetricaLista(contrato, tipo);
+        const valor = valorRelevanteMetricaLista(contrato, tipo, taxas);
         totalInscricoes += inscricoes;
         totalValor += valor;
         const turmaDestino = obterTurmaDestinoContrato(contrato, rotuloPorIdTurma);

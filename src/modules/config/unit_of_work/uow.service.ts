@@ -35,6 +35,7 @@ import { DuvidasArtigos } from '../entities/duvidasArtigos.entity';
 import { DuvidasConversas } from '../entities/duvidasConversas.entity';
 import { DuvidasMensagens } from '../entities/duvidasMensagens.entity';
 import { DuvidasSugestoes } from '../entities/duvidasSugestoes.entity';
+import { TurmaDisponibilidade } from '../entities/turmaDisponibilidade.entity';
 /*****************************************************************************/
 
 @Injectable()
@@ -292,6 +293,14 @@ export class UnitOfWorkService {
     get duvidasMensagensRP(): Repository<DuvidasMensagens> {
         if (!this._duvidasMensagensRP) this._duvidasMensagensRP = this.postgresEM.getRepository(DuvidasMensagens);
         return this._duvidasMensagensRP;
+    }
+
+    private _turmaDisponibilidadeRP?: Repository<TurmaDisponibilidade>;
+    get turmaDisponibilidadeRP(): Repository<TurmaDisponibilidade> {
+        if (!this._turmaDisponibilidadeRP) {
+            this._turmaDisponibilidadeRP = this.postgresEM.getRepository(TurmaDisponibilidade);
+        }
+        return this._turmaDisponibilidadeRP;
     }
 
     private _duvidasSugestoesRP?: Repository<DuvidasSugestoes>;

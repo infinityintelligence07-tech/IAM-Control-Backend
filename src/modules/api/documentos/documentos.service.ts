@@ -988,10 +988,17 @@ export class DocumentosService {
                 : null;
 
             // Salvar informações do contrato no banco de dados
+            const statusConciliacao =
+                criarContratoDto.status_conciliacao &&
+                ['NOVO', 'CONCILIADO', 'PENDENTE'].includes(String(criarContratoDto.status_conciliacao))
+                    ? String(criarContratoDto.status_conciliacao)
+                    : 'NOVO';
+
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
                 status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                status_conciliacao: statusConciliacao,
                 // Comprovante(s) de pagamento desta venda, vinculados ao contrato.
                 comprovantes_pagamento: comprovantesVenda.length > 0 ? comprovantesVenda : null,
                 // Campos ZapSign específicos (ausentes quando contrato escrito à mão)
@@ -1097,6 +1104,7 @@ export class DocumentosService {
                         comprovantes_pagamento: comprovantesVenda,
                         comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda),
                     },
+                    status_conciliacao: statusConciliacao,
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
                     testemunhas: (() => {
@@ -4079,6 +4087,7 @@ export class DocumentosService {
         if (!contrato) {
             throw new NotFoundException('Contrato não encontrado');
         }
+        this.assertContratoNaoConciliado(contrato);
 
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
@@ -4121,6 +4130,23 @@ export class DocumentosService {
         return { atualizado: true };
     }
 
+    /**
+     * Venda conciliada é imutável: só exclusão + nova venda.
+     * Lê coluna materializada e fallback do snapshot em dados_contrato.
+     */
+    private assertContratoNaoConciliado(contrato: TurmasAlunosTreinamentosContratos): void {
+        const statusColuna = String(contrato.status_conciliacao || '').toUpperCase();
+        const statusSnapshot = String(
+            (contrato.dados_contrato as { status_conciliacao?: string } | null)?.status_conciliacao || '',
+        ).toUpperCase();
+        const status = statusColuna || statusSnapshot || 'NOVO';
+        if (status === 'CONCILIADO') {
+            throw new BadRequestException(
+                'Venda conciliada não pode ser alterada. Exclua a venda e crie uma nova.',
+            );
+        }
+    }
+
     // Persiste/edita somente a observação interna (uso do sistema) da venda na
     // coluna dados_contrato, sem tocar nas observações do contrato.
     async atualizarObservacoesSistemaContratoHistorico(contratoId: string, observacoes: string): Promise<{ atualizado: boolean }> {
@@ -4130,6 +4156,7 @@ export class DocumentosService {
         if (!contrato) {
             throw new NotFoundException('Contrato não encontrado');
         }
+        this.assertContratoNaoConciliado(contrato);
 
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
@@ -4160,6 +4187,7 @@ export class DocumentosService {
         if (!contrato) {
             throw new NotFoundException('Contrato não encontrado');
         }
+        this.assertContratoNaoConciliado(contrato);
 
         const comprovantesArray = this.normalizarComprovantesParaArray(comprovantes);
 
@@ -4340,6 +4368,7 @@ export class DocumentosService {
         if (!contrato) {
             throw new NotFoundException('Contrato não encontrado');
         }
+        this.assertContratoNaoConciliado(contrato);
 
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
@@ -4472,6 +4501,7 @@ export class DocumentosService {
         if (!contrato) {
             throw new NotFoundException('Contrato não encontrado');
         }
+        this.assertContratoNaoConciliado(contrato);
 
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
@@ -5483,16 +5513,16 @@ export class DocumentosService {
             // respeitadas.
             const buscaPorTextoAtiva = Boolean(this.normalizarTexto(filtros?.search));
             const temDatasExplicitas = Boolean(filtros?.data_inicio) || Boolean(filtros?.data_fim);
-            // Filtro por aluno (aba Contratos / deep link): sem datas explícitas,
-            // não restringe aos últimos 30 dias — senão some o histórico antigo.
+            // Filtro por aluno (aba Contratos): nunca restringe por período —
+            // precisa listar contratos antigos e novos do mesmo aluno.
             const filtroPorAlunoAtivo = (() => {
                 const id = Number(filtros?.id_aluno);
                 return Number.isFinite(id) && id > 0;
             })();
             const aplicarFiltroPeriodo =
+                !filtroPorAlunoAtivo &&
                 (!filtroTurmaSemPeriodo || temDatasExplicitas) &&
-                (!buscaPorTextoAtiva || temDatasExplicitas) &&
-                (!filtroPorAlunoAtivo || temDatasExplicitas);
+                (!buscaPorTextoAtiva || temDatasExplicitas);
             const dataInicioPadrao = (() => {
                 const d = new Date();
                 d.setDate(d.getDate() - 30);
@@ -5561,7 +5591,13 @@ export class DocumentosService {
                 .split('|')
                 .map((valor) => this.normalizarTexto(valor))
                 .filter(Boolean);
-            const filtroTurmaAtivo = this.ehModoFiltroTurma(filtros?.tipo_filtro_busca);
+            // Aplica filtro de turma no modo legado ("turma"/"treinamento") OU
+            // quando origem/destino foram enviados (período + turma juntos).
+            const filtroTurmaAtivo =
+                this.ehModoFiltroTurma(filtros?.tipo_filtro_busca) ||
+                Boolean(treinamentoOrigemFiltro) ||
+                turmasOrigemFiltro.length > 0 ||
+                turmasDestinoFiltro.length > 0;
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
             const idTurmaOrigemDadosContratoSql = this.sqlIdTurmaOrigemHistorico;
@@ -5695,19 +5731,64 @@ export class DocumentosService {
             if (filtros?.id_aluno) {
                 const idAluno = Number(filtros.id_aluno);
                 if (Number.isFinite(idAluno) && idAluno > 0) {
-                    // Matrícula vinculada OU id gravado no JSON do contrato
-                    // (cobre casos em que o join turma_aluno→aluno não resolve).
-                    baseQb.andWhere(
-                        `(aluno.id = :idAluno
-                          OR COALESCE(
+                    const idAlunoTexto = String(idAluno);
+                    const alunoCadastro = await this.uow.alunosRP.findOne({
+                        where: { id: idAluno },
+                        select: ['id', 'cpf'],
+                        withDeleted: true,
+                    });
+                    const cpfAlunoDigitos = String(alunoCadastro?.cpf || '').replace(/\D/g, '');
+                    const schema = this.uow.turmasAlunosTreinamentosContratosRP.metadata.schema || 'public';
+
+                    // Cobre: matrícula (join ativo ou soft-deleted), snapshot JSON,
+                    // outros clientes do combo e CPF (contratos legados sem id).
+                    const condicoesAluno = [
+                        'CAST(ta.id_aluno AS text) = :idAlunoTexto',
+                        'CAST(aluno.id AS text) = :idAlunoTexto',
+                        `COALESCE(
                             contrato.dados_contrato->'aluno'->>'id',
-                            contrato.dados_contrato->'aluno'->>'id_aluno'
-                          ) = :idAlunoTexto)`,
-                        {
-                            idAluno,
-                            idAlunoTexto: String(idAluno),
-                        },
-                    );
+                            contrato.dados_contrato->'aluno'->>'id_aluno',
+                            ''
+                          ) = :idAlunoTexto`,
+                        `COALESCE(
+                            contrato.dados_contrato->'turma_aluno'->>'id_aluno',
+                            ''
+                          ) = :idAlunoTexto`,
+                        `EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements(
+                              CASE
+                                WHEN jsonb_typeof(contrato.dados_contrato->'turma_aluno'->'outros_clientes') = 'array'
+                                  THEN contrato.dados_contrato->'turma_aluno'->'outros_clientes'
+                                WHEN jsonb_typeof(contrato.dados_contrato->'outros_clientes') = 'array'
+                                  THEN contrato.dados_contrato->'outros_clientes'
+                                WHEN jsonb_typeof(contrato.dados_contrato->'compradores_adicionais') = 'array'
+                                  THEN contrato.dados_contrato->'compradores_adicionais'
+                                ELSE '[]'::jsonb
+                              END
+                            ) AS oc
+                            WHERE COALESCE(oc->>'id', oc->>'id_aluno', '') = :idAlunoTexto
+                          )`,
+                        `EXISTS (
+                            SELECT 1
+                            FROM ${schema}.turmas_alunos_treinamentos tat_aluno
+                            INNER JOIN ${schema}.turmas_alunos ta_aluno
+                              ON ta_aluno.id = tat_aluno.id_turma_aluno
+                            WHERE tat_aluno.id = contrato.id_turma_aluno_treinamento
+                              AND CAST(ta_aluno.id_aluno AS text) = :idAlunoTexto
+                          )`,
+                    ];
+                    const paramsAluno: Record<string, string> = { idAlunoTexto };
+                    if (cpfAlunoDigitos.length >= 11) {
+                        condicoesAluno.push(
+                            `REGEXP_REPLACE(
+                                COALESCE(contrato.dados_contrato->'aluno'->>'cpf', ''),
+                                '[^0-9]', '', 'g'
+                              ) = :cpfAlunoDigitos`,
+                        );
+                        paramsAluno.cpfAlunoDigitos = cpfAlunoDigitos;
+                    }
+                    baseQb.andWhere(`(${condicoesAluno.join(' OR ')})`, paramsAluno);
                 }
             }
 

@@ -1,6 +1,6 @@
-import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber, IsBoolean, MaxLength, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsNotEmpty, IsEnum, IsNumberString, IsNumber, IsBoolean, MaxLength, MinLength, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ECategoriaExclusaoContrato, ETipoDocumento } from '@/modules/config/entities/enum';
+import { ECategoriaExclusaoContrato, EStatusConciliacaoVenda, ETipoDocumento } from '@/modules/config/entities/enum';
 
 export class CampoDocumentoDto {
     @IsString()
@@ -311,6 +311,14 @@ export class CriarContratoZapSignDto {
     @IsOptional()
     @IsBoolean()
     pendencia_pagamento?: boolean; // Pendência de pagamento marcada no ato da venda
+
+    /**
+     * Etiqueta de conciliação da venda (Novo / Conciliado / Pendente).
+     * Independente de pendência financeira.
+     */
+    @IsOptional()
+    @IsIn(Object.values(EStatusConciliacaoVenda))
+    status_conciliacao?: EStatusConciliacaoVenda | string;
 
     @IsOptional()
     quantidade_inscricoes?: number; // Quantidade de inscrições da venda

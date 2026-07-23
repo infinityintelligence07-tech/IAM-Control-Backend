@@ -77,7 +77,7 @@ export class MetricasDashboardVendasDto {
     fatBruto: number;
     /** Pix + Cartão + Link. */
     liqBruto: number;
-    /** (Cartão + Link) × 0,88 + Pix. */
+    /** Liquidez após taxas das Configurações: cada forma × (1 − taxa%/100). */
     liquidezLiq: number;
     /** Liquidez liq ÷ Fat bruto (× 100). */
     percentualLiquidez: number;

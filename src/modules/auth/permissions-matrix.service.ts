@@ -321,6 +321,9 @@ export class PermissionsMatrixService {
      *     (Staff+ em Eventos/Expansão; estagiário permanece só view).
      * v9: novo módulo `empresas` (cadastro de empresas Liberty/IAM e vínculo de
      *     treinamentos): copia as permissões de `treinamentos` de cada papel.
+     * v10: novo módulo `disponibilidadePitch` (contagens manhã/tarde/noite e
+     *     filas pitch/repitch por turma): libera view/create/edit/delete para
+     *     Staff e funções com prioridade ≥ STAFF.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -429,6 +432,23 @@ export class PermissionsMatrixService {
                         create: Boolean(role.empresas?.create || role.treinamentos?.create),
                         edit: Boolean(role.empresas?.edit || role.treinamentos?.edit),
                         delete: Boolean(role.empresas?.delete || role.treinamentos?.delete),
+                    };
+                }
+
+                if (fromVersion < 10 && defaultRole.disponibilidadePitch?.view) {
+                    role.disponibilidadePitch = {
+                        view: true,
+                        create: Boolean(
+                            role.disponibilidadePitch?.create ||
+                                defaultRole.disponibilidadePitch.create,
+                        ),
+                        edit: Boolean(
+                            role.disponibilidadePitch?.edit || defaultRole.disponibilidadePitch.edit,
+                        ),
+                        delete: Boolean(
+                            role.disponibilidadePitch?.delete ||
+                                defaultRole.disponibilidadePitch.delete,
+                        ),
                     };
                 }
             }

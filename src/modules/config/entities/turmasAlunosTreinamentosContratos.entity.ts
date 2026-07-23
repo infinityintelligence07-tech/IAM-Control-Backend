@@ -76,6 +76,19 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     @Column({ type: 'boolean', name: 'hist_pendencia_pagamento', nullable: false, default: false })
     hist_pendencia_pagamento: boolean;
 
+    /**
+     * Etiqueta de conciliação da venda (Novo / Conciliado / Pendente).
+     * Independente de `hist_pendencia_pagamento` (financeiro).
+     */
+    @Column({
+        type: 'varchar',
+        length: 20,
+        name: 'status_conciliacao',
+        nullable: false,
+        default: 'NOVO',
+    })
+    status_conciliacao: 'NOVO' | 'CONCILIADO' | 'PENDENTE' | string;
+
     @Column({ type: 'numeric', precision: 14, scale: 2, name: 'hist_receita_total', nullable: false, default: 0 })
     hist_receita_total: string | number;
 

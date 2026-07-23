@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { In, IsNull } from 'typeorm';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
+import { ConfiguracoesService } from '@/modules/api/configuracoes/configuracoes.service';
 import { Turmas } from '@/modules/config/entities/turmas.entity';
 import { EPresencaTurmas, EStatusAlunosGeral, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import {
@@ -36,6 +37,8 @@ import {
     resumoStatusVazio,
     rotuloTreinamentoDashboard,
     rotuloTurmaIamControl,
+    TAXAS_LIQUIDEZ_ZERADAS,
+    TaxasLiquidezDashboard,
     TurmaRankingInput,
 } from './vendas-dashboard.aggregator';
 
@@ -60,7 +63,24 @@ type LinhaContratoRaw = {
 
 @Injectable()
 export class VendasDashboardService {
-    constructor(private readonly uow: UnitOfWorkService) {}
+    constructor(
+        private readonly uow: UnitOfWorkService,
+        private readonly configuracoesService: ConfiguracoesService,
+    ) {}
+
+    private async obterTaxasLiquidez(): Promise<TaxasLiquidezDashboard> {
+        try {
+            const taxas = await this.configuracoesService.getTaxasEComissao();
+            return {
+                taxaBoleto: taxas.taxa_boleto,
+                taxaCartaoCredito: taxas.taxa_cartao_credito,
+                taxaCartaoDebito: taxas.taxa_cartao_debito,
+                taxaPix: taxas.taxa_pix,
+            };
+        } catch {
+            return TAXAS_LIQUIDEZ_ZERADAS;
+        }
+    }
 
     async getDashboard(filtros: VendasDashboardQueryDto): Promise<VendasDashboardResponseDto> {
         const { dataInicio, dataFim } = this.resolverPeriodo(filtros.data_inicio, filtros.data_fim);
@@ -132,9 +152,11 @@ export class VendasDashboardService {
             };
         }
 
+        const taxasLiquidez = await this.obterTaxasLiquidez();
+
         return {
             filtros_aplicados: filtrosAplicados,
-            metricas: calcularMetricasDashboard(contratos, domManha),
+            metricas: calcularMetricasDashboard(contratos, domManha, taxasLiquidez),
             formasPagamento: agregarFormasPagamento(contratos),
             vendasPorProduto: agregarVendasPorProduto(contratos),
             statusRecebiveis: calcularResumoStatusDashboard(contratos),
@@ -158,7 +180,8 @@ export class VendasDashboardService {
     ): Promise<VendasDashboardMetricasListaResponseDto> {
         const contratos = await this.carregarContratosFiltrados(filtros);
         const rotuloPorIdTurma = await this.montarRotulosTurmas(contratos);
-        return listarItensMetricasDashboard(contratos, filtros.tipo, rotuloPorIdTurma);
+        const taxasLiquidez = await this.obterTaxasLiquidez();
+        return listarItensMetricasDashboard(contratos, filtros.tipo, rotuloPorIdTurma, taxasLiquidez);
     }
 
     async getFiltros(): Promise<VendasDashboardFiltrosResponseDto> {

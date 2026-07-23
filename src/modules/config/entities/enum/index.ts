@@ -111,6 +111,13 @@ export enum EStatusAssinaturasContratos {
     PARCIALMENTE_ASSINADO = 'PARCIALMENTE_ASSINADO',
 }
 
+/** Etiqueta de conciliação da venda (vista/não vista), independente de pendência financeira. */
+export enum EStatusConciliacaoVenda {
+    NOVO = 'NOVO',
+    CONCILIADO = 'CONCILIADO',
+    PENDENTE = 'PENDENTE',
+}
+
 export enum EStatusTurmas {
     AGUARDANDO_LIBERACAO = 'AGUARDANDO_LIBERACAO',
     ENCERRADA = 'ENCERRADA',

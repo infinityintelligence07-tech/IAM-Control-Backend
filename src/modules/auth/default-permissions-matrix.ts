@@ -30,6 +30,21 @@ function grantPendenciaETestemunha(role: RolePermissions): RolePermissions {
     return next;
 }
 
+/** Staff e funções com prioridade maior (estagiário fica de fora). */
+const STAFF_MIN_PRIORITY = FUNCTION_PRIORITY.STAFF;
+
+/** Contagens de disponibilidade / pitch por turma. */
+function grantDisponibilidadePitchStaffPlus(
+    funcao: string,
+    role: RolePermissions,
+): RolePermissions {
+    if (funcao === PADRAO_SETOR_KEY) return role;
+    if (getFunctionPriority(funcao) >= STAFF_MIN_PRIORITY) {
+        return grantModule(role, 'disponibilidadePitch', 'all');
+    }
+    return role;
+}
+
 function shouldGrantPendenciaETestemunha(setor: ESetores, funcao: string): boolean {
     if (setor !== ESetores.EXPANSAO_NEGOCIOS) return false;
     if (funcao === PADRAO_SETOR_KEY) return true;
@@ -208,9 +223,11 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
         }
 
         for (const [funcao, role] of Object.entries(sectorRow)) {
+            let next = role;
             if (shouldGrantPendenciaETestemunha(setor, funcao)) {
-                sectorRow[funcao] = grantPendenciaETestemunha(role);
+                next = grantPendenciaETestemunha(next);
             }
+            sectorRow[funcao] = grantDisponibilidadePitchStaffPlus(funcao, next);
         }
 
         matrix[setor] = sectorRow;

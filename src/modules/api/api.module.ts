@@ -18,6 +18,7 @@ import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
 import { NotificacoesModule } from './notificacoes/notificacoes.module';
 import { VendasModule } from './vendas/vendas.module';
 import { DuvidasModule } from './duvidas/duvidas.module';
+import { TurmaDisponibilidadeModule } from './turma-disponibilidade/turma-disponibilidade.module';
 
 @Module({
     imports: [
@@ -40,6 +41,7 @@ import { DuvidasModule } from './duvidas/duvidas.module';
         NotificacoesModule,
         VendasModule,
         DuvidasModule,
+        TurmaDisponibilidadeModule,
     ],
 })
 export class ApiModule {}

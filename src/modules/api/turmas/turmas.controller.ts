@@ -27,6 +27,7 @@ import {
     CreateAlunoTurmaHistoricoDto,
     RemoveAlunoTurmaDto,
     UpdateTurmaAcessoraDto,
+    LiberarTurmaTemporariamenteDto,
     AlunoHistoricoObservacoesResponseDto,
     GetExtratoMovimentacaoDto,
     ExtratoMovimentacaoResponseDto,
@@ -213,11 +214,7 @@ export class TurmasController {
     @Post(':id/logs')
     @UseGuards(JwtAuthGuard, PermissionsGuard)
     @RequirePermission({ module: 'turmas', action: 'edit' })
-    async createTurmaHistorico(
-        @Param('id', ParseIntPipe) id: number,
-        @Body() dto: CreateTurmaHistoricoDto,
-        @Req() req: any,
-    ): Promise<{ message: string }> {
+    async createTurmaHistorico(@Param('id', ParseIntPipe) id: number, @Body() dto: CreateTurmaHistoricoDto, @Req() req: any): Promise<{ message: string }> {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         await this.turmasService.createTurmaHistorico(id, dto, userId);
         return { message: 'Histórico registrado com sucesso.' };
@@ -446,9 +443,7 @@ export class TurmasController {
     // Gerenciamento de Alunos na Turma
 
     @Get(':id/alunos/export')
-    async getAlunosTurmaExport(
-        @Param('id', ParseIntPipe) id_turma: number,
-    ): Promise<AlunosTurmaExportResponseDto> {
+    async getAlunosTurmaExport(@Param('id', ParseIntPipe) id_turma: number): Promise<AlunosTurmaExportResponseDto> {
         return this.turmasService.getAlunosTurmaExport(id_turma);
     }
 
@@ -460,6 +455,32 @@ export class TurmasController {
     ): Promise<AlunosTurmaListResponseDto> {
         console.log('Buscando alunos da turma:', id_turma);
         return this.turmasService.getAlunosTurma(id_turma, page, limit);
+    }
+
+    /**
+     * Libera temporariamente (24h) uma turma já encerrada para venda e credenciamento.
+     * Exige observação obrigatória; quem liberou fica registrado no histórico da turma.
+     * Mesma permissão de quem opera o credenciamento (marcar presença).
+     */
+    @Post(':id/liberacao-temporaria')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
+    async liberarTurmaTemporariamente(
+        @Param('id', ParseIntPipe) id_turma: number,
+        @Body() dto: LiberarTurmaTemporariamenteDto,
+        @Req() req: any,
+    ): Promise<{ id_turma: number; liberada_temporariamente_em: Date; liberada_temporariamente_ate: Date; message: string }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.liberarTurmaTemporariamente(id_turma, dto.observacao, userId);
+    }
+
+    /** Encerra manualmente (antes das 24h) a liberação temporária: a turma volta a ficar encerrada na hora. */
+    @Delete(':id/liberacao-temporaria')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
+    async encerrarLiberacaoTemporariaTurma(@Param('id', ParseIntPipe) id_turma: number, @Req() req: any): Promise<{ id_turma: number; message: string }> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.encerrarLiberacaoTemporariaTurma(id_turma, userId);
     }
 
     @Put(':id/acessora')

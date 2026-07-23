@@ -131,6 +131,28 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'boolean', name: 'reaberta_manualmente', default: false, nullable: false })
     reaberta_manualmente: boolean;
 
+    // ===== Liberação temporária pós-encerramento (venda/credenciamento por até 24h) =====
+    // Permite refazer/corrigir vendas em turma já encerrada: enquanto `liberada_temporariamente_ate`
+    // estiver no futuro, a turma volta a aparecer no credenciamento e na venda e deixa de ser
+    // tratada como congelada. Expira sozinha em 24h (cron) ou pode ser encerrada manualmente.
+    @Column({ type: 'timestamp', name: 'liberada_temporariamente_em', nullable: true })
+    liberada_temporariamente_em: Date | null;
+
+    @Column({ type: 'timestamp', name: 'liberada_temporariamente_ate', nullable: true })
+    liberada_temporariamente_ate: Date | null;
+
+    @Column({ type: 'int', name: 'liberada_temporariamente_por', nullable: true })
+    liberada_temporariamente_por: number | null;
+
+    // Observação obrigatória informada por quem liberou a turma.
+    @Column({ type: 'text', name: 'liberacao_temporaria_observacao', nullable: true })
+    liberacao_temporaria_observacao: string | null;
+
+    // true quando o fim da liberação já foi processado (encerramento manual ou cron de expiração),
+    // evitando reprocessar a mesma liberação a cada ciclo do cron.
+    @Column({ type: 'boolean', name: 'liberacao_temporaria_processada', default: false, nullable: false })
+    liberacao_temporaria_processada: boolean;
+
     @Column({ type: 'jsonb', name: 'detalhamento_bonus', nullable: true })
     detalhamento_bonus: { id_treinamento_db: number }[];
 
@@ -170,6 +192,10 @@ export class Turmas extends BaseEntity {
     @ManyToOne(() => Usuarios)
     @JoinColumn([{ name: 'id_acessora', referencedColumnName: 'id' }])
     id_acessora_fk: Usuarios | null;
+
+    @ManyToOne(() => Usuarios)
+    @JoinColumn([{ name: 'liberada_temporariamente_por', referencedColumnName: 'id' }])
+    liberada_temporariamente_por_fk: Usuarios | null;
 
     @ManyToOne(() => EnderecoEventos)
     @JoinColumn([{ name: 'id_endereco_evento', referencedColumnName: 'id' }])

@@ -1,4 +1,19 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsBoolean, IsArray, ValidateNested, ValidateIf, IsInt, Min, IsObject, IsIn } from 'class-validator';
+import {
+    IsOptional,
+    IsString,
+    IsNumber,
+    IsEnum,
+    IsBoolean,
+    IsArray,
+    ValidateNested,
+    ValidateIf,
+    IsInt,
+    Min,
+    IsObject,
+    IsIn,
+    MinLength,
+    MaxLength,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { EStatusTurmas, EStatusAlunosTurmas, EOrigemAlunos, EStatusEventoCalendario } from '../../../config/entities/enum';
 
@@ -735,6 +750,12 @@ export class TurmaResponseDto {
     } | null;
     /** Quando a acessora atual foi definida (null quando não há acessora). */
     acessora_definida_em?: Date | string | null;
+    /** Liberação temporária pós-encerramento (janela de até 24h para venda/credenciamento). */
+    liberada_temporariamente_em?: Date | string | null;
+    liberada_temporariamente_ate?: Date | string | null;
+    liberada_temporariamente_por?: number | null;
+    liberada_temporariamente_por_nome?: string | null;
+    liberacao_temporaria_observacao?: string | null;
     alunos_count?: number;
     alunos_inscricoes_extras_count?: number;
     alunos_confirmados_count?: number;
@@ -954,6 +975,15 @@ export class RemoveAlunoTurmaDto {
     @IsString()
     @Transform(({ value }) => value?.trim())
     motivo?: string;
+}
+
+/** Libera temporariamente (24h) uma turma encerrada para venda e credenciamento. */
+export class LiberarTurmaTemporariamenteDto {
+    @IsString()
+    @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+    @MinLength(5, { message: 'Informe uma observação com pelo menos 5 caracteres para liberar a turma.' })
+    @MaxLength(300, { message: 'A observação deve ter no máximo 300 caracteres.' })
+    observacao: string;
 }
 
 /** Define (ou remove, com null) a acessora do Cuidado de Alunos responsável pela turma. */

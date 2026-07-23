@@ -683,8 +683,28 @@ export class TurmasService {
         return hoje > dataFinal;
     }
 
-    private isTurmaCongelada(turma: any): boolean {
+    /**
+     * Liberação temporária pós-encerramento vigente: a turma encerrada foi liberada
+     * manualmente (com observação obrigatória) e ainda está dentro da janela de 24h.
+     */
+    private isLiberacaoTemporariaAtiva(turma: any): boolean {
+        const ate = turma?.liberada_temporariamente_ate;
+        if (!ate) {
+            return false;
+        }
+        const ateMs = new Date(ate).getTime();
+        return Number.isFinite(ateMs) && ateMs > Date.now();
+    }
+
+    private isTurmaCongelada(turma: any, opts?: { ignorarLiberacaoTemporaria?: boolean }): boolean {
         if (!turma) {
+            return false;
+        }
+        // Liberação temporária vigente descongela a turma na prática (permite refazer venda,
+        // marcar presença no credenciamento etc.) sem alterar o status ENCERRADA nem o snapshot.
+        // O caminho de manutenção do snapshot (update) usa ignorarLiberacaoTemporaria para não
+        // apagar o snapshot durante a janela de 24h.
+        if (!opts?.ignorarLiberacaoTemporaria && this.isLiberacaoTemporariaAtiva(turma)) {
             return false;
         }
         // Congelada (bloqueia remoção/cancelamento e altera a mecânica de transferência) exige
@@ -826,8 +846,7 @@ export class TurmasService {
         });
         const funcoes = Array.isArray(usuario?.funcao) ? usuario.funcao : [];
         const isLiderCuidadoDeAlunos =
-            userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS) &&
-            TurmasService.FUNCOES_LIDERANCA.some((funcao) => funcoes.includes(funcao));
+            userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS) && TurmasService.FUNCOES_LIDERANCA.some((funcao) => funcoes.includes(funcao));
 
         if (!this.isUsuarioAdministrador(usuario) && !isLiderCuidadoDeAlunos) {
             throw new ForbiddenException('Somente a líder do Cuidado de Alunos pode definir a acessora da turma.');
@@ -869,6 +888,213 @@ export class TurmasService {
             acessora: acessora ? { id: acessora.id, nome: acessora.nome } : null,
             acessora_definida_em: turma.acessora_definida_em,
         };
+    }
+
+    /* ============ Liberação temporária pós-encerramento (janela de 24h) ============ */
+
+    /** Duração máxima da liberação temporária pós-encerramento, em horas. */
+    private static readonly LIBERACAO_TEMPORARIA_HORAS = 24;
+
+    private formatarDataHoraBr(data: Date): string {
+        return data.toLocaleString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    }
+
+    /**
+     * Libera temporariamente uma turma já encerrada para venda e credenciamento por até 24h.
+     * Exige observação (motivo) e registra quem liberou no histórico da turma. A liberação
+     * expira sozinha (cron) ou pode ser encerrada manualmente antes do prazo.
+     */
+    async liberarTurmaTemporariamente(
+        id_turma: number,
+        observacao: string,
+        userId?: number,
+    ): Promise<{ id_turma: number; liberada_temporariamente_em: Date; liberada_temporariamente_ate: Date; message: string }> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado');
+        }
+
+        const obs = (observacao || '').trim();
+        if (obs.length < 5) {
+            throw new BadRequestException('Informe uma observação com pelo menos 5 caracteres para liberar a turma.');
+        }
+
+        const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma, deletado_em: null } });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        // A liberação só se aplica a turmas de fato encerradas (status ENCERRADA ou evento já
+        // terminado). Turma ainda dentro da janela normal de venda/credenciamento não precisa dela.
+        const encerrada = turma.status_turma === EStatusTurmas.ENCERRADA;
+        const eventoTerminou = this.eventoTurmaTerminou(turma) === true;
+        if (!encerrada && !eventoTerminou) {
+            throw new BadRequestException('A turma ainda não está encerrada. A liberação temporária só se aplica a turmas já encerradas.');
+        }
+
+        if (this.isLiberacaoTemporariaAtiva(turma)) {
+            throw new BadRequestException('Esta turma já está liberada temporariamente.');
+        }
+
+        const agora = new Date();
+        const ate = new Date(agora.getTime() + TurmasService.LIBERACAO_TEMPORARIA_HORAS * 60 * 60 * 1000);
+
+        await this.uow.turmasRP.update(id_turma, {
+            liberada_temporariamente_em: agora,
+            liberada_temporariamente_ate: ate,
+            liberada_temporariamente_por: userId,
+            liberacao_temporaria_observacao: obs,
+            liberacao_temporaria_processada: false,
+            atualizado_por: userId,
+            atualizado_em: agora,
+        });
+
+        await this.registrarLogTurma(
+            {
+                id_turma,
+                tipo_acao: 'STATUS',
+                titulo: 'Turma liberada temporariamente (pós-encerramento)',
+                descricao: `Liberada para venda e credenciamento por ${TurmasService.LIBERACAO_TEMPORARIA_HORAS}h (até ${this.formatarDataHoraBr(ate)}). Observação: ${obs}`,
+                detalhes: {
+                    liberada_temporariamente_em: agora.toISOString(),
+                    liberada_temporariamente_ate: ate.toISOString(),
+                    observacao: obs,
+                },
+            },
+            userId,
+        );
+
+        this.logger.log(`turma.liberacao_temporaria | Turma ${id_turma} liberada por usuário ${userId} até ${ate.toISOString()}`);
+
+        return {
+            id_turma,
+            liberada_temporariamente_em: agora,
+            liberada_temporariamente_ate: ate,
+            message: `Turma liberada para venda e credenciamento até ${this.formatarDataHoraBr(ate)}.`,
+        };
+    }
+
+    /**
+     * Encerra manualmente (antes das 24h) a liberação temporária de uma turma: ela volta
+     * imediatamente a ficar encerrada/congelada e some da venda e do credenciamento.
+     */
+    async encerrarLiberacaoTemporariaTurma(id_turma: number, userId?: number): Promise<{ id_turma: number; message: string }> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado');
+        }
+
+        const turma = await this.uow.turmasRP.findOne({ where: { id: id_turma, deletado_em: null } });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        if (!this.isLiberacaoTemporariaAtiva(turma)) {
+            throw new BadRequestException('Esta turma não está com liberação temporária ativa.');
+        }
+
+        const agora = new Date();
+        await this.uow.turmasRP.update(id_turma, {
+            // Expira a janela agora, preservando em/por/observação como auditoria da última liberação.
+            liberada_temporariamente_ate: agora,
+            liberacao_temporaria_processada: true,
+            atualizado_por: userId,
+            atualizado_em: agora,
+        });
+
+        await this.registrarLogTurma(
+            {
+                id_turma,
+                tipo_acao: 'STATUS',
+                titulo: 'Liberação temporária encerrada manualmente',
+                descricao: 'A turma voltou a ficar encerrada antes do fim da janela de 24h.',
+                detalhes: { encerrada_em: agora.toISOString() },
+            },
+            userId,
+        );
+
+        await this.regerarSnapshotAposLiberacaoTemporaria(id_turma);
+
+        this.logger.log(`turma.liberacao_temporaria | Liberação da turma ${id_turma} encerrada manualmente por usuário ${userId}`);
+
+        return { id_turma, message: 'Turma encerrada novamente com sucesso.' };
+    }
+
+    /**
+     * Regera o snapshot congelado após o fim da liberação temporária, para as vendas/presenças
+     * feitas durante a janela refletirem nas métricas. Best-effort: falha não bloqueia o fluxo.
+     */
+    private async regerarSnapshotAposLiberacaoTemporaria(id_turma: number): Promise<void> {
+        try {
+            const snapshotExistente = await this.obterSnapshotMetricasTurma(id_turma);
+            if (!snapshotExistente) {
+                return;
+            }
+            await this.regerarSnapshotMetricasTurmaInterno(id_turma);
+            this.logger.log(`turma.liberacao_temporaria | Snapshot da turma ${id_turma} regerado após fim da liberação`);
+        } catch (error) {
+            this.logger.warn(
+                `turma.liberacao_temporaria | Falha ao regerar snapshot da turma ${id_turma} após fim da liberação: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+        }
+    }
+
+    private liberacoesExpiradasCronEmExecucao = false;
+
+    /**
+     * Processa liberações temporárias expiradas (passadas 24h): marca como processadas,
+     * registra no histórico e regera o snapshot. A visibilidade na venda/credenciamento já
+     * expira sozinha pela comparação de data — este cron cuida da auditoria e das métricas.
+     */
+    @Cron('*/10 * * * *')
+    async encerrarLiberacoesTemporariasExpiradasCron(): Promise<void> {
+        if (this.liberacoesExpiradasCronEmExecucao) {
+            return;
+        }
+        this.liberacoesExpiradasCronEmExecucao = true;
+        try {
+            const agora = new Date();
+            const turmasExpiradas = await this.uow.turmasRP
+                .createQueryBuilder('turma')
+                .where('turma.deletado_em IS NULL')
+                .andWhere('turma.liberada_temporariamente_ate IS NOT NULL')
+                .andWhere('turma.liberada_temporariamente_ate <= :agora', { agora })
+                .andWhere('turma.liberacao_temporaria_processada = false')
+                .getMany();
+
+            for (const turma of turmasExpiradas) {
+                await this.uow.turmasRP.update(turma.id, {
+                    liberacao_temporaria_processada: true,
+                    atualizado_em: new Date(),
+                });
+
+                await this.registrarLogTurma(
+                    {
+                        id_turma: turma.id,
+                        tipo_acao: 'STATUS',
+                        titulo: 'Liberação temporária expirada (24h)',
+                        descricao: 'A janela de 24h da liberação terminou e a turma voltou a ficar encerrada automaticamente.',
+                        detalhes: { liberada_temporariamente_ate: turma.liberada_temporariamente_ate },
+                    },
+                    turma.liberada_temporariamente_por ?? undefined,
+                );
+
+                await this.regerarSnapshotAposLiberacaoTemporaria(turma.id);
+            }
+
+            if (turmasExpiradas.length > 0) {
+                this.logger.log(`turma.liberacao_temporaria.cron | ${turmasExpiradas.length} liberação(ões) expirada(s) processada(s)`);
+            }
+        } catch (error) {
+            this.logger.error('turma.liberacao_temporaria.cron | Erro ao processar liberações expiradas', error instanceof Error ? error.stack : undefined);
+        } finally {
+            this.liberacoesExpiradasCronEmExecucao = false;
+        }
     }
 
     private async getTransferidosCountByTurmas(turmaIds: number[]): Promise<Record<number, number>> {
@@ -1279,7 +1505,15 @@ export class TurmasService {
 
     async regerarSnapshotMetricasTurma(id_turma: number, userId?: number): Promise<{ id_turma: number; snapshot_em: Date; message: string }> {
         await this.validarPermissaoAdministrador(userId);
+        return this.regerarSnapshotMetricasTurmaInterno(id_turma, userId);
+    }
 
+    /**
+     * Regera o snapshot sem exigir administrador — uso interno (ex.: fim da liberação
+     * temporária de 24h, para o snapshot refletir as vendas feitas durante a janela).
+     * Caminho seguro: NÃO marca NO_SHOW nem dispara auto-transferência.
+     */
+    private async regerarSnapshotMetricasTurmaInterno(id_turma: number, userId?: number): Promise<{ id_turma: number; snapshot_em: Date; message: string }> {
         const turma = await this.uow.turmasRP.findOne({
             where: { id: id_turma, deletado_em: null },
         });
@@ -1769,6 +2003,7 @@ export class TurmasService {
                 .leftJoinAndSelect('treinamento.id_empresa_fk', 'empresa', 'empresa.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.id_acessora_fk', 'acessora', 'acessora.deletado_em IS NULL')
+                .leftJoinAndSelect('turma.liberada_temporariamente_por_fk', 'liberacao_usuario')
                 .where('turma.deletado_em IS NULL');
 
             // Aplicar filtros básicos
@@ -1796,8 +2031,12 @@ export class TurmasService {
 
             // Filtro do credenciamento: só turmas habilitadas, aplicado na query
             // para não perder turmas abertas antigas por criado_em após o limit.
+            // Turmas com liberação temporária pós-encerramento vigente (janela de 24h)
+            // também entram, mesmo com turma_aberta = false (forçado no encerramento).
             if (turma_aberta === true) {
-                queryBuilder.andWhere('turma.turma_aberta = true');
+                queryBuilder.andWhere(
+                    '(turma.turma_aberta = true OR (turma.liberada_temporariamente_ate IS NOT NULL AND turma.liberada_temporariamente_ate > NOW()))',
+                );
             }
 
             // Filtrar por tipo de treinamento NA QUERY (antes da paginação): com o
@@ -1943,6 +2182,11 @@ export class TurmasService {
                           }
                         : null,
                     acessora_definida_em: turma.acessora_definida_em ?? null,
+                    liberada_temporariamente_em: turma.liberada_temporariamente_em ?? null,
+                    liberada_temporariamente_ate: turma.liberada_temporariamente_ate ?? null,
+                    liberada_temporariamente_por: turma.liberada_temporariamente_por ?? null,
+                    liberada_temporariamente_por_nome: turma.liberada_temporariamente_por_fk?.nome ?? null,
+                    liberacao_temporaria_observacao: turma.liberacao_temporaria_observacao ?? null,
                     meta_pico_inscritos: picosPorTurma[turma.id]?.meta_pico_inscritos ?? null,
                     meta_pico_extras: picosPorTurma[turma.id]?.meta_pico_extras ?? null,
                     // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, contagens agregadas
@@ -1974,7 +2218,14 @@ export class TurmasService {
         try {
             const turma = await this.uow.turmasRP.findOne({
                 where: { id, deletado_em: null },
-                relations: ['id_polo_fk', 'id_treinamento_fk', 'id_treinamento_fk.id_empresa_fk', 'lider_evento_fk', 'id_acessora_fk'],
+                relations: [
+                    'id_polo_fk',
+                    'id_treinamento_fk',
+                    'id_treinamento_fk.id_empresa_fk',
+                    'lider_evento_fk',
+                    'id_acessora_fk',
+                    'liberada_temporariamente_por_fk',
+                ],
             });
 
             if (!turma) {
@@ -2065,6 +2316,11 @@ export class TurmasService {
                       }
                     : null,
                 acessora_definida_em: turma.acessora_definida_em ?? null,
+                liberada_temporariamente_em: turma.liberada_temporariamente_em ?? null,
+                liberada_temporariamente_ate: turma.liberada_temporariamente_ate ?? null,
+                liberada_temporariamente_por: turma.liberada_temporariamente_por ?? null,
+                liberada_temporariamente_por_nome: turma.liberada_temporariamente_por_fk?.nome ?? null,
+                liberacao_temporaria_observacao: turma.liberacao_temporaria_observacao ?? null,
                 // Para palestras/masterclass, alunos_count = pré-cadastrados; para treinamentos, alunos_count = alunos
                 alunos_count: alunosCountCalc,
                 alunos_inscricoes_extras_count: extrasCountCalc,
@@ -3235,7 +3491,9 @@ export class TurmasService {
                 // por congelamento em lote/manual ou ter ficado órfão. Removemos para descongelar de fato
                 // (métricas ao vivo e operações como presença/cancelamento liberadas). Será regerado do
                 // zero quando a turma voltar a congelar (ENCERRADA + após D+1).
-                if (!this.isTurmaCongelada(turmaAtualizada)) {
+                // A liberação temporária de 24h é ignorada aqui: durante a janela o snapshot deve
+                // permanecer intacto (ele é regerado quando a liberação termina).
+                if (!this.isTurmaCongelada(turmaAtualizada, { ignorarLiberacaoTemporaria: true })) {
                     await this.removerSnapshotMetricasTurma(id);
                 }
             }
@@ -4835,8 +5093,7 @@ export class TurmasService {
                 }
                 // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
                 // Réplica (turma congelada/robô): matrícula de origem continua ativa → NÃO é saída.
-                const origemPermaneceuAtiva =
-                    row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
+                const origemPermaneceuAtiva = row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
                 if (idsSet.has(de) && !specialSet.has(para) && !origemPermaneceuAtiva) {
                     pushMov(de, { dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência' });
                 }
@@ -5207,8 +5464,7 @@ export class TurmasService {
                 }
                 // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
                 // Réplica (turma congelada/robô): matrícula de origem continua ativa → NÃO é saída.
-                const origemPermaneceuAtiva =
-                    row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
+                const origemPermaneceuAtiva = row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
                 if (de === id_turma && !specialSet.has(para) && !origemPermaneceuAtiva) {
                     itens.push({
                         id_aluno: Number(row.id_aluno),

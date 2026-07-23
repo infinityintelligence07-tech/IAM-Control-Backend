@@ -89,6 +89,8 @@ export class MetricasDashboardVendasDto {
     convFechado: number;
     taxaFechamento: number;
     cartaoLink: number;
+    cartao: number;
+    link: number;
     pix: number;
     boleto: number;
     pendencia: number;
@@ -110,6 +112,59 @@ export class VendasDashboardStatusListaQueryDto extends VendasDashboardQueryDto 
     @IsString()
     @IsIn(['total', 'resolvidas', 'no_prazo', 'vencidas', 'canceladas'])
     status: StatusRecebivelFiltro;
+}
+
+export type MetricasListaTipo =
+    | 'vendas'
+    | 'inscricoes'
+    | 'fat_bruto'
+    | 'liq_bruto'
+    | 'liquidez_liq'
+    | 'cartao'
+    | 'link'
+    | 'pix'
+    | 'boleto'
+    | 'pendencia';
+
+export class VendasDashboardMetricasListaQueryDto extends VendasDashboardQueryDto {
+    @IsString()
+    @IsIn([
+        'vendas',
+        'inscricoes',
+        'fat_bruto',
+        'liq_bruto',
+        'liquidez_liq',
+        'cartao',
+        'link',
+        'pix',
+        'boleto',
+        'pendencia',
+    ])
+    tipo: MetricasListaTipo;
+}
+
+export class MetricasListaItemDto {
+    id: string;
+    aluno: string;
+    whatsapp?: string | null;
+    lider?: string | null;
+    produto?: string | null;
+    turma_destino: string;
+    turma_origem: string;
+    forma_pagamento?: string | null;
+    valor: number;
+    inscricoes: number;
+    status_label: string;
+}
+
+export class VendasDashboardMetricasListaResponseDto {
+    tipo: MetricasListaTipo;
+    titulo: string;
+    total: number;
+    total_inscricoes: number;
+    total_vendas: number;
+    total_valor: number;
+    itens: MetricasListaItemDto[];
 }
 
 export class StatusRecebivelListaItemDto {

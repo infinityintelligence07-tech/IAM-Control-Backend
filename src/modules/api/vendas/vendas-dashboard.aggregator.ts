@@ -352,7 +352,9 @@ export const calcularMetricasDashboard = (contratos: ContratoDashboardLinha[], d
 
     const formas = agregarFormasPagamento(contratos);
     const pix = valorFatia(formas, ['Pix']);
-    const cartaoLink = valorFatia(formas, ['Cartão', 'Link']);
+    const cartao = valorFatia(formas, ['Cartão']);
+    const link = valorFatia(formas, ['Link']);
+    const cartaoLink = cartao + link;
     const boleto = valorFatia(formas, ['Boleto']);
     const pendencia = valorFatia(formas, ['Pendência']);
     // Fat bruto = soma dos valores dos contratos
@@ -379,6 +381,8 @@ export const calcularMetricasDashboard = (contratos: ContratoDashboardLinha[], d
         convFechado: vendas > 0 ? (vendasFechadas / vendas) * 100 : 0,
         taxaFechamento: vendas > 0 ? (vendasFechadas / vendas) * 100 : 0,
         cartaoLink,
+        cartao,
+        link,
         pix,
         boleto,
         pendencia,
@@ -955,6 +959,270 @@ export const listarItensStatusRecebivel = (
     };
 };
 
+export type MetricasListaTipo =
+    | 'vendas'
+    | 'inscricoes'
+    | 'fat_bruto'
+    | 'liq_bruto'
+    | 'liquidez_liq'
+    | 'pix'
+    | 'boleto'
+    | 'pendencia';
+
+export type MetricasListaItem = {
+    id: string;
+    aluno: string;
+    whatsapp?: string | null;
+    lider?: string | null;
+    produto?: string | null;
+    turma_destino: string;
+    turma_origem: string;
+    forma_pagamento?: string | null;
+    valor: number;
+    inscricoes: number;
+    status_label: string;
+};
+
+const rotuloStatusRecebivelCurto = (status: StatusRecebivel): string => {
+    switch (status) {
+        case 'resolvida':
+            return 'Resolvida';
+        case 'no_prazo':
+            return 'No prazo';
+        case 'vencida':
+            return 'Vencida';
+        case 'cancelada':
+            return 'Cancelada';
+        default: {
+            const _exhaustive: never = status;
+            return String(_exhaustive);
+        }
+    }
+};
+
+/** Espelha agregarFormasPagamento por contrato (label → valor). */
+const obterValoresPorFormaContrato = (
+    contrato: ContratoDashboardLinha,
+): Map<string, number> => {
+    const mapa = new Map<string, number>();
+    const adicionar = (label: string, valor: number) => {
+        if (valor <= 0) return;
+        mapa.set(label, (mapa.get(label) || 0) + valor);
+    };
+
+    const pagamento = contrato.dados_contrato?.pagamento || {};
+    const formas: FormaPagamentoItem[] = Array.isArray(pagamento.formas_pagamento)
+        ? pagamento.formas_pagamento
+        : [];
+    const valorTotal = obterValorTotalContrato(contrato);
+    const pendente = possuiPendenciaPagamento(contrato);
+
+    if (formas.length > 0) {
+        let somaFormas = 0;
+        for (const forma of formas) {
+            const valor = parseNumeroSeguro(forma.valor);
+            somaFormas += valor;
+            adicionar(rotuloFormaPagamentoDashboard(forma.forma, forma.tipo), valor);
+        }
+        const restante = valorTotal - somaFormas;
+        if (pendente && restante > 0.01) {
+            adicionar('Pendência', restante);
+        }
+        return mapa;
+    }
+
+    if (pendente) {
+        adicionar('Pendência', valorTotal > 0 ? valorTotal : 0);
+        return mapa;
+    }
+
+    adicionar(rotuloFormaPagamentoDashboard(pagamento.forma_pagamento), valorTotal > 0 ? valorTotal : 0);
+    return mapa;
+};
+
+const valorFormas = (mapa: Map<string, number>, labels: string[]): number =>
+    labels.reduce((acc, label) => acc + (mapa.get(label) || 0), 0);
+
+const contratoCorrespondeMetricaLista = (
+    contrato: ContratoDashboardLinha,
+    tipo: MetricasListaTipo,
+): boolean => {
+    if (tipo === 'vendas' || tipo === 'inscricoes' || tipo === 'fat_bruto') {
+        return true;
+    }
+    const mapa = obterValoresPorFormaContrato(contrato);
+    switch (tipo) {
+        case 'cartao':
+            return valorFormas(mapa, ['Cartão']) > 0;
+        case 'link':
+            return valorFormas(mapa, ['Link']) > 0;
+        case 'pix':
+            return valorFormas(mapa, ['Pix']) > 0;
+        case 'boleto':
+            return valorFormas(mapa, ['Boleto']) > 0;
+        case 'pendencia':
+            return valorFormas(mapa, ['Pendência']) > 0;
+        case 'liq_bruto':
+        case 'liquidez_liq':
+            return valorFormas(mapa, ['Pix', 'Cartão', 'Link']) > 0;
+        default: {
+            const _exhaustive: never = tipo;
+            return Boolean(_exhaustive);
+        }
+    }
+};
+
+const valorRelevanteMetricaLista = (
+    contrato: ContratoDashboardLinha,
+    tipo: MetricasListaTipo,
+): number => {
+    if (tipo === 'vendas' || tipo === 'inscricoes' || tipo === 'fat_bruto') {
+        return obterValorTotalContrato(contrato);
+    }
+    const mapa = obterValoresPorFormaContrato(contrato);
+    switch (tipo) {
+        case 'cartao':
+            return valorFormas(mapa, ['Cartão']);
+        case 'link':
+            return valorFormas(mapa, ['Link']);
+        case 'pix':
+            return valorFormas(mapa, ['Pix']);
+        case 'boleto':
+            return valorFormas(mapa, ['Boleto']);
+        case 'pendencia':
+            return valorFormas(mapa, ['Pendência']);
+        case 'liq_bruto':
+            return valorFormas(mapa, ['Pix', 'Cartão', 'Link']);
+        case 'liquidez_liq': {
+            const pix = valorFormas(mapa, ['Pix']);
+            const cartaoLink = valorFormas(mapa, ['Cartão', 'Link']);
+            return cartaoLink * 0.88 + pix;
+        }
+        default: {
+            const _exhaustive: never = tipo;
+            return Number(_exhaustive);
+        }
+    }
+};
+
+const tituloMetricaLista = (
+    tipo: MetricasListaTipo,
+    totalVendas: number,
+    totalInscricoes: number,
+    totalValor: number,
+): string => {
+    const vendasLabel = `${totalVendas} venda${totalVendas === 1 ? '' : 's'}`;
+    const valorLabel = formatarMoedaPtBr(totalValor);
+    switch (tipo) {
+        case 'inscricoes':
+            return `Inscrições (${totalInscricoes}) · ${vendasLabel}`;
+        case 'vendas':
+            return `Vendas (${totalVendas}) · ${totalInscricoes} inscrição${totalInscricoes === 1 ? '' : 'ões'}`;
+        case 'fat_bruto':
+            return `Fat. Bruto (${vendasLabel}) · ${valorLabel}`;
+        case 'liq_bruto':
+            return `Liq. Bruto (${vendasLabel}) · ${valorLabel}`;
+        case 'liquidez_liq':
+            return `Liquidez Liq. (${vendasLabel}) · ${valorLabel}`;
+        case 'cartao':
+            return `Cartão (${vendasLabel}) · ${valorLabel}`;
+        case 'link':
+            return `Link (${vendasLabel}) · ${valorLabel}`;
+        case 'pix':
+            return `Pix (${vendasLabel}) · ${valorLabel}`;
+        case 'boleto':
+            return `Boleto (${vendasLabel}) · ${valorLabel}`;
+        case 'pendencia':
+            return `Pendência (${vendasLabel}) · ${valorLabel}`;
+        default: {
+            const _exhaustive: never = tipo;
+            return String(_exhaustive);
+        }
+    }
+};
+
+/** Listagem dos KPIs Inscrições / Vendas / Financeiro (mesmos filtros do dashboard). */
+export const listarItensMetricasDashboard = (
+    contratos: ContratoDashboardLinha[],
+    tipo: MetricasListaTipo,
+    rotuloPorIdTurma?: Map<number, string>,
+): {
+    tipo: MetricasListaTipo;
+    titulo: string;
+    total: number;
+    total_inscricoes: number;
+    total_vendas: number;
+    total_valor: number;
+    itens: MetricasListaItem[];
+} => {
+    const agora = new Date();
+    agora.setHours(0, 0, 0, 0);
+
+    const itens: MetricasListaItem[] = [];
+    let totalInscricoes = 0;
+    let totalValor = 0;
+
+    for (const contrato of contratos) {
+        if (!isProcessoVendaContrato(contrato)) continue;
+        if (!contratoCorrespondeMetricaLista(contrato, tipo)) continue;
+
+        const status = classificarStatusRecebivel(contrato, agora);
+        const inscricoes = obterQuantidadeInscricoes(contrato);
+        const valor = valorRelevanteMetricaLista(contrato, tipo);
+        totalInscricoes += inscricoes;
+        totalValor += valor;
+        const turmaDestino = obterTurmaDestinoContrato(contrato, rotuloPorIdTurma);
+
+        itens.push({
+            id: contrato.id,
+            aluno: obterNomeAlunoContrato(contrato),
+            whatsapp: obterWhatsappContrato(contrato),
+            lider: textoLimpo(contrato.lider_nome) || null,
+            produto: obterProdutoContrato(contrato),
+            turma_destino: turmaDestino,
+            turma_origem: obterTurmaOrigemContrato(contrato, rotuloPorIdTurma),
+            forma_pagamento: formatarFormasPagamentoDetalhe(contrato),
+            valor,
+            inscricoes,
+            status_label: rotuloStatusRecebivelCurto(status),
+        });
+    }
+
+    if (tipo === 'inscricoes') {
+        itens.sort((a, b) => {
+            if (b.inscricoes !== a.inscricoes) return b.inscricoes - a.inscricoes;
+            return a.aluno.localeCompare(b.aluno, 'pt-BR', { sensitivity: 'base' });
+        });
+    } else if (
+        tipo === 'fat_bruto' ||
+        tipo === 'liq_bruto' ||
+        tipo === 'liquidez_liq' ||
+        tipo === 'pix' ||
+        tipo === 'boleto' ||
+        tipo === 'pendencia'
+    ) {
+        itens.sort((a, b) => {
+            if (b.valor !== a.valor) return b.valor - a.valor;
+            return a.aluno.localeCompare(b.aluno, 'pt-BR', { sensitivity: 'base' });
+        });
+    } else {
+        itens.sort((a, b) => a.aluno.localeCompare(b.aluno, 'pt-BR', { sensitivity: 'base' }));
+    }
+
+    const totalVendas = itens.length;
+    const titulo = tituloMetricaLista(tipo, totalVendas, totalInscricoes, totalValor);
+
+    return {
+        tipo,
+        titulo,
+        total: tipo === 'inscricoes' ? totalInscricoes : totalVendas,
+        total_inscricoes: totalInscricoes,
+        total_vendas: totalVendas,
+        total_valor: totalValor,
+        itens,
+    };
+};
+
 const baseStatus = (): Omit<StatusResumoItemDto, 'id'> => ({
     quantidade: 0,
     valor: 0,
@@ -1259,6 +1527,8 @@ export const metricasVazia = (domManha = 0): MetricasDashboardVendasDto => ({
     convFechado: 0,
     taxaFechamento: 0,
     cartaoLink: 0,
+    cartao: 0,
+    link: 0,
     pix: 0,
     boleto: 0,
     pendencia: 0,

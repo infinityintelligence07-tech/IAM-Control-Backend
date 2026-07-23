@@ -5,6 +5,8 @@ import { RequirePermission } from '@/modules/auth/decorators/require-permission.
 import { VendasDashboardService } from './vendas-dashboard.service';
 import {
     VendasDashboardFiltrosResponseDto,
+    VendasDashboardMetricasListaQueryDto,
+    VendasDashboardMetricasListaResponseDto,
     VendasDashboardQueryDto,
     VendasDashboardResponseDto,
     VendasDashboardStatusListaQueryDto,
@@ -34,6 +36,13 @@ export class VendasController {
         @Query() query: VendasDashboardStatusListaQueryDto,
     ): Promise<VendasDashboardStatusListaResponseDto> {
         return this.vendasDashboardService.getStatusRecebiveisLista(query);
+    }
+
+    @Get('dashboard/metricas-lista')
+    async getMetricasLista(
+        @Query() query: VendasDashboardMetricasListaQueryDto,
+    ): Promise<VendasDashboardMetricasListaResponseDto> {
+        return this.vendasDashboardService.getMetricasLista(query);
     }
 
     @Get('dashboard/filtros')

@@ -7,6 +7,8 @@ import {
     CodigoEventoDashboard,
     EVENTOS_DASHBOARD,
     VendasDashboardFiltrosResponseDto,
+    VendasDashboardMetricasListaQueryDto,
+    VendasDashboardMetricasListaResponseDto,
     VendasDashboardQueryDto,
     VendasDashboardResponseDto,
     VendasDashboardStatusListaQueryDto,
@@ -28,6 +30,7 @@ import {
     criarMapaAquisicaoVazio,
     isProcessoVendaContrato,
     listarItensStatusRecebivel,
+    listarItensMetricasDashboard,
     metricasVazia,
     obterDadosEventoContrato,
     resumoStatusVazio,
@@ -148,6 +151,14 @@ export class VendasDashboardService {
         const contratos = await this.carregarContratosFiltrados(filtros);
         const rotuloPorIdTurma = await this.montarRotulosTurmas(contratos);
         return listarItensStatusRecebivel(contratos, filtros.status, rotuloPorIdTurma);
+    }
+
+    async getMetricasLista(
+        filtros: VendasDashboardMetricasListaQueryDto,
+    ): Promise<VendasDashboardMetricasListaResponseDto> {
+        const contratos = await this.carregarContratosFiltrados(filtros);
+        const rotuloPorIdTurma = await this.montarRotulosTurmas(contratos);
+        return listarItensMetricasDashboard(contratos, filtros.tipo, rotuloPorIdTurma);
     }
 
     async getFiltros(): Promise<VendasDashboardFiltrosResponseDto> {

@@ -926,8 +926,6 @@ export class ContractTemplateService {
                     ${label} - ${formatCurrencyBRL(data.valorTotal)}
                 </label>`;
 
-                const valorParcelaBoleto = boletoParcelado.parcelas > 0 ? boletoParcelado.valorTotal / boletoParcelado.parcelas : 0;
-
                 const avistaHtml = [
                     montarLinhaAVista('CARTÃO DE CRÉDITO', cartaoCreditoAVista),
                     montarLinhaAVista('CARTÃO DE DÉBITO', cartaoDebitoAVista),
@@ -946,12 +944,13 @@ export class ContractTemplateService {
                 </label>`,
                 ].join('');
 
+                // Parcelas do boleto não são impressas na caixa de FORMA DE PAGAMENTO:
+                // o detalhamento fica nas OBSERVAÇÕES (mantém só valor total + datas).
                 const boletoParceladoHtml = destinationProfile.allowBoletoParcelado
                     ? `
                 <label class="checkbox-item">
                     <input type="checkbox" class="checkbox" ${boletoParcelado.checked ? 'checked' : ''} disabled>
                     BOLETO - ${formatCurrencyBRL(boletoParcelado.valorTotal)}<br>
-                    ${boletoParcelado.parcelas || 0} parcela(s) de ${formatCurrencyBRL(valorParcelaBoleto)}<br>
                     Melhor dia de vencimento: ${escapeAndFallback(melhorDiaBoleto, '___')}<br>
                     1º boleto para: ${escapeAndFallback(dataPrimeiroBoleto, '___/___/___')}
                 </label>`
@@ -2256,20 +2255,14 @@ export class ContractTemplateService {
 
                           if (mostrarBoleto) {
                               const totalBoleto = temBoletoParcelado?.valor || 0;
-                              const numeroParcelas = temBoletoParcelado?.parcelas || 0;
-                              const valorParcela = numeroParcelas > 0 ? totalBoleto / numeroParcelas : 0;
 
                               const totalFormatado = totalBoleto.toLocaleString('pt-BR', {
                                   style: 'currency',
                                   currency: 'BRL',
                               });
 
-                              const valorParcelaFormatado = valorParcela.toLocaleString('pt-BR', {
-                                  style: 'currency',
-                                  currency: 'BRL',
-                              });
-
                               // Obter dados do boleto dos campos variáveis
+                              // Parcelas não são impressas aqui: detalhamento fica nas OBSERVAÇÕES.
                               const dataPrimeiroBoleto = campos_variaveis?.['Data do Primeiro Boleto'] || '___/___/___';
                               const melhorDiaVencimento = dataPrimeiroBoleto !== '___/___/___' ? dataPrimeiroBoleto.split('/')[0] : '___';
 
@@ -2278,7 +2271,6 @@ export class ContractTemplateService {
                              <label class="checkbox-item">
                                <input type="checkbox" class="checkbox" checked disabled>
                                BOLETO - Valor: ${totalFormatado}<br>
-                               ${numeroParcelas} Parcelas de: ${valorParcelaFormatado}<br>
                                Melhor dia de Vencimento: ${melhorDiaVencimento}<br> 
                                1º Boleto para: ${dataPrimeiroBoleto}
                              </label>
@@ -2288,7 +2280,6 @@ export class ContractTemplateService {
                              <label class="checkbox-item">
                                <input type="checkbox" class="checkbox" disabled>
                                BOLETO - Valor: R$ 0,00<br>
-                               0 Parcelas de: R$ 0,00<br>
                                Melhor dia de Vencimento: ___<br> 
                                1º Boleto para: ___/___/___
                              </label>

@@ -32,7 +32,7 @@ async function bootstrap() {
         prefix: '/uploads',
     });
 
-    // Prefixo global para todas as rotas da API
+    // Prefixo global para todas as rotas da API.
     app.setGlobalPrefix('api');
 
     // Configuração do body parser para payloads grandes (50MB)

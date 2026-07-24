@@ -59,6 +59,8 @@ type ResumoHistoricoVendas = {
     total_inscricoes_vendidas: number;
     total_inscricoes_bonus: number;
     total_com_pendencia: number;
+    total_sem_assinatura: number;
+    total_sem_conciliacao: number;
     receita_total: number;
     ranking_staff_lider: Array<{
         lider_id: string;
@@ -4050,6 +4052,24 @@ export class DocumentosService {
         return s === 'signed' || s === 'complete' || s === 'completed' || s === 'assinado';
     }
 
+    /** Contrato com assinatura digital concluída OU manuscrito anexado. */
+    private sqlContratoTemAssinatura(aliasContrato = 'contrato'): string {
+        const statusDocumentoSql = `LOWER(COALESCE(${aliasContrato}.zapsign_document_status->>'status', ''))`;
+        return `(
+            ${aliasContrato}.foto_documento_aluno_base64 IS NOT NULL
+            OR ${statusDocumentoSql} IN ('signed', 'complete', 'completed', 'assinado')
+        )`;
+    }
+
+    /** Venda marcada como conciliada (coluna ou snapshot). */
+    private sqlContratoConciliado(aliasContrato = 'contrato'): string {
+        return `UPPER(COALESCE(
+            NULLIF(TRIM(${aliasContrato}.status_conciliacao), ''),
+            NULLIF(TRIM(${aliasContrato}.dados_contrato->>'status_conciliacao'), ''),
+            'NOVO'
+        )) = 'CONCILIADO'`;
+    }
+
     private converterDataFiltroParaDate(valor?: string, fimDoDia: boolean = false): Date | null {
         const bruto = String(valor || '').trim();
         if (!bruto) return null;
@@ -5281,6 +5301,8 @@ export class DocumentosService {
             .addSelect('MAX(contrato.hist_receita_total)', 'hist_receita_total')
             .addSelect('MAX(contrato.hist_staff_lider_id)', 'hist_staff_lider_id')
             .addSelect('MAX(COALESCE(contrato.hist_vendedor_id, contrato.criado_por))', 'hist_vendedor_id')
+            .addSelect(`BOOL_OR(${this.sqlContratoTemAssinatura('contrato')})`, 'tem_assinatura')
+            .addSelect(`BOOL_OR(${this.sqlContratoConciliado('contrato')})`, 'conciliado')
             .groupBy('contrato.id');
 
         const [subSql, subParams] = distinctQb.getQueryAndParameters();
@@ -5292,6 +5314,8 @@ export class DocumentosService {
                 COALESCE(SUM(q.hist_qtd_inscricoes), 0)::float AS total_inscricoes_vendidas,
                 COALESCE(SUM(q.hist_qtd_bonus), 0)::float AS total_inscricoes_bonus,
                 COALESCE(SUM(CASE WHEN q.hist_pendencia_pagamento THEN 1 ELSE 0 END), 0)::int AS total_com_pendencia,
+                COALESCE(SUM(CASE WHEN NOT COALESCE(q.tem_assinatura, false) THEN 1 ELSE 0 END), 0)::int AS total_sem_assinatura,
+                COALESCE(SUM(CASE WHEN NOT COALESCE(q.conciliado, false) THEN 1 ELSE 0 END), 0)::int AS total_sem_conciliacao,
                 COALESCE(SUM(q.hist_receita_total), 0)::float AS receita_total
             FROM (${subSql}) q
             `,
@@ -5415,6 +5439,8 @@ export class DocumentosService {
             total_inscricoes_vendidas: Number(totaisRow?.total_inscricoes_vendidas || 0),
             total_inscricoes_bonus: Number(totaisRow?.total_inscricoes_bonus || 0),
             total_com_pendencia: Number(totaisRow?.total_com_pendencia || 0),
+            total_sem_assinatura: Number(totaisRow?.total_sem_assinatura || 0),
+            total_sem_conciliacao: Number(totaisRow?.total_sem_conciliacao || 0),
             receita_total: Number(totaisRow?.receita_total || 0),
             ranking_staff_lider: rankingStaffLider,
             inscricoes_sem_lider: {
@@ -5445,8 +5471,18 @@ export class DocumentosService {
                 acc.receita_total += metricas.valorTotalVenda;
                 return acc;
             },
-            { total_inscricoes_vendidas: 0, total_inscricoes_bonus: 0, total_com_pendencia: 0, receita_total: 0 },
+            {
+                total_inscricoes_vendidas: 0,
+                total_inscricoes_bonus: 0,
+                total_com_pendencia: 0,
+                total_sem_assinatura: 0,
+                total_sem_conciliacao: 0,
+                receita_total: 0,
+            },
         );
+        // Fallback legado: sem colunas de assinatura/conciliação nas linhas raw.
+        resumoBase.total_sem_assinatura = 0;
+        resumoBase.total_sem_conciliacao = 0;
 
         const idsUsuarios = Array.from(
             new Set(
@@ -5586,6 +5622,8 @@ export class DocumentosService {
         search?: string;
         canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
         somente_com_pendencia?: boolean | string;
+        somente_sem_assinatura?: boolean | string;
+        somente_sem_conciliacao?: boolean | string;
         tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
         treinamento_origem?: string;
         turma_origem?: string;
@@ -5665,6 +5703,8 @@ export class DocumentosService {
                 search: filtros?.search || null,
                 canal_venda: filtros?.canal_venda || null,
                 somente_com_pendencia: filtros?.somente_com_pendencia || null,
+                somente_sem_assinatura: filtros?.somente_sem_assinatura || null,
+                somente_sem_conciliacao: filtros?.somente_sem_conciliacao || null,
                 tipo_filtro_busca: filtros?.tipo_filtro_busca || null,
                 treinamento_origem: filtros?.treinamento_origem || null,
                 turma_origem: filtros?.turma_origem || null,
@@ -5707,6 +5747,14 @@ export class DocumentosService {
                 turmasDestinoFiltro.length > 0;
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
+            const somenteSemAssinaturaAtivo =
+                filtros?.somente_sem_assinatura === true ||
+                filtros?.somente_sem_assinatura === 'true' ||
+                filtros?.somente_sem_assinatura === '1';
+            const somenteSemConciliacaoAtivo =
+                filtros?.somente_sem_conciliacao === true ||
+                filtros?.somente_sem_conciliacao === 'true' ||
+                filtros?.somente_sem_conciliacao === '1';
             const idTurmaOrigemDadosContratoSql = this.sqlIdTurmaOrigemHistorico;
 
             // Expressões compartilhadas com listarOpcoesFiltrosOrigem: o rótulo
@@ -5930,6 +5978,14 @@ export class DocumentosService {
 
             if (somentePendenciaAtivo) {
                 baseQb.andWhere(`contrato.hist_pendencia_pagamento = true`);
+            }
+
+            if (somenteSemAssinaturaAtivo) {
+                baseQb.andWhere(`NOT ${this.sqlContratoTemAssinatura('contrato')}`);
+            }
+
+            if (somenteSemConciliacaoAtivo) {
+                baseQb.andWhere(`NOT ${this.sqlContratoConciliado('contrato')}`);
             }
 
             if (statusFiltro && statusFiltro !== 'all') {

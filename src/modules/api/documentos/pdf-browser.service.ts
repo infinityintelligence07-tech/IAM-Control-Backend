@@ -131,6 +131,8 @@ export class PdfBrowserService implements OnModuleDestroy {
                     const transiente = this.isErroTransientePuppeteer(error);
                     const chromeAusente = this.isErroChromeAusente(error);
                     const targetClosed = this.isErroTargetClosed(error);
+                    const launchFalhou = this.isErroLaunchFalhou(error);
+                    const podeRetentar = transiente || chromeAusente || targetClosed || launchFalhou;
 
                     console.error(
                         `[PDF] Falha na tentativa ${tentativa}/${PdfBrowserService.MAX_TENTATIVAS} (estratégia=${this.estrategiaAtual}):`,
@@ -139,7 +141,7 @@ export class PdfBrowserService implements OnModuleDestroy {
 
                     await this.descartarBrowser();
 
-                    if (chromeAusente || targetClosed || transiente) {
+                    if (podeRetentar) {
                         this.forcarSomenteChromeProjeto = true;
                         this.dumpioNaProximaTentativa = true;
                         // Próxima tentativa usa estratégia mais agressiva (VPS).
@@ -157,7 +159,7 @@ export class PdfBrowserService implements OnModuleDestroy {
                         }
                     }
 
-                    if ((!transiente && !chromeAusente && !targetClosed) || tentativa === PdfBrowserService.MAX_TENTATIVAS) {
+                    if (!podeRetentar || tentativa === PdfBrowserService.MAX_TENTATIVAS) {
                         throw error;
                     }
 
@@ -216,6 +218,8 @@ export class PdfBrowserService implements OnModuleDestroy {
             '--no-default-browser-check',
             '--mute-audio',
             '--disable-background-networking',
+            '--disable-crash-reporter',
+            '--disable-breakpad',
         ];
         const isWindows = process.platform === 'win32';
         const linuxExtra = isWindows ? [] : baseLinux;
@@ -602,6 +606,17 @@ export class PdfBrowserService implements OnModuleDestroy {
             message.includes('não encontrado') ||
             message.includes("executable doesn't exist") ||
             message.includes('executable doesnt exist')
+        );
+    }
+
+    /** Chrome inicia e morre (libs faltando, crashpad, code 127) — vale trocar estratégia. */
+    private isErroLaunchFalhou(error: unknown): boolean {
+        const message = String((error as Error)?.message || '').toLowerCase();
+        return (
+            message.includes('failed to launch the browser process') ||
+            message.includes('cannot open shared object file') ||
+            message.includes('error while loading shared libraries') ||
+            message.includes('chrome_crashpad_handler')
         );
     }
 }

@@ -40,19 +40,21 @@ jobs:
             # (Target closed) quando faltam (libnss3/libgbm/etc.).
             if command -v apt-get >/dev/null 2>&1; then
               sudo DEBIAN_FRONTEND=noninteractive apt-get update -y || true
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                ca-certificates fonts-liberation libasound2t64 libasound2 \
-                libatk-bridge2.0-0t64 libatk-bridge2.0-0 libatk1.0-0t64 libatk1.0-0 \
+              # Ubuntu 24.04 usa sufixo t64; nomes antigos ficam como fallback.
+              # Instala pacote a pacote para um nome inválido não abortar o resto.
+              for pkg in \
+                ca-certificates fonts-liberation wget xdg-utils \
+                libasound2t64 libasound2 \
+                libatk-bridge2.0-0t64 libatk-bridge2.0-0 \
+                libatk1.0-0t64 libatk1.0-0 \
+                libatspi2.0-0t64 libatspi2.0-0 \
                 libcairo2 libcups2t64 libcups2 libdbus-1-3 libdrm2 libgbm1 \
                 libglib2.0-0t64 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 \
                 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
-                libxkbcommon0 libxrandr2 wget xdg-utils 2>/dev/null \
-                || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 \
-                libatk1.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 \
-                libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
-                libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 \
-                libxrandr2 wget xdg-utils || true
+                libxkbcommon0 libxrandr2
+              do
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" || true
+              done
             fi
             npm run build
             pkill -f 'iam-pdf-chrome-' 2>/dev/null || true

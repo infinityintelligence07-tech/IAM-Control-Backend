@@ -73,6 +73,16 @@ export class GetTurmasDto {
     @Transform(({ value }) => value === true || value === 'true')
     turma_aberta?: boolean;
 
+    // Modo leve (usado pelo Calendário): retorna só os dados básicos da turma
+    // (treinamento/polo/status/datas) SEM calcular métricas de alunos
+    // (contadores, pré-cadastros, transferidos) nem executar a auto-atualização
+    // de status/pico por turma — que fazem writes por linha e, com limit alto,
+    // estouravam o timeout de 30s do axios, deixando o calendário lento/vazio.
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === true || value === 'true')
+    sem_metricas?: boolean;
+
     @IsOptional()
     @IsNumber()
     @Transform(({ value }) => parseInt(value))

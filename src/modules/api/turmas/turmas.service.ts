@@ -1980,6 +1980,107 @@ export class TurmasService {
         };
     }
 
+    /**
+     * Mapeia a entidade de turma para a resposta SEM calcular métricas de alunos.
+     * Usado no modo leve do Calendário: contadores ficam em 0 e os picos vêm do
+     * valor já armazenado (sem recomputar/gravar). Mantém os relacionamentos
+     * (polo/treinamento/líder/acessora) necessários para renderizar os cards.
+     */
+    private mapTurmaBasicResponse(turma: any): TurmaResponseDto {
+        return {
+            id: turma.id,
+            id_polo: turma.id_polo,
+            id_treinamento: turma.id_treinamento,
+            lider_evento: turma.lider_evento,
+            edicao_turma: turma.edicao_turma,
+            referencia_externa: turma.referencia_externa ?? null,
+            status_evento: turma.status_evento,
+            id_endereco_evento: turma.id_endereco_evento,
+            local_evento: turma.id_endereco_evento_fk?.local_evento?.trim() || null,
+            cep: turma.cep,
+            logradouro: turma.logradouro,
+            complemento: turma.complemento,
+            numero: turma.numero,
+            bairro: turma.bairro,
+            cidade: turma.cidade,
+            estado: turma.estado,
+            status_turma: turma.status_turma,
+            autorizar_bonus: turma.autorizar_bonus,
+            id_turma_bonus: turma.id_turma_bonus,
+            capacidade_turma: turma.capacidade_turma,
+            meta: turma.meta,
+            data_inicio: turma.data_inicio,
+            data_final: turma.data_final,
+            dias_montagem: turma.dias_montagem ?? null,
+            turma_aberta: turma.turma_aberta,
+            bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
+            detalhamento_bonus: turma.detalhamento_bonus,
+            turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
+            turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+            times_equipes: turma.times_equipes || [],
+            url_midia_kit: turma.url_midia_kit,
+            url_grupo_whatsapp: turma.url_grupo_whatsapp,
+            url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
+            url_pagamento_cartao: turma.url_pagamento_cartao,
+            created_at: turma.criado_em,
+            updated_at: turma.atualizado_em,
+            polo: turma.id_polo_fk
+                ? {
+                      id: turma.id_polo_fk.id,
+                      nome: turma.id_polo_fk.polo,
+                      sigla_polo: turma.id_polo_fk.sigla_polo,
+                      cidade: turma.id_polo_fk.cidade,
+                      estado: turma.id_polo_fk.estado,
+                  }
+                : undefined,
+            treinamento: turma.id_treinamento_fk
+                ? {
+                      id: turma.id_treinamento_fk.id,
+                      nome: turma.id_treinamento_fk.treinamento,
+                      tipo: turma.id_treinamento_fk.tipo_treinamento ? 'treinamento' : 'palestra',
+                      tipo_mentoria: turma.id_treinamento_fk.tipo_mentoria === true,
+                      sigla_treinamento: turma.id_treinamento_fk.sigla_treinamento,
+                      treinamento: turma.id_treinamento_fk.treinamento,
+                      duracao_meses: turma.id_treinamento_fk.duracao_meses ?? null,
+                      url_logo_treinamento: turma.id_treinamento_fk.url_logo_treinamento,
+                      tipo_online: turma.id_treinamento_fk.tipo_online,
+                      id_empresa: turma.id_treinamento_fk.id_empresa ?? null,
+                      empresa_nome: turma.id_treinamento_fk.id_empresa_fk?.nome ?? null,
+                  }
+                : undefined,
+            lider: turma.lider_evento_fk
+                ? {
+                      id: turma.lider_evento_fk.id,
+                      nome: turma.lider_evento_fk.nome,
+                  }
+                : undefined,
+            id_acessora: turma.id_acessora ?? null,
+            acessora: turma.id_acessora_fk
+                ? {
+                      id: turma.id_acessora_fk.id,
+                      nome: turma.id_acessora_fk.nome,
+                  }
+                : null,
+            acessora_definida_em: turma.acessora_definida_em ?? null,
+            liberada_temporariamente_em: turma.liberada_temporariamente_em ?? null,
+            liberada_temporariamente_ate: turma.liberada_temporariamente_ate ?? null,
+            liberada_temporariamente_por: turma.liberada_temporariamente_por ?? null,
+            liberada_temporariamente_por_nome: turma.liberada_temporariamente_por_fk?.nome ?? null,
+            liberacao_temporaria_observacao: turma.liberacao_temporaria_observacao ?? null,
+            meta_pico_inscritos: turma.meta_pico_inscritos ?? null,
+            meta_pico_extras: turma.meta_pico_extras ?? null,
+            // Métricas não são calculadas no modo leve (não exibidas no calendário).
+            alunos_count: 0,
+            alunos_inscricoes_extras_count: 0,
+            alunos_confirmados_count: 0,
+            transferidos_count: 0,
+            vindos_transferencia_count: 0,
+            pre_cadastrados_count: 0,
+            presentes_count: 0,
+            inadimplentes_count: 0,
+        };
+    }
+
     async findAll(filters: GetTurmasDto): Promise<TurmasListResponseDto> {
         const {
             page = 1,
@@ -1993,6 +2094,7 @@ export class TurmasService {
             data_inicio,
             data_final,
             turma_aberta,
+            sem_metricas,
         } = filters;
 
         try {
@@ -2077,6 +2179,23 @@ export class TurmasService {
             const turmasFiltradas = turmas;
 
             const idsListagem = turmasFiltradas.map((t) => t.id);
+
+            // Modo leve (Calendário): sem métricas de alunos e sem writes por turma.
+            // Retorna só o essencial para renderizar os cards (título/status/datas),
+            // evitando os N round-trips de auto-status/pico e as agregações pesadas
+            // que estouravam o timeout com limit alto.
+            if (sem_metricas) {
+                const turmasResponseLeve: TurmaResponseDto[] = turmasFiltradas.map((turma) =>
+                    this.mapTurmaBasicResponse(turma),
+                );
+                return {
+                    data: turmasResponseLeve,
+                    total: turmasFiltradas.length,
+                    page,
+                    limit,
+                    totalPages: Math.ceil(total / limit),
+                };
+            }
 
             const turmasPalestrasIds = turmasFiltradas
                 .filter((t) => t.id_treinamento_fk?.tipo_palestra === true || t.id_treinamento_fk?.tipo_treinamento === false)
@@ -2461,11 +2580,13 @@ export class TurmasService {
             // Palestras/masterclass iniciam com inscrições abertas; treinamentos mantêm o fluxo anterior (padrão do DTO)
             const statusTurmaFinal = isPalestra ? EStatusTurmas.INSCRICOES_ABERTAS : (createTurmaDto.status_turma ?? EStatusTurmas.AGUARDANDO_LIBERACAO);
 
-            // Dias de montagem: valor explícito ou default por cidade/polo
+            // Dias de montagem: Masterclass/palestra nunca tem montagem.
+            // Demais: valor explícito ou default por cidade/polo
             // (Campinas=2, fora de Americana=1, Americana=0).
             const cidadeMontagem = enderecoData.cidade || '';
-            const diasMontagemResolvido =
-                createTurmaDto.dias_montagem !== undefined && createTurmaDto.dias_montagem !== null
+            const diasMontagemResolvido = isPalestra
+                ? 0
+                : createTurmaDto.dias_montagem !== undefined && createTurmaDto.dias_montagem !== null
                     ? Math.max(0, Math.floor(createTurmaDto.dias_montagem))
                     : (() => {
                           const cidadeNorm = String(cidadeMontagem)

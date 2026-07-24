@@ -4255,29 +4255,34 @@ export class TurmasService {
             throw new NotFoundException('Turma não encontrada');
         }
 
-        const turmasAlunos = await this.uow.turmasAlunosRP.find({
-            where: { id_turma, deletado_em: null },
-            relations: ['id_aluno_fk'],
-            order: { criado_em: 'ASC' },
-        });
+        // Select enxuto: só id/nome/foto (evita carregar o restante do aluno).
+        const rows = await this.uow.turmasAlunosRP
+            .createQueryBuilder('ta')
+            .innerJoin('ta.id_aluno_fk', 'aluno')
+            .select('ta.id_aluno', 'id_aluno')
+            .addSelect('aluno.nome', 'nome')
+            .addSelect('aluno.url_foto_aluno', 'url_foto_aluno')
+            .where('ta.id_turma = :id_turma', { id_turma })
+            .andWhere('ta.deletado_em IS NULL')
+            .andWhere('aluno.deletado_em IS NULL')
+            .orderBy('aluno.nome', 'ASC')
+            .getRawMany<{ id_aluno: string | number; nome: string; url_foto_aluno?: string | null }>();
 
         const vistos = new Set<string>();
         const data: Array<{ id_aluno: string; nome: string; url_foto_aluno?: string | null }> = [];
 
-        for (const ta of turmasAlunos) {
-            const idAluno = String(ta.id_aluno ?? ta.id_aluno_fk?.id ?? '').trim();
+        for (const row of rows) {
+            const idAluno = String(row.id_aluno ?? '').trim();
             if (!idAluno || vistos.has(idAluno)) continue;
             vistos.add(idAluno);
-            const nome = String(ta.id_aluno_fk?.nome ?? '').trim();
+            const nome = String(row.nome ?? '').trim();
             if (!nome) continue;
             data.push({
                 id_aluno: idAluno,
                 nome,
-                url_foto_aluno: ta.id_aluno_fk?.url_foto_aluno ?? null,
+                url_foto_aluno: row.url_foto_aluno ?? null,
             });
         }
-
-        data.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
 
         return { data, total: data.length };
     }

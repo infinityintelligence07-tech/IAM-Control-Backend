@@ -4242,6 +4242,46 @@ export class TurmasService {
         return mapa;
     }
 
+    /**
+     * Lista alunos da turma com nome completo e foto (url_foto_aluno),
+     * usados na geração do PDF Peixinho (grade A4 foto + nome).
+     */
+    async getPeixinhoAlunos(id_turma: number): Promise<{ data: Array<{ id_aluno: string; nome: string; url_foto_aluno?: string | null }>; total: number }> {
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id: id_turma, deletado_em: IsNull() as any },
+            select: { id: true },
+        });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        const turmasAlunos = await this.uow.turmasAlunosRP.find({
+            where: { id_turma, deletado_em: null },
+            relations: ['id_aluno_fk'],
+            order: { criado_em: 'ASC' },
+        });
+
+        const vistos = new Set<string>();
+        const data: Array<{ id_aluno: string; nome: string; url_foto_aluno?: string | null }> = [];
+
+        for (const ta of turmasAlunos) {
+            const idAluno = String(ta.id_aluno ?? ta.id_aluno_fk?.id ?? '').trim();
+            if (!idAluno || vistos.has(idAluno)) continue;
+            vistos.add(idAluno);
+            const nome = String(ta.id_aluno_fk?.nome ?? '').trim();
+            if (!nome) continue;
+            data.push({
+                id_aluno: idAluno,
+                nome,
+                url_foto_aluno: ta.id_aluno_fk?.url_foto_aluno ?? null,
+            });
+        }
+
+        data.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
+
+        return { data, total: data.length };
+    }
+
     /** Listagem enxuta para exportação XLSX — sem comprovantes base64; inclui canal/categoria do dashboard. */
     async getAlunosTurmaExport(id_turma: number): Promise<AlunosTurmaExportResponseDto> {
         try {

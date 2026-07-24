@@ -11,6 +11,7 @@ import {
     TurmaResponseDto,
     AlunosTurmaListResponseDto,
     AlunosTurmaExportResponseDto,
+    PeixinhoAlunosResponseDto,
     AlunoTurmaResponseDto,
     AlunosDisponiveisResponseDto,
     SoftDeleteTurmaDto,
@@ -445,6 +446,14 @@ export class TurmasController {
     @Get(':id/alunos/export')
     async getAlunosTurmaExport(@Param('id', ParseIntPipe) id_turma: number): Promise<AlunosTurmaExportResponseDto> {
         return this.turmasService.getAlunosTurmaExport(id_turma);
+    }
+
+    /** Alunos da turma com foto para gerar o PDF Peixinho (folha A4). */
+    @Get(':id/peixinho')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
+    async getPeixinhoAlunos(@Param('id', ParseIntPipe) id_turma: number): Promise<PeixinhoAlunosResponseDto> {
+        return this.turmasService.getPeixinhoAlunos(id_turma);
     }
 
     @Get(':id/alunos')

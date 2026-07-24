@@ -1114,6 +1114,18 @@ export class AlunosTurmaExportResponseDto {
     total: number;
 }
 
+/** Dados mínimos para o PDF Peixinho (foto + nome completo por aluno da turma). */
+export class PeixinhoAlunoItemDto {
+    id_aluno: string;
+    nome: string;
+    url_foto_aluno?: string | null;
+}
+
+export class PeixinhoAlunosResponseDto {
+    data: PeixinhoAlunoItemDto[];
+    total: number;
+}
+
 export class AlunosDisponiveis {
     id: number;
     nome: string;

@@ -3176,6 +3176,7 @@ export class DocumentosService {
                     testemunha_dois: true,
                     status_ass_test_dois: true,
                     data_ass_test_dois: true,
+                    status_conciliacao: true,
                     dados_contrato: true, // Garantir que o campo JSON seja carregado
                     comprovantes_pagamento: true, // Comprovante(s) vinculados ao contrato
                     zapsign_document_id: true, // ✅ Campo ZapSign adicionado
@@ -5962,6 +5963,7 @@ export class DocumentosService {
                 data_ass_aluno: true,
                 data_ass_test_um: true,
                 data_ass_test_dois: true,
+                status_conciliacao: true,
                 criado_em: true,
                 atualizado_em: true,
                 criado_por: true,

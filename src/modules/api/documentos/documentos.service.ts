@@ -1,13 +1,4 @@
-import {
-    Injectable,
-    NotFoundException,
-    BadRequestException,
-    ForbiddenException,
-    Logger,
-    Inject,
-    forwardRef,
-} from '@nestjs/common';
-import { userHasSetor } from '@/common/utils/setor.util';
+import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
 import { Documentos } from '@/modules/config/entities/documentos.entity';
@@ -1005,8 +996,12 @@ export class DocumentosService {
                   }
                 : null;
 
-            // Toda venda nasce como NOVO; só o Financeiro altera depois no Histórico.
-            const statusConciliacao = 'NOVO';
+            // Salvar informações do contrato no banco de dados
+            const statusConciliacao =
+                criarContratoDto.status_conciliacao &&
+                ['NOVO', 'CONCILIADO', 'PENDENTE'].includes(String(criarContratoDto.status_conciliacao))
+                    ? String(criarContratoDto.status_conciliacao)
+                    : 'NOVO';
 
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
@@ -4286,70 +4281,6 @@ export class DocumentosService {
                 'Venda conciliada não pode ser alterada. Exclua a venda e crie uma nova.',
             );
         }
-    }
-
-    private isUsuarioAdministrador(usuario: Pick<Usuarios, 'setor' | 'funcao'> | null | undefined): boolean {
-        const funcoes = Array.isArray(usuario?.funcao) ? usuario.funcao : [];
-        return funcoes.includes(EFuncoes.ADMINISTRADOR) || userHasSetor(usuario, ESetores.ADMINISTRADOR);
-    }
-
-    /**
-     * Etiqueta de conciliação (Novo / Conciliado / Pendente): só Financeiro ou
-     * administrador podem alterar — e podem mudar mesmo quando já está Conciliado
-     * (ex.: reabrir para Pendente/Novo). Demais edições da venda continuam bloqueadas
-     * por assertContratoNaoConciliado enquanto o status for CONCILIADO.
-     */
-    async atualizarStatusConciliacaoContratoHistorico(
-        contratoId: string,
-        statusConciliacao: string,
-        userId?: number,
-    ): Promise<{ atualizado: boolean; status_conciliacao: string }> {
-        if (!userId) {
-            throw new ForbiddenException('Não autorizado');
-        }
-
-        const statusNormalizado = String(statusConciliacao || '')
-            .trim()
-            .toUpperCase();
-        if (!['NOVO', 'CONCILIADO', 'PENDENTE'].includes(statusNormalizado)) {
-            throw new BadRequestException(
-                'Status de conciliação inválido. Use NOVO, CONCILIADO ou PENDENTE.',
-            );
-        }
-
-        const usuario = await this.uow.usuariosRP.findOne({
-            where: { id: userId, deletado_em: IsNull() },
-            select: ['id', 'setor', 'funcao'] as any,
-        });
-        if (!usuario) {
-            throw new ForbiddenException('Não autorizado');
-        }
-        if (
-            !this.isUsuarioAdministrador(usuario) &&
-            !userHasSetor(usuario, ESetores.FINANCEIRO)
-        ) {
-            throw new ForbiddenException(
-                'Somente o Financeiro pode alterar a etiqueta de conciliação da venda.',
-            );
-        }
-
-        const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-            where: { id: contratoId, deletado_em: IsNull() },
-        });
-        if (!contrato) {
-            throw new NotFoundException('Contrato não encontrado');
-        }
-
-        const dadosContrato = { ...(contrato.dados_contrato || {}) };
-        dadosContrato.status_conciliacao = statusNormalizado;
-
-        await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {
-            status_conciliacao: statusNormalizado,
-            dados_contrato: dadosContrato,
-        });
-        this.invalidarCachesHistoricoVendas();
-
-        return { atualizado: true, status_conciliacao: statusNormalizado };
     }
 
     // Persiste/edita somente a observação interna (uso do sistema) da venda na

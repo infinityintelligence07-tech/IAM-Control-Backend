@@ -20,16 +20,12 @@ import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
 import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
 import { Request } from 'express';
 import { EFormasPagamento } from '@/modules/config/entities/enum';
-import { PdfBrowserService, PdfDiagnostico } from './pdf-browser.service';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('documentos')
 export class DocumentosController {
     private readonly logger = new Logger(DocumentosController.name);
-    constructor(
-        private readonly documentosService: DocumentosService,
-        private readonly pdfBrowserService: PdfBrowserService,
-    ) {}
+    constructor(private readonly documentosService: DocumentosService) {}
 
     @Post()
     @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -433,21 +429,6 @@ export class DocumentosController {
         return this.documentosService.atualizarObservacoesSistemaContratoHistorico(id, body?.observacoes ?? '');
     }
 
-    // Etiqueta de conciliação (Novo / Conciliado / Pendente): só Financeiro/admin.
-    @Post('public/contratos-banco/:id/status-conciliacao')
-    @UseGuards(JwtAuthGuard)
-    atualizarStatusConciliacaoContrato(
-        @Param('id') id: string,
-        @Body()
-        body: {
-            status_conciliacao?: string;
-        },
-        @Req() req: Request,
-    ) {
-        const userId = (req.user as { sub?: number } | undefined)?.sub;
-        return this.documentosService.atualizarStatusConciliacaoContratoHistorico(id, body?.status_conciliacao ?? '', userId);
-    }
-
     // Atualiza os dados DA VENDA (quantidade de inscrições, outros clientes e
     // pendência) no snapshot por venda dados_contrato.turma_aluno — fonte que a
     // listagem do histórico prioriza sobre a matrícula compartilhada de origem.
@@ -518,17 +499,6 @@ export class DocumentosController {
             message: 'Caches do histórico invalidados com sucesso.',
             ...resultado,
         };
-    }
-
-    /**
-     * Diagnóstico do Chrome/Puppeteer na VPS: gera um PDF mínimo e devolve
-     * caminhos/erro reais (útil quando a venda falha com Target closed).
-     */
-    @Get('admin/pdf-health')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'documentos', action: 'view' })
-    async diagnosticarPdf(): Promise<PdfDiagnostico> {
-        return this.pdfBrowserService.diagnosticar();
     }
 
     @Post('admin/historico/recalcular-staff-lider')

@@ -314,8 +314,7 @@ export class CriarContratoZapSignDto {
 
     /**
      * Etiqueta de conciliação da venda (Novo / Conciliado / Pendente).
-     * Ignorado na criação: toda venda nasce como NOVO. Só o Financeiro
-     * altera depois via endpoint dedicado no Histórico de Vendas.
+     * Independente de pendência financeira.
      */
     @IsOptional()
     @IsIn(Object.values(EStatusConciliacaoVenda))

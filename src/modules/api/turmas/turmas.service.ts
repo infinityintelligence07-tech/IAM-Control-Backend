@@ -154,15 +154,6 @@ export class TurmasService {
     private periodosMentoriaCronEmExecucao = false;
     /** Turmas com congelamento de snapshot em geração em background (evita disparos duplicados). */
     private readonly snapshotEmGeracaoBackground = new Set<number>();
-    /** Retry em falhas transitórias de conexão (Postgres remoto / pool idle). */
-    private readonly liberacaoCronMaxTentativas = Math.max(
-        1,
-        Number.parseInt(process.env.LIBERACAO_CRON_MAX_TENTATIVAS || '3', 10) || 3,
-    );
-    private readonly liberacaoCronRetryDelayMs = Math.max(
-        200,
-        Number.parseInt(process.env.LIBERACAO_CRON_RETRY_DELAY_MS || '2000', 10) || 2000,
-    );
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -1055,22 +1046,6 @@ export class TurmasService {
 
     private liberacoesExpiradasCronEmExecucao = false;
 
-    private isErroConexaoTransitorio(error: unknown): boolean {
-        const message = String((error as { message?: unknown })?.message || '').toLowerCase();
-        return (
-            message.includes('connection terminated unexpectedly') ||
-            message.includes('terminating connection') ||
-            message.includes('connection reset') ||
-            message.includes('econnreset') ||
-            message.includes('timeout') ||
-            message.includes('connection not open')
-        );
-    }
-
-    private async aguardar(ms: number): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
     /**
      * Processa liberações temporárias expiradas (passadas 24h): marca como processadas,
      * registra no histórico e regera o snapshot. A visibilidade na venda/credenciamento já
@@ -1083,67 +1058,42 @@ export class TurmasService {
         }
         this.liberacoesExpiradasCronEmExecucao = true;
         try {
-            await this.executarLiberacoesTemporariasExpiradasComRetry();
+            const agora = new Date();
+            const turmasExpiradas = await this.uow.turmasRP
+                .createQueryBuilder('turma')
+                .where('turma.deletado_em IS NULL')
+                .andWhere('turma.liberada_temporariamente_ate IS NOT NULL')
+                .andWhere('turma.liberada_temporariamente_ate <= :agora', { agora })
+                .andWhere('turma.liberacao_temporaria_processada = false')
+                .getMany();
+
+            for (const turma of turmasExpiradas) {
+                await this.uow.turmasRP.update(turma.id, {
+                    liberacao_temporaria_processada: true,
+                    atualizado_em: new Date(),
+                });
+
+                await this.registrarLogTurma(
+                    {
+                        id_turma: turma.id,
+                        tipo_acao: 'STATUS',
+                        titulo: 'Liberação temporária expirada (24h)',
+                        descricao: 'A janela de 24h da liberação terminou e a turma voltou a ficar encerrada automaticamente.',
+                        detalhes: { liberada_temporariamente_ate: turma.liberada_temporariamente_ate },
+                    },
+                    turma.liberada_temporariamente_por ?? undefined,
+                );
+
+                await this.regerarSnapshotAposLiberacaoTemporaria(turma.id);
+            }
+
+            if (turmasExpiradas.length > 0) {
+                this.logger.log(`turma.liberacao_temporaria.cron | ${turmasExpiradas.length} liberação(ões) expirada(s) processada(s)`);
+            }
         } catch (error) {
             this.logger.error('turma.liberacao_temporaria.cron | Erro ao processar liberações expiradas', error instanceof Error ? error.stack : undefined);
         } finally {
             this.liberacoesExpiradasCronEmExecucao = false;
-        }
-    }
-
-    private async executarLiberacoesTemporariasExpiradasComRetry(): Promise<void> {
-        for (let tentativa = 1; tentativa <= this.liberacaoCronMaxTentativas; tentativa++) {
-            try {
-                await this.processarLiberacoesTemporariasExpiradas();
-                return;
-            } catch (error) {
-                const erroTransitorio = this.isErroConexaoTransitorio(error);
-                const ultimaTentativa = tentativa >= this.liberacaoCronMaxTentativas;
-
-                if (!erroTransitorio || ultimaTentativa) {
-                    throw error;
-                }
-
-                this.logger.warn(
-                    `turma.liberacao_temporaria.cron | Falha transitória de conexão na tentativa ${tentativa}/${this.liberacaoCronMaxTentativas}; retry em ${this.liberacaoCronRetryDelayMs}ms`,
-                );
-                await this.aguardar(this.liberacaoCronRetryDelayMs);
-            }
-        }
-    }
-
-    private async processarLiberacoesTemporariasExpiradas(): Promise<void> {
-        const agora = new Date();
-        const turmasExpiradas = await this.uow.turmasRP
-            .createQueryBuilder('turma')
-            .where('turma.deletado_em IS NULL')
-            .andWhere('turma.liberada_temporariamente_ate IS NOT NULL')
-            .andWhere('turma.liberada_temporariamente_ate <= :agora', { agora })
-            .andWhere('turma.liberacao_temporaria_processada = false')
-            .getMany();
-
-        for (const turma of turmasExpiradas) {
-            await this.uow.turmasRP.update(turma.id, {
-                liberacao_temporaria_processada: true,
-                atualizado_em: new Date(),
-            });
-
-            await this.registrarLogTurma(
-                {
-                    id_turma: turma.id,
-                    tipo_acao: 'STATUS',
-                    titulo: 'Liberação temporária expirada (24h)',
-                    descricao: 'A janela de 24h da liberação terminou e a turma voltou a ficar encerrada automaticamente.',
-                    detalhes: { liberada_temporariamente_ate: turma.liberada_temporariamente_ate },
-                },
-                turma.liberada_temporariamente_por ?? undefined,
-            );
-
-            await this.regerarSnapshotAposLiberacaoTemporaria(turma.id);
-        }
-
-        if (turmasExpiradas.length > 0) {
-            this.logger.log(`turma.liberacao_temporaria.cron | ${turmasExpiradas.length} liberação(ões) expirada(s) processada(s)`);
         }
     }
 

@@ -320,6 +320,15 @@ export class CriarContratoZapSignDto {
     @IsIn(Object.values(EStatusConciliacaoVenda))
     status_conciliacao?: EStatusConciliacaoVenda | string;
 
+    /**
+     * Recriação de venda: ID do contrato original (pode estar soft-deleted).
+     * Quando informado, o novo contrato herda o vendedor e o staff líder do
+     * original para o Histórico de Vendas / ranking.
+     */
+    @IsOptional()
+    @IsString()
+    id_contrato_origem?: string;
+
     @IsOptional()
     quantidade_inscricoes?: number; // Quantidade de inscrições da venda
 

@@ -633,6 +633,13 @@ export class DocumentosService {
         try {
             this.logger.debug('zapsign.create.contract | Iniciando criação de contrato ZapSign');
 
+            // Recriação: herda vendedor + staff líder do contrato original
+            // (ex.: exclusão por erro de preenchimento / venda conciliada refeita).
+            const atribuicaoRecriacao = await this.resolverAtribuicaoRecriacaoContrato(
+                criarContratoDto.id_contrato_origem,
+            );
+            const criadoPorAtribuicao = atribuicaoRecriacao?.vendedorId ?? userId;
+
             // Buscar dados do aluno
             const aluno = await this.uow.alunosRP.findOne({
                 where: { id: parseInt(criarContratoDto.id_aluno), deletado_em: null },
@@ -1105,6 +1112,17 @@ export class DocumentosService {
                         comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda),
                     },
                     status_conciliacao: statusConciliacao,
+                    ...(atribuicaoRecriacao
+                        ? {
+                              recriacao: {
+                                  id_contrato_origem: atribuicaoRecriacao.idContratoOrigem,
+                                  vendedor_id_original: atribuicaoRecriacao.vendedorId,
+                                  staff_lider_id_original: atribuicaoRecriacao.staffLiderId,
+                                  recriado_por: userId ?? null,
+                                  recriado_em: new Date().toISOString(),
+                              },
+                          }
+                        : {}),
                     campos_variaveis: bonusData.campos_variaveis,
                     observacoes: criarContratoDto.observacoes || '',
                     testemunhas: (() => {
@@ -1132,13 +1150,23 @@ export class DocumentosService {
                         return undefined;
                     })(),
                 },
-                criado_por: userId,
+                criado_por: criadoPorAtribuicao,
                 atualizado_por: userId,
             });
-            Object.assign(
-                contrato,
-                await this.montarColunasHistoricoVendaCompletas(contrato.dados_contrato, userId, [idTurmaOrigemContrato, criarContratoDto.id_turma_destino]),
+            const colunasHistorico = await this.montarColunasHistoricoVendaCompletas(
+                contrato.dados_contrato,
+                criadoPorAtribuicao,
+                [idTurmaOrigemContrato, criarContratoDto.id_turma_destino],
             );
+            // Preferência: staff líder já materializado no contrato original
+            // (evita “perder” o líder se o time IPR mudou entre exclusão e recriação).
+            if (atribuicaoRecriacao?.staffLiderId) {
+                colunasHistorico.hist_staff_lider_id = atribuicaoRecriacao.staffLiderId;
+            }
+            if (atribuicaoRecriacao?.vendedorId) {
+                colunasHistorico.hist_vendedor_id = atribuicaoRecriacao.vendedorId;
+            }
+            Object.assign(contrato, colunasHistorico);
 
             const savedContrato = await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
             this.invalidarCachesHistoricoVendas();
@@ -3662,6 +3690,84 @@ export class DocumentosService {
         const liderId = timeDoVendedor?.liderId || liderPorMembroGlobal.get(vendedorKey) || '';
         const parsed = Number(liderId);
         return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    /**
+     * Recriação de contrato: resolve vendedor e staff líder do contrato original
+     * (ativo ou soft-deleted) para o novo contrato herdar a atribuição no histórico.
+     */
+    private async resolverAtribuicaoRecriacaoContrato(
+        idContratoOrigemRaw?: string | null,
+    ): Promise<{
+        idContratoOrigem: string;
+        vendedorId: number | null;
+        staffLiderId: number | null;
+    } | null> {
+        const idContratoOrigem = String(idContratoOrigemRaw || '').trim();
+        if (!idContratoOrigem) return null;
+
+        const contratoOrigem = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+            where: { id: idContratoOrigem },
+            withDeleted: true,
+            select: {
+                id: true,
+                criado_por: true,
+                hist_vendedor_id: true,
+                hist_staff_lider_id: true,
+                dados_contrato: true,
+            },
+        });
+
+        if (!contratoOrigem) {
+            throw new NotFoundException(
+                `Contrato original (${idContratoOrigem}) não encontrado para recriação.`,
+            );
+        }
+
+        const dadosOrigem = (contratoOrigem.dados_contrato || {}) as Record<string, any>;
+        const criadoPorConfronto = dadosOrigem?.criado_por_confronto || {};
+        const candidatosVendedor = [
+            contratoOrigem.hist_vendedor_id,
+            contratoOrigem.criado_por,
+            criadoPorConfronto?.consolidado,
+            criadoPorConfronto?.contrato,
+            dadosOrigem?.criado_por,
+            dadosOrigem?.recriacao?.vendedor_id_original,
+        ];
+        let vendedorId: number | null = null;
+        for (const candidato of candidatosVendedor) {
+            const id = Number(candidato);
+            if (Number.isFinite(id) && id > 0) {
+                vendedorId = id;
+                break;
+            }
+        }
+
+        const staffLiderColuna = Number(contratoOrigem.hist_staff_lider_id);
+        const staffLiderSnapshot = Number(
+            dadosOrigem?.recriacao?.staff_lider_id_original ?? dadosOrigem?.hist_staff_lider_id,
+        );
+        let staffLiderId: number | null =
+            Number.isFinite(staffLiderColuna) && staffLiderColuna > 0
+                ? staffLiderColuna
+                : Number.isFinite(staffLiderSnapshot) && staffLiderSnapshot > 0
+                  ? staffLiderSnapshot
+                  : null;
+
+        if (!staffLiderId && vendedorId) {
+            const idsTurmas = this.obterIdsTurmasParaStaffLider(dadosOrigem);
+            staffLiderId = await this.resolverHistStaffLiderId(vendedorId, idsTurmas);
+        }
+
+        this.logger.log(
+            `contract.recreate | origem=${idContratoOrigem} vendedor=${vendedorId ?? 'null'} staffLider=${staffLiderId ?? 'null'}`,
+        );
+
+        return {
+            idContratoOrigem,
+            vendedorId,
+            staffLiderId,
+        };
     }
 
     private async montarColunasHistoricoVendaCompletas(

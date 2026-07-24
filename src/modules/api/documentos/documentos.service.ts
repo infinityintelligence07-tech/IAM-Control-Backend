@@ -4070,6 +4070,15 @@ export class DocumentosService {
         )) = 'CONCILIADO'`;
     }
 
+    /** Status de conciliação normalizado (NOVO / CONCILIADO / PENDENTE). */
+    private sqlStatusConciliacaoNormalizado(aliasContrato = 'contrato'): string {
+        return `UPPER(COALESCE(
+            NULLIF(TRIM(${aliasContrato}.status_conciliacao), ''),
+            NULLIF(TRIM(${aliasContrato}.dados_contrato->>'status_conciliacao'), ''),
+            'NOVO'
+        ))`;
+    }
+
     private converterDataFiltroParaDate(valor?: string, fimDoDia: boolean = false): Date | null {
         const bruto = String(valor || '').trim();
         if (!bruto) return null;
@@ -5624,6 +5633,8 @@ export class DocumentosService {
         somente_com_pendencia?: boolean | string;
         somente_sem_assinatura?: boolean | string;
         somente_sem_conciliacao?: boolean | string;
+        /** Filtro exato: NOVO | CONCILIADO | PENDENTE */
+        status_conciliacao?: string;
         tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
         treinamento_origem?: string;
         turma_origem?: string;
@@ -5705,6 +5716,7 @@ export class DocumentosService {
                 somente_com_pendencia: filtros?.somente_com_pendencia || null,
                 somente_sem_assinatura: filtros?.somente_sem_assinatura || null,
                 somente_sem_conciliacao: filtros?.somente_sem_conciliacao || null,
+                status_conciliacao: filtros?.status_conciliacao || null,
                 tipo_filtro_busca: filtros?.tipo_filtro_busca || null,
                 treinamento_origem: filtros?.treinamento_origem || null,
                 turma_origem: filtros?.turma_origem || null,
@@ -5755,6 +5767,13 @@ export class DocumentosService {
                 filtros?.somente_sem_conciliacao === true ||
                 filtros?.somente_sem_conciliacao === 'true' ||
                 filtros?.somente_sem_conciliacao === '1';
+            const statusConciliacaoFiltro = String(filtros?.status_conciliacao || '')
+                .trim()
+                .toUpperCase();
+            const statusConciliacaoFiltroAtivo =
+                statusConciliacaoFiltro === 'NOVO' ||
+                statusConciliacaoFiltro === 'CONCILIADO' ||
+                statusConciliacaoFiltro === 'PENDENTE';
             const idTurmaOrigemDadosContratoSql = this.sqlIdTurmaOrigemHistorico;
 
             // Expressões compartilhadas com listarOpcoesFiltrosOrigem: o rótulo
@@ -5984,8 +6003,14 @@ export class DocumentosService {
                 baseQb.andWhere(`NOT ${this.sqlContratoTemAssinatura('contrato')}`);
             }
 
-            if (somenteSemConciliacaoAtivo) {
+            if (somenteSemConciliacaoAtivo && !statusConciliacaoFiltroAtivo) {
                 baseQb.andWhere(`NOT ${this.sqlContratoConciliado('contrato')}`);
+            }
+
+            if (statusConciliacaoFiltroAtivo) {
+                baseQb.andWhere(`${this.sqlStatusConciliacaoNormalizado('contrato')} = :statusConciliacaoFiltro`, {
+                    statusConciliacaoFiltro,
+                });
             }
 
             if (statusFiltro && statusFiltro !== 'all') {

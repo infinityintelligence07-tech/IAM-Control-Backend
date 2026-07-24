@@ -35,7 +35,7 @@ async function bootstrap() {
     // Prefixo global para todas as rotas da API.
     app.setGlobalPrefix('api');
 
-    // Configuração do body parser para payloads grandes (50MB)
+    // Configuração do body parser para payloads grandes (50MB).
     app.use(bodyParser.json({ limit: '100mb' }));
     app.use(bodyParser.urlencoded({ limit: '100mb', extended: true }));
 

@@ -9,6 +9,7 @@ import {
     ValidateIf,
     IsInt,
     Min,
+    Max,
     IsObject,
     IsIn,
     MinLength,
@@ -196,6 +197,18 @@ export class CreateTurmaDto {
     @IsString()
     data_final?: string | null;
 
+    /** Dias de montagem no calendário (primeiros N dias do intervalo). */
+    @IsOptional()
+    @IsInt()
+    @Min(0)
+    @Max(30)
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
+    dias_montagem?: number | null;
+
     @IsOptional()
     @IsBoolean()
     turma_aberta?: boolean = false;
@@ -369,6 +382,18 @@ export class UpdateTurmaDto {
     @IsOptional()
     @IsString()
     data_final?: string;
+
+    /** Dias de montagem no calendário (primeiros N dias do intervalo). */
+    @IsOptional()
+    @IsInt()
+    @Min(0)
+    @Max(30)
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return undefined;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? undefined : n;
+    })
+    dias_montagem?: number | null;
 
     @IsOptional()
     @IsBoolean()
@@ -687,6 +712,8 @@ export class TurmaResponseDto {
     // Status do evento no calendário (cores da legenda). Ver EStatusEventoCalendario.
     status_evento?: string;
     id_endereco_evento?: number;
+    /** Nome do local (ex.: hotel) vindo do endereço predefinido vinculado. */
+    local_evento?: string | null;
     cep: string;
     logradouro: string;
     complemento: string;
@@ -705,6 +732,8 @@ export class TurmaResponseDto {
     meta_pico_extras?: number | null;
     data_inicio: string;
     data_final: string;
+    /** Dias de montagem no calendário (null = usar default por cidade/polo). */
+    dias_montagem?: number | null;
     turma_aberta: boolean;
     bonus_treinamentos?: number[];
     detalhamento_bonus?: { id_treinamento_db: number }[];

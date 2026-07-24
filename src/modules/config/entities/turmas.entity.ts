@@ -122,6 +122,12 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'date', name: 'data_final', nullable: true })
     data_final: string | null;
 
+    // Dias de montagem exibidos no calendário ANTES do evento (primeiros N dias
+    // de [data_inicio, data_final]). Fora do polo de Americana o padrão é 1;
+    // Campinas usa 2. NULL = ainda não definido (calendário aplica o default).
+    @Column({ type: 'int', name: 'dias_montagem', nullable: true })
+    dias_montagem: number | null;
+
     @Column({ type: 'boolean', name: 'turma_aberta', default: false, nullable: false })
     turma_aberta: boolean;
 

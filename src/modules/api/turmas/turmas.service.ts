@@ -2004,6 +2004,7 @@ export class TurmasService {
                 .leftJoinAndSelect('turma.lider_evento_fk', 'lider', 'lider.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.id_acessora_fk', 'acessora', 'acessora.deletado_em IS NULL')
                 .leftJoinAndSelect('turma.liberada_temporariamente_por_fk', 'liberacao_usuario')
+                .leftJoinAndSelect('turma.id_endereco_evento_fk', 'endereco_evento', 'endereco_evento.deletado_em IS NULL')
                 .where('turma.deletado_em IS NULL');
 
             // Aplicar filtros básicos
@@ -2118,6 +2119,8 @@ export class TurmasService {
                     edicao_turma: turma.edicao_turma,
                     referencia_externa: turma.referencia_externa ?? null,
                     status_evento: turma.status_evento,
+                    id_endereco_evento: turma.id_endereco_evento,
+                    local_evento: turma.id_endereco_evento_fk?.local_evento?.trim() || null,
                     cep: turma.cep,
                     logradouro: turma.logradouro,
                     complemento: turma.complemento,
@@ -2132,6 +2135,7 @@ export class TurmasService {
                     meta: turma.meta,
                     data_inicio: turma.data_inicio,
                     data_final: turma.data_final,
+                    dias_montagem: turma.dias_montagem ?? null,
                     turma_aberta: turma.turma_aberta,
                     bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                     detalhamento_bonus: turma.detalhamento_bonus,
@@ -2225,6 +2229,7 @@ export class TurmasService {
                     'lider_evento_fk',
                     'id_acessora_fk',
                     'liberada_temporariamente_por_fk',
+                    'id_endereco_evento_fk',
                 ],
             });
 
@@ -2251,6 +2256,7 @@ export class TurmasService {
                 lider_evento: turma.lider_evento,
                 edicao_turma: turma.edicao_turma,
                 id_endereco_evento: turma.id_endereco_evento,
+                local_evento: turma.id_endereco_evento_fk?.local_evento?.trim() || null,
                 cep: turma.cep,
                 logradouro: turma.logradouro,
                 complemento: turma.complemento,
@@ -2267,6 +2273,7 @@ export class TurmasService {
                 meta_pico_extras: picos.meta_pico_extras,
                 data_inicio: turma.data_inicio,
                 data_final: turma.data_final,
+                dias_montagem: turma.dias_montagem ?? null,
                 turma_aberta: turma.turma_aberta,
                 bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                 detalhamento_bonus: turma.detalhamento_bonus,
@@ -2283,6 +2290,7 @@ export class TurmasService {
                     ? {
                           id: turma.id_polo_fk.id,
                           nome: turma.id_polo_fk.polo,
+                          sigla_polo: turma.id_polo_fk.sigla_polo,
                           cidade: turma.id_polo_fk.cidade,
                           estado: turma.id_polo_fk.estado,
                       }
@@ -2453,12 +2461,46 @@ export class TurmasService {
             // Palestras/masterclass iniciam com inscrições abertas; treinamentos mantêm o fluxo anterior (padrão do DTO)
             const statusTurmaFinal = isPalestra ? EStatusTurmas.INSCRICOES_ABERTAS : (createTurmaDto.status_turma ?? EStatusTurmas.AGUARDANDO_LIBERACAO);
 
+            // Dias de montagem: valor explícito ou default por cidade/polo
+            // (Campinas=2, fora de Americana=1, Americana=0).
+            const cidadeMontagem = enderecoData.cidade || '';
+            const diasMontagemResolvido =
+                createTurmaDto.dias_montagem !== undefined && createTurmaDto.dias_montagem !== null
+                    ? Math.max(0, Math.floor(createTurmaDto.dias_montagem))
+                    : (() => {
+                          const cidadeNorm = String(cidadeMontagem)
+                              .normalize('NFD')
+                              .replace(/\p{Diacritic}/gu, '')
+                              .toLowerCase()
+                              .trim();
+                          if (cidadeNorm.includes('campinas')) return 2;
+                          const sigla = String(polo.sigla_polo || '')
+                              .normalize('NFD')
+                              .replace(/\p{Diacritic}/gu, '')
+                              .toLowerCase()
+                              .trim();
+                          const nomePolo = String(polo.polo || '')
+                              .normalize('NFD')
+                              .replace(/\p{Diacritic}/gu, '')
+                              .toLowerCase()
+                              .trim();
+                          const cidadePolo = String(polo.cidade || '')
+                              .normalize('NFD')
+                              .replace(/\p{Diacritic}/gu, '')
+                              .toLowerCase()
+                              .trim();
+                          const isAmericana =
+                              sigla === 'am' || nomePolo === 'americana' || cidadePolo === 'americana';
+                          return isAmericana ? 0 : 1;
+                      })();
+
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
                 ...createData,
                 ...enderecoData,
                 data_inicio: dataInicioFormatada,
                 data_final: dataFinalFormatada,
+                dias_montagem: diasMontagemResolvido,
                 turma_aberta: turmaAberta,
                 status_turma: statusTurmaFinal,
                 id_turma_bonus: createTurmaDto.id_turma_bonus || null,
@@ -3183,6 +3225,7 @@ export class TurmasService {
                     meta: turma.meta,
                     data_inicio: turma.data_inicio,
                     data_final: turma.data_final,
+                    dias_montagem: turma.dias_montagem ?? null,
                     turma_aberta: turma.turma_aberta,
                     bonus_treinamentos: turma.detalhamento_bonus?.map((item) => item.id_treinamento_db) || [],
                     detalhamento_bonus: turma.detalhamento_bonus,

@@ -969,8 +969,11 @@ export class DocumentosService {
             const boletoData = this.processBoletoData(criarContratoDto);
             bonusData.campos_variaveis = { ...bonusData.campos_variaveis, ...boletoData };
 
-            // Preparar dados dos signers para o campo zapsign_signers_data
-            const signersData = signers.map((signer, index) => {
+            // Preparar dados dos signers para o campo zapsign_signers_data.
+            // Contrato manuscrito: o aluno já assinou no papel — gravamos só o
+            // aluno como assinante com status assinado (sem ZapSign).
+            const signersParaGravar = isContratoManual ? [signers[0]] : signers;
+            const signersData = signersParaGravar.map((signer, index) => {
                 // Tentar encontrar o signer correspondente no ZapSign por índice ou nome
                 const zapSignSigner = zapSignResponse?.signers[index] || zapSignResponse?.signers.find((s) => s.name === signer.name);
 
@@ -979,7 +982,7 @@ export class DocumentosService {
                     email: signer.email || undefined,
                     telefone: signer.phone || undefined,
                     cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
-                    status: zapSignSigner?.status || 'pending',
+                    status: isContratoManual ? 'signed' : zapSignSigner?.status || 'pending',
                     signing_url: zapSignSigner?.sign_url || '',
                 };
             });
@@ -987,14 +990,21 @@ export class DocumentosService {
             this.logger.debug(`zapsign.create.contract | Signers preparados total=${signersData.length}`);
 
             // Preparar status do documento para o campo zapsign_document_status
-            const documentStatus = zapSignResponse
+            const documentStatus = isContratoManual
                 ? {
-                      status: zapSignResponse.status,
-                      created_at: zapSignResponse.created_at,
-                      document_id: zapSignResponse.token,
-                      signing_url: zapSignResponse.signers[0]?.sign_url || '',
+                      status: 'signed',
+                      created_at: new Date().toISOString(),
+                      document_id: '',
+                      signing_url: '',
                   }
-                : null;
+                : zapSignResponse
+                  ? {
+                        status: zapSignResponse.status,
+                        created_at: zapSignResponse.created_at,
+                        document_id: zapSignResponse.token,
+                        signing_url: zapSignResponse.signers[0]?.sign_url || '',
+                    }
+                  : null;
 
             // Salvar informações do contrato no banco de dados
             const statusConciliacao =
@@ -1006,7 +1016,10 @@ export class DocumentosService {
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
-                status_ass_aluno: EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                status_ass_aluno: isContratoManual
+                    ? EStatusAssinaturasContratos.ASSINADO
+                    : EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                data_ass_aluno: isContratoManual ? new Date() : undefined,
                 status_conciliacao: statusConciliacao,
                 // Comprovante(s) de pagamento desta venda, vinculados ao contrato.
                 comprovantes_pagamento: comprovantesVenda.length > 0 ? comprovantesVenda : null,
@@ -3131,6 +3144,30 @@ export class DocumentosService {
             // Foto(s) ou PDF do contrato escrito à mão
             if (signatureData.documentPhoto) {
                 contrato.foto_documento_aluno_base64 = signatureData.documentPhoto;
+                // Manuscrito anexado: aluno como assinante e contrato já assinado
+                // (espelha a regra de criação com contrato_manual).
+                const alunoNome =
+                    (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)
+                        ?.aluno?.nome || 'Aluno';
+                const alunoDados =
+                    (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)
+                        ?.aluno || {};
+                contrato.zapsign_signers_data = [
+                    {
+                        name: alunoNome,
+                        email: alunoDados.email || undefined,
+                        telefone: alunoDados.telefone_um || undefined,
+                        cpf: alunoDados.cpf || '',
+                        status: 'signed',
+                        signing_url: '',
+                    },
+                ];
+                contrato.zapsign_document_status = {
+                    status: 'signed',
+                    created_at: dataAssinatura.toISOString(),
+                    document_id: '',
+                    signing_url: '',
+                };
             }
             contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
             contrato.data_ass_aluno = dataAssinatura;

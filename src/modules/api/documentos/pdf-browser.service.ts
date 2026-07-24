@@ -2,7 +2,7 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { promisify } from 'util';
 import * as puppeteer from 'puppeteer';
 
@@ -34,10 +34,10 @@ interface GerarPdfOptions {
  * - página sempre fechada em finally e navegador fechado no shutdown do módulo
  *   (evita chromes órfãos também no watcher do start:dev);
  * - retentativas com backoff para erros transientes de sessão/conexão;
- * - resolução de executablePath priorizando o cache do projeto (.puppeteerrc.cjs),
- *   ignorando PUPPETEER_CACHE_DIR poluído (ex.: sandbox do Cursor) que apontava
- *   para cache vazio e forçava Chrome do sistema incompatível →
- *   "Protocol error (Target.setDiscoverTargets): Target closed";
+ * - NUNCA usa Chrome do sistema por padrão (versão incompatível com o
+ *   protocolo do Puppeteer → "Target.setDiscoverTargets: Target closed");
+ * - resolve o cache do projeto por vários caminhos (cwd do PM2 pode diferir);
+ * - em Target closed: reinstala o Chrome for Testing e relança;
  * - WebSocket no Windows (pipe costuma derrubar o handshake CDP).
  */
 @Injectable()
@@ -45,14 +45,15 @@ export class PdfBrowserService implements OnModuleDestroy {
     /** Tempo ocioso (sem gerar PDF) após o qual o Chromium é fechado. */
     private static readonly IDLE_CLOSE_MS = 5 * 60 * 1000;
     private static readonly MAX_TENTATIVAS = 3;
-    /** Cache canônico do projeto (espelha `.puppeteerrc.cjs`). */
-    private static readonly PROJECT_CACHE_DIR = join(process.cwd(), '.cache', 'puppeteer');
 
     private browserPromise: Promise<puppeteer.Browser> | null = null;
     private fila: Promise<unknown> = Promise.resolve();
     private idleTimer: NodeJS.Timeout | null = null;
     private chromeInstallPromise: Promise<void> | null = null;
     private userDataDir: string | null = null;
+    /** Após Target closed, força só o Chrome for Testing (ignora sistema). */
+    private forcarSomenteChromeProjeto = false;
+    private dumpioNaProximaTentativa = false;
 
     async onModuleDestroy(): Promise<void> {
         this.cancelarIdleTimer();
@@ -75,20 +76,30 @@ export class PdfBrowserService implements OnModuleDestroy {
             let ultimaFalha: unknown;
             for (let tentativa = 1; tentativa <= PdfBrowserService.MAX_TENTATIVAS; tentativa++) {
                 try {
+                    // Sem Chrome for Testing no cache: instala ANTES do launch
+                    // (evita cair no Chrome do sistema → Target closed).
+                    if (!this.findChromeInAnyProjectCache()) {
+                        await this.ensureChromeInstalled();
+                    }
                     return await this.gerarPdfTentativa(html, options);
                 } catch (error) {
                     ultimaFalha = error;
                     const transiente = this.isErroTransientePuppeteer(error);
                     const chromeAusente = this.isErroChromeAusente(error);
+                    const targetClosed = this.isErroTargetClosed(error);
 
                     console.error(
                         `[PDF] Falha na tentativa ${tentativa}/${PdfBrowserService.MAX_TENTATIVAS}:`,
                         error instanceof Error ? error.message : error,
                     );
 
-                    // Chrome ausente (comum após deploy): tenta baixar 1x e relança.
-                    if (chromeAusente) {
-                        await this.descartarBrowser();
+                    await this.descartarBrowser();
+
+                    // Target closed / protocol error: quase sempre Chrome errado
+                    // (sistema) ou binário corrompido pós-deploy — reinstala.
+                    if (chromeAusente || targetClosed) {
+                        this.forcarSomenteChromeProjeto = true;
+                        this.dumpioNaProximaTentativa = true;
                         try {
                             await this.ensureChromeInstalled();
                         } catch (installError) {
@@ -97,19 +108,18 @@ export class PdfBrowserService implements OnModuleDestroy {
                                 installError instanceof Error ? installError.message : installError,
                             );
                         }
+                        await this.matarChromesOrfaosBestEffort();
                     } else if (transiente) {
-                        // Erro de sessão/conexão do Chromium: descarta o navegador
-                        // para relançar um novo na próxima tentativa.
-                        await this.descartarBrowser();
+                        this.dumpioNaProximaTentativa = true;
                     }
 
-                    if ((!transiente && !chromeAusente) || tentativa === PdfBrowserService.MAX_TENTATIVAS) {
+                    if ((!transiente && !chromeAusente && !targetClosed) || tentativa === PdfBrowserService.MAX_TENTATIVAS) {
                         throw error;
                     }
 
                     // Backoff crescente para dar tempo do Chromium estabilizar /
                     // liberar locks de profile no Windows.
-                    await new Promise((resolve) => setTimeout(resolve, 500 * tentativa));
+                    await new Promise((resolve) => setTimeout(resolve, 750 * tentativa));
                 }
             }
             throw ultimaFalha;
@@ -129,9 +139,14 @@ export class PdfBrowserService implements OnModuleDestroy {
             await page.setContent(html, { waitUntil: options.waitUntil, timeout: 45000 });
 
             if (options.aguardarFontes) {
-                await page.evaluate(async () => {
-                    await document.fonts.ready;
-                });
+                // Timeout curto: fontes externas (Google Fonts) não podem
+                // travar a geração se a rede falhar.
+                await Promise.race([
+                    page.evaluate(async () => {
+                        await document.fonts.ready;
+                    }),
+                    new Promise((resolve) => setTimeout(resolve, 5000)),
+                ]);
             }
 
             const pdfBuffer = await page.pdf(options.pdfOptions);
@@ -187,13 +202,16 @@ export class PdfBrowserService implements OnModuleDestroy {
             console.log(`[PDF] Usando Chrome em: ${executablePath}`);
         } else {
             console.warn(
-                '[PDF] executablePath não resolvido — Puppeteer usará o cache padrão (.cache/puppeteer ou ~/.cache/puppeteer).',
+                '[PDF] executablePath não resolvido — Puppeteer usará o cache padrão (.cache/puppeteer).',
             );
         }
 
         // Profile temporário exclusivo por instância: evita "profile in use" /
         // Target closed quando um chrome anterior não liberou o diretório.
         this.userDataDir = join(tmpdir(), `iam-pdf-chrome-${process.pid}-${Date.now()}`);
+
+        const usarDumpio = this.dumpioNaProximaTentativa;
+        this.dumpioNaProximaTentativa = false;
 
         const launchPromise = puppeteer.launch({
             headless: true,
@@ -203,6 +221,7 @@ export class PdfBrowserService implements OnModuleDestroy {
             args: chromiumArgs,
             protocolTimeout: 120000,
             userDataDir: this.userDataDir,
+            dumpio: usarDumpio,
             ...(executablePath ? { executablePath } : {}),
         });
 
@@ -232,9 +251,10 @@ export class PdfBrowserService implements OnModuleDestroy {
     /**
      * Resolve o binário do Chrome na ordem:
      * 1) PUPPETEER_EXECUTABLE_PATH (override manual na VPS)
-     * 2) cache do projeto em `.cache/puppeteer` (ignora PUPPETEER_CACHE_DIR poluído)
+     * 2) Chrome for Testing no cache do projeto (vários caminhos candidatos)
      * 3) puppeteer.executablePath() se o arquivo existir de fato
-     * 4) Chrome/Chromium instalado no sistema
+     * 4) Chrome do sistema — SOMENTE se ALLOW_SYSTEM_CHROME=1 (incompatível
+     *    com frequência → Target closed; desligado por padrão)
      */
     private resolveExecutablePath(): string | undefined {
         const envPath = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
@@ -242,18 +262,30 @@ export class PdfBrowserService implements OnModuleDestroy {
             return envPath;
         }
 
-        const projetoChrome = this.findChromeInCache(PdfBrowserService.PROJECT_CACHE_DIR);
+        const projetoChrome = this.findChromeInAnyProjectCache();
         if (projetoChrome) {
             return projetoChrome;
         }
 
         try {
             const bundled = puppeteer.executablePath();
-            if (bundled && existsSync(bundled)) {
+            if (bundled && existsSync(bundled) && this.isCaminhoChromeProjeto(bundled)) {
                 return bundled;
+            }
+            // bundled apontando para cache poluído (sandbox Cursor) ou sistema:
+            // ignora — preferimos instalar o do projeto.
+            if (bundled && existsSync(bundled) && !this.forcarSomenteChromeProjeto) {
+                console.warn(
+                    `[PDF] puppeteer.executablePath() fora do cache do projeto (${bundled}) — ignorando para evitar Target closed.`,
+                );
             }
         } catch {
             // Cache vazio / versão ainda não baixada.
+        }
+
+        const allowSystem = process.env.ALLOW_SYSTEM_CHROME === '1' && !this.forcarSomenteChromeProjeto;
+        if (!allowSystem) {
+            return undefined;
         }
 
         const candidatos =
@@ -271,6 +303,63 @@ export class PdfBrowserService implements OnModuleDestroy {
                   ];
 
         return candidatos.find((path) => existsSync(path));
+    }
+
+    /** Localiza chrome.exe / chrome em qualquer cache candidato do projeto. */
+    private findChromeInAnyProjectCache(): string | undefined {
+        for (const cacheDir of this.listProjectCacheCandidates()) {
+            const found = this.findChromeInCache(cacheDir);
+            if (found) {
+                return found;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Candidatos de cache: o cwd do PM2 às vezes não é a raiz do backend —
+     * por isso também sobe a partir de __dirname e respeita PUPPETEER_CACHE_DIR
+     * só quando aponta para um caminho que já contém chrome.
+     */
+    private listProjectCacheCandidates(): string[] {
+        const candidatos: string[] = [];
+        const add = (dir: string | undefined) => {
+            if (!dir) return;
+            const normalized = dir.trim();
+            if (!normalized) return;
+            if (!candidatos.includes(normalized)) {
+                candidatos.push(normalized);
+            }
+        };
+
+        add(join(process.cwd(), '.cache', 'puppeteer'));
+
+        // Sobe a partir do arquivo compilado (dist/.../documentos) até achar .puppeteerrc.cjs.
+        let dir = __dirname;
+        for (let i = 0; i < 8; i++) {
+            if (existsSync(join(dir, '.puppeteerrc.cjs')) || existsSync(join(dir, 'package.json'))) {
+                add(join(dir, '.cache', 'puppeteer'));
+                break;
+            }
+            const parent = dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
+        }
+
+        const envCache = process.env.PUPPETEER_CACHE_DIR?.trim();
+        if (envCache && this.findChromeInCache(envCache)) {
+            // Só aceita env se já tiver chrome — evita cache vazio do sandbox Cursor.
+            add(envCache);
+        }
+
+        return candidatos;
+    }
+
+    private isCaminhoChromeProjeto(executablePath: string): boolean {
+        const normalized = executablePath.replace(/\\/g, '/').toLowerCase();
+        return this.listProjectCacheCandidates().some((cache) =>
+            normalized.includes(cache.replace(/\\/g, '/').toLowerCase()),
+        );
     }
 
     /** Localiza chrome.exe / chrome dentro de um cache do Puppeteer. */
@@ -315,18 +404,19 @@ export class PdfBrowserService implements OnModuleDestroy {
 
     /**
      * Baixa o Chrome for Testing no cache do projeto (single-flight).
-     * Usado quando o launch falha com "Could not find Chrome".
+     * Usado quando o launch falha com "Could not find Chrome" ou Target closed.
      */
     private async ensureChromeInstalled(): Promise<void> {
         if (!this.chromeInstallPromise) {
+            const cacheDir = this.listProjectCacheCandidates()[0] || join(process.cwd(), '.cache', 'puppeteer');
             this.chromeInstallPromise = (async () => {
-                console.warn('[PDF] Chrome do Puppeteer ausente — instalando via npx puppeteer browsers install chrome...');
+                console.warn(`[PDF] Garantindo Chrome for Testing em ${cacheDir}...`);
                 // Força o cache do projeto mesmo se PUPPETEER_CACHE_DIR estiver poluído.
                 await execFileAsync('npx', ['puppeteer', 'browsers', 'install', 'chrome'], {
                     cwd: process.cwd(),
                     env: {
                         ...process.env,
-                        PUPPETEER_CACHE_DIR: PdfBrowserService.PROJECT_CACHE_DIR,
+                        PUPPETEER_CACHE_DIR: cacheDir,
                     },
                     timeout: 5 * 60 * 1000,
                     shell: process.platform === 'win32',
@@ -371,6 +461,34 @@ export class PdfBrowserService implements OnModuleDestroy {
         }
     }
 
+    /**
+     * Mata chromes órfãos do perfil iam-pdf-chrome (best effort).
+     * Na VPS, processos zumbis pós-crash/OOM travam novos launches.
+     */
+    private async matarChromesOrfaosBestEffort(): Promise<void> {
+        try {
+            if (process.platform === 'win32') {
+                await execFileAsync(
+                    'powershell.exe',
+                    [
+                        '-NoProfile',
+                        '-Command',
+                        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*iam-pdf-chrome*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+                    ],
+                    { timeout: 10000 },
+                );
+            } else {
+                await execFileAsync(
+                    'bash',
+                    ['-lc', "pkill -f 'iam-pdf-chrome-' 2>/dev/null || true"],
+                    { timeout: 10000 },
+                );
+            }
+        } catch {
+            // Best effort — não bloqueia a retentativa.
+        }
+    }
+
     /** Fecha o Chromium após o período ocioso para liberar memória entre vendas. */
     private agendarFechamentoPorOciosidade(): void {
         this.cancelarIdleTimer();
@@ -400,6 +518,15 @@ export class PdfBrowserService implements OnModuleDestroy {
             message.includes('navigation failed because browser has disconnected') ||
             message.includes('navigating frame was detached') ||
             message.includes('page crashed')
+        );
+    }
+
+    private isErroTargetClosed(error: unknown): boolean {
+        const message = String((error as Error)?.message || '').toLowerCase();
+        return (
+            message.includes('target closed') ||
+            message.includes('setdiscovertargets') ||
+            (message.includes('protocol error') && message.includes('target'))
         );
     }
 

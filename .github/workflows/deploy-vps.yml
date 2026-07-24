@@ -34,8 +34,14 @@ jobs:
             npm i --legacy-peer-deps
             # Garante o Chrome do Puppeteer no cache do projeto (.cache/puppeteer).
             # O npm i pode pular o download (ignore-scripts / cache limpo) e a
-            # geração de PDF do contrato falha com "Could not find Chrome".
+            # geração de PDF do contrato falha com "Could not find Chrome" ou
+            # "Target.setDiscoverTargets: Target closed" (Chrome do sistema).
             export PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer"
             npx puppeteer browsers install chrome
             npm run build
+            # Chromes órfãos pós-crash/OOM derrubam o handshake CDP no próximo PDF.
+            pkill -f 'iam-pdf-chrome-' 2>/dev/null || true
+            pkill -f 'chrome-headless' 2>/dev/null || true
+            # --update-env faz o PM2 herdar PUPPETEER_CACHE_DIR deste shell
+            # (sem isso o Node pode cair no Chrome do sistema → Target closed).
             pm2 restart all --update-env

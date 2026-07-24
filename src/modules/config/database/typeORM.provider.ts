@@ -52,11 +52,13 @@ const buildDataSourceOptions = ({
     migrations: [path.join(__dirname, '../migrations/*{.ts,.js}')],
     extra: {
         // Configuração explícita de pool/timeouts para reduzir quedas intermitentes de conexão.
+        // Postgres remoto (VPS) costuma derrubar idle; keepAlive + min baixo evitam clientes mortos no pool.
         max: parseNumberEnv(process.env.DB_POOL_MAX, 20),
-        min: parseNumberEnv(process.env.DB_POOL_MIN, 2),
-        idleTimeoutMillis: parseNumberEnv(process.env.DB_POOL_IDLE_TIMEOUT_MS, 30000),
+        min: parseNumberEnv(process.env.DB_POOL_MIN, 0),
+        idleTimeoutMillis: parseNumberEnv(process.env.DB_POOL_IDLE_TIMEOUT_MS, 20000),
         connectionTimeoutMillis: parseNumberEnv(process.env.DB_POOL_CONNECTION_TIMEOUT_MS, 10000),
         keepAlive: process.env.DB_POOL_KEEP_ALIVE !== 'false',
+        keepAliveInitialDelayMillis: parseNumberEnv(process.env.DB_POOL_KEEP_ALIVE_DELAY_MS, 10000),
     },
 });
 

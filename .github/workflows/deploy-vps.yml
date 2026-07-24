@@ -32,16 +32,80 @@ jobs:
             git stash || true
             git pull origin main
             npm i --legacy-peer-deps
-            # Garante o Chrome do Puppeteer no cache do projeto (.cache/puppeteer).
-            # O npm i pode pular o download (ignore-scripts / cache limpo) e a
-            # geração de PDF do contrato falha com "Could not find Chrome" ou
-            # "Target.setDiscoverTargets: Target closed" (Chrome do sistema).
+            # Cache do Chrome DENTRO do projeto (espelha .puppeteerrc.cjs).
             export PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer"
             npx puppeteer browsers install chrome
+            npx puppeteer browsers install chrome-headless-shell || true
+            # Libs gráficas mínimas — Chrome for Testing morre no handshake
+            # (Target closed) quando faltam (libnss3/libgbm/etc.).
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo DEBIAN_FRONTEND=noninteractive apt-get update -y || true
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                ca-certificates fonts-liberation libasound2t64 libasound2 \
+                libatk-bridge2.0-0t64 libatk-bridge2.0-0 libatk1.0-0t64 libatk1.0-0 \
+                libcairo2 libcups2t64 libcups2 libdbus-1-3 libdrm2 libgbm1 \
+                libglib2.0-0t64 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 \
+                libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+                libxkbcommon0 libxrandr2 wget xdg-utils 2>/dev/null \
+                || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 \
+                libatk1.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 \
+                libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+                libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 \
+                libxrandr2 wget xdg-utils || true
+            fi
             npm run build
-            # Chromes órfãos pós-crash/OOM derrubam o handshake CDP no próximo PDF.
             pkill -f 'iam-pdf-chrome-' 2>/dev/null || true
             pkill -f 'chrome-headless' 2>/dev/null || true
-            # --update-env faz o PM2 herdar PUPPETEER_CACHE_DIR deste shell
-            # (sem isso o Node pode cair no Chrome do sistema → Target closed).
+            # Smoke test ANTES do pm2: se falhar, o deploy para com o erro real.
+            node <<'SMOKE'
+            const fs = require('fs');
+            const path = require('path');
+            const puppeteer = require('puppeteer');
+            const cache = path.join(process.cwd(), '.cache', 'puppeteer');
+            function findChrome(root, name, bins) {
+              const base = path.join(root, name);
+              if (!fs.existsSync(base)) return null;
+              const versions = fs.readdirSync(base).sort().reverse();
+              for (const v of versions) {
+                for (const b of bins) {
+                  const p = path.join(base, v, b);
+                  if (fs.existsSync(p)) return p;
+                }
+              }
+              return null;
+            }
+            (async () => {
+              const exe = findChrome(cache, 'chrome', ['chrome-linux64/chrome', 'chrome-linux/chrome'])
+                || findChrome(cache, 'chrome-headless-shell', [
+                  'chrome-headless-shell-linux64/chrome-headless-shell',
+                  'chrome-headless-shell-linux/chrome-headless-shell',
+                ]);
+              console.log('[PDF_SMOKE] executable=', exe || '(default)');
+              const browser = await puppeteer.launch({
+                headless: true,
+                pipe: false,
+                args: [
+                  '--no-sandbox',
+                  '--disable-setuid-sandbox',
+                  '--disable-dev-shm-usage',
+                  '--disable-gpu',
+                  '--no-zygote',
+                  '--single-process',
+                ],
+                ...(exe ? { executablePath: exe } : {}),
+              });
+              try {
+                const page = await browser.newPage();
+                await page.setContent('<h1>ok</h1>', { waitUntil: 'domcontentloaded' });
+                const pdf = await page.pdf({ format: 'A4' });
+                console.log('[PDF_SMOKE] OK bytes=', pdf.length);
+              } finally {
+                await browser.close();
+              }
+            })().catch((err) => {
+              console.error('[PDF_SMOKE] FAIL:', err && err.message ? err.message : err);
+              process.exit(1);
+            });
+            SMOKE
             pm2 restart all --update-env

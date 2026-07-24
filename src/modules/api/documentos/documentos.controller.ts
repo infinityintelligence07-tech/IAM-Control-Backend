@@ -429,6 +429,25 @@ export class DocumentosController {
         return this.documentosService.atualizarObservacoesSistemaContratoHistorico(id, body?.observacoes ?? '');
     }
 
+    // Etiqueta de conciliação (Novo / Conciliado / Pendente): só Financeiro/admin.
+    @Post('public/contratos-banco/:id/status-conciliacao')
+    @UseGuards(JwtAuthGuard)
+    atualizarStatusConciliacaoContrato(
+        @Param('id') id: string,
+        @Body()
+        body: {
+            status_conciliacao?: string;
+        },
+        @Req() req: Request,
+    ) {
+        const userId = (req.user as { sub?: number } | undefined)?.sub;
+        return this.documentosService.atualizarStatusConciliacaoContratoHistorico(
+            id,
+            body?.status_conciliacao ?? '',
+            userId,
+        );
+    }
+
     // Atualiza os dados DA VENDA (quantidade de inscrições, outros clientes e
     // pendência) no snapshot por venda dados_contrato.turma_aluno — fonte que a
     // listagem do histórico prioriza sobre a matrícula compartilhada de origem.

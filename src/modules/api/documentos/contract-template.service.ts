@@ -77,8 +77,10 @@ export class ContractTemplateService {
             // Se não é URL do Google Drive, verifica se é URL absoluta
             if (url.startsWith('http')) return url;
 
-            // Caso contrário, adiciona a URL base do frontend
-            return `${process.env.FRONTEND_URL || 'http://iamcontrol.com.br'}${url}`;
+            // Caso contrário, adiciona a URL base do frontend.
+            // encodeURI preserva "/" e trata espaços (ex.: logo Liberty).
+            const base = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
+            return `${base}${encodeURI(url)}`;
         };
 
         // Função para converter URLs relativas em absolutas
@@ -2664,8 +2666,12 @@ export class ContractTemplateService {
             // Geração centralizada no PdfBrowserService: navegador único
             // compartilhado, fila de concorrência 1 e retentativas para erros
             // transientes (proteção contra estouro de memória do servidor).
+            // domcontentloaded (não networkidle0): logos/fontes externas 404 ou
+            // lentas (ex.: logo Liberty com espaço no nome via localhost) travavam
+            // o Chrome até o target cair com "Target.setDiscoverTargets: Target closed".
+            // Fontes tipográficas ainda são aguardadas via document.fonts.ready.
             return await this.pdfBrowserService.gerarPdf(html, {
-                waitUntil: 'networkidle0',
+                waitUntil: 'domcontentloaded',
                 aguardarFontes: true,
                 pdfOptions: {
                     format: 'A4',

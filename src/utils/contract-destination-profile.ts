@@ -38,9 +38,41 @@ const PROFILE_DEFAULT_IAM: ContractDestinationProfile = {
   showTestemunhas: true,
 };
 
+// Evento presencial da Liberty (ex.: encontros dos mentorados do Liberty /
+// Liberty Begin): mantém a marca Liberty, mas o contrato é de EVENTO, como os
+// eventos da IAM — e não de mentoria, apesar de "Liberty" estar no nome.
+const PROFILE_LIBERTY_EVENTO: ContractDestinationProfile = {
+  key: "LIBERTY_EVENTO",
+  brand: "LIBERTY",
+  treinamentoLabel: "EVENTO",
+  dataLabel: "DATA PREVISTA",
+  showBonus: false,
+  showPayment: true,
+  allowBoletoParcelado: true,
+  showQuantidadeInscricoes: false,
+  showTestemunhas: true,
+};
+
+const PROFILE_LIBERTY_DEFAULT: ContractDestinationProfile = {
+  key: "LIBERTY_DEFAULT",
+  brand: "LIBERTY",
+  treinamentoLabel: "MENTORIA",
+  dataLabel: null,
+  showBonus: false,
+  showPayment: true,
+  allowBoletoParcelado: true,
+  showQuantidadeInscricoes: false,
+  showTestemunhas: true,
+};
+
+// `somenteMentoria`/`somenteEvento`: regras aplicadas apenas quando o cadastro
+// do produto informa o tipo (`tipoMentoria`). Sem essa informação, valem as
+// regras de mentoria, preservando o comportamento dos contratos já existentes.
 const PROFILE_RULES: Array<{
   when: (normalizedTraining: string) => boolean;
   profile: ContractDestinationProfile;
+  somenteMentoria?: boolean;
+  somenteEvento?: boolean;
 }> = [
   {
     when: (n) =>
@@ -131,7 +163,13 @@ const PROFILE_RULES: Array<{
     },
   },
   {
+    when: (n) => n.includes("liberty"),
+    somenteEvento: true,
+    profile: PROFILE_LIBERTY_EVENTO,
+  },
+  {
     when: (n) => n.includes("liberty begin"),
+    somenteMentoria: true,
     profile: {
       key: "LIBERTY_BEGIN",
       brand: "LIBERTY",
@@ -159,18 +197,13 @@ const PROFILE_RULES: Array<{
     },
   },
   {
-    when: (n) => n.includes("liberty") || n.includes("troca de pf para pj"),
-    profile: {
-      key: "LIBERTY_DEFAULT",
-      brand: "LIBERTY",
-      treinamentoLabel: "MENTORIA",
-      dataLabel: null,
-      showBonus: false,
-      showPayment: true,
-      allowBoletoParcelado: true,
-      showQuantidadeInscricoes: false,
-      showTestemunhas: true,
-    },
+    when: (n) => n.includes("liberty"),
+    somenteMentoria: true,
+    profile: PROFILE_LIBERTY_DEFAULT,
+  },
+  {
+    when: (n) => n.includes("troca de pf para pj"),
+    profile: PROFILE_LIBERTY_DEFAULT,
   },
   {
     // Aplica o perfil de Confronto (com bônus) somente ao "Confronto" propriamente
@@ -193,8 +226,15 @@ const PROFILE_RULES: Array<{
 
 export const getContractDestinationProfile = (
   treinamentoNome: string | null | undefined,
+  opcoes?: { tipoMentoria?: boolean | null },
 ): ContractDestinationProfile => {
   const normalized = normalize(treinamentoNome || "");
-  const found = PROFILE_RULES.find((rule) => rule.when(normalized));
+  const tipoMentoria = opcoes?.tipoMentoria;
+  const ehEvento = tipoMentoria === false;
+  const found = PROFILE_RULES.find((rule) => {
+    if (rule.somenteMentoria && ehEvento) return false;
+    if (rule.somenteEvento && !ehEvento) return false;
+    return rule.when(normalized);
+  });
   return found?.profile || PROFILE_DEFAULT_IAM;
 };

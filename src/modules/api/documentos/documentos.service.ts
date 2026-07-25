@@ -1042,6 +1042,7 @@ export class DocumentosService {
                         url_logo_treinamento: treinamento.url_logo_treinamento,
                         tipo_treinamento: treinamento.tipo_treinamento,
                         tipo_palestra: treinamento.tipo_palestra,
+                        tipo_mentoria: treinamento.tipo_mentoria,
                         tipo_online: treinamento.tipo_online,
                     },
                     turma: turma
@@ -1378,6 +1379,7 @@ export class DocumentosService {
                 url_logo_treinamento: treinamento.url_logo_treinamento,
                 tipo_treinamento: treinamento.tipo_treinamento,
                 tipo_palestra: treinamento.tipo_palestra,
+                tipo_mentoria: treinamento.tipo_mentoria,
                 tipo_online: treinamento.tipo_online,
             },
             pagamento: {
@@ -3403,6 +3405,7 @@ export class DocumentosService {
                         sigla: treinamento?.sigla_treinamento,
                         preco: treinamento?.preco_treinamento,
                         url_logo_treinamento: treinamento?.url_logo_treinamento,
+                        tipo_mentoria: treinamento?.tipo_mentoria ?? null,
                     },
                     template: {
                         id: documento?.id,
@@ -6910,6 +6913,7 @@ export class DocumentosService {
                                 sigla: treinamento?.sigla_treinamento,
                                 preco: treinamento?.preco_treinamento,
                                 url_logo_treinamento: treinamento?.url_logo_treinamento,
+                                tipo_mentoria: treinamento?.tipo_mentoria ?? null,
                             },
                             template: {
                                 id: documento?.id,

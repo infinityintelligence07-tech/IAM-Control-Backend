@@ -250,6 +250,19 @@ export class CreateTurmaDto {
     })
     turmas_ipr_relacionadas?: number[];
 
+    /**
+     * Evento de mentoria: turma da mentoria (ex.: Liberty / Liberty Begin) cujos
+     * mentorados vigentes na data do evento são matriculados automaticamente.
+     */
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
+    id_turma_mentoria_vinculada?: number | null;
+
     @IsOptional()
     @IsString()
     @Transform(({ value }) => value?.trim())
@@ -435,6 +448,20 @@ export class UpdateTurmaDto {
         return value.map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v));
     })
     turmas_ipr_relacionadas?: number[];
+
+    /**
+     * Evento de mentoria: turma da mentoria cujos mentorados vigentes são
+     * matriculados automaticamente. Enviar null desfaz o vínculo (matrículas
+     * já criadas permanecem).
+     */
+    @IsOptional()
+    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return isNaN(n) ? null : n;
+    })
+    id_turma_mentoria_vinculada?: number | null;
 
     @IsOptional()
     @IsArray()
@@ -749,6 +776,10 @@ export class TurmaResponseDto {
     detalhamento_bonus?: { id_treinamento_db: number }[];
     turmas_imersao_ofertadas?: number[];
     turmas_ipr_relacionadas?: number[];
+    /** Turma da mentoria cujos mentorados entram automaticamente neste evento. */
+    id_turma_mentoria_vinculada?: number | null;
+    /** Quantos mentorados foram matriculados na última sincronização (só na criação/atualização do vínculo). */
+    mentorados_vinculados_inseridos?: number;
     times_equipes?: TimeEquipeGrupoDto[];
     url_midia_kit?: string;
     url_grupo_whatsapp?: string;

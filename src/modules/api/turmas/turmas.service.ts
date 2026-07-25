@@ -152,8 +152,11 @@ export class TurmasService {
     private readonly logger = new Logger(TurmasService.name);
     private congelamentoMetricasCronEmExecucao = false;
     private periodosMentoriaCronEmExecucao = false;
+    private eventosMentoriaVinculadaCronEmExecucao = false;
     /** Turmas com congelamento de snapshot em geração em background (evita disparos duplicados). */
     private readonly snapshotEmGeracaoBackground = new Set<number>();
+    /** Eventos com sincronização de mentorados em andamento (evita inserções duplicadas concorrentes). */
+    private readonly mentoradosEventoEmSincronizacao = new Set<number>();
 
     constructor(
         private readonly uow: UnitOfWorkService,
@@ -1864,6 +1867,295 @@ export class TurmasService {
         };
     }
 
+    /* ============ Eventos de mentoria (encontros do Liberty / Liberty Begin) ============ */
+
+    /**
+     * Valida a turma informada como mentoria vinculada de um evento: precisa existir,
+     * estar ativa e ser de um treinamento do tipo mentoria.
+     */
+    private async validarTurmaMentoriaVinculada(id_turma_mentoria: number): Promise<void> {
+        const turmaMentoria = await this.uow.turmasRP.findOne({
+            where: { id: id_turma_mentoria, deletado_em: null },
+            relations: ['id_treinamento_fk'],
+        });
+
+        if (!turmaMentoria) {
+            throw new NotFoundException('Turma de mentoria vinculada não encontrada');
+        }
+
+        if (turmaMentoria.id_treinamento_fk?.tipo_mentoria !== true) {
+            throw new BadRequestException('A turma vinculada para inserção automática de mentorados precisa ser de uma mentoria');
+        }
+    }
+
+    /**
+     * Mentorados de uma turma de mentoria com contrato VIGENTE no período do evento.
+     *
+     * O período de cada mentorado vem de `turmas_alunos_treinamentos`
+     * (data_inicio_mentoria/data_fim_mentoria, considerando renovações) e, quando o
+     * mentorado não tem contrato (adicionado manualmente/importado), do
+     * `criado_em` da matrícula + a duração do produto (Liberty 12m, Begin 6m).
+     */
+    private async buscarMentoradosVigentesNoPeriodo(id_turma_mentoria: number, data_inicio: string, data_final: string): Promise<string[]> {
+        const duracaoMesesSql = sqlDuracaoMentoriaMeses('tr.treinamento', 'tr.duracao_meses');
+
+        const linhas: Array<{ id_aluno: string }> = await this.uow.turmasAlunosRP.query(
+            `
+            WITH periodos AS (
+                SELECT
+                    ta.id_aluno::text AS id_aluno,
+                    COALESCE(MIN(tat.data_inicio_mentoria), MIN(ta.criado_em::date)) AS inicio,
+                    COALESCE(
+                        MAX(tat.data_fim_mentoria),
+                        MAX((ta.criado_em::date + ((${duracaoMesesSql}) || ' months')::interval)::date)
+                    ) AS fim
+                FROM turmas_alunos AS ta
+                INNER JOIN turmas AS t ON t.id = ta.id_turma
+                INNER JOIN treinamentos AS tr ON tr.id = t.id_treinamento
+                LEFT JOIN turmas_alunos_treinamentos AS tat
+                    ON tat.id_turma_aluno = ta.id
+                   AND tat.id_treinamento = t.id_treinamento
+                   AND tat.deletado_em IS NULL
+                WHERE ta.id_turma = $1
+                  AND ta.deletado_em IS NULL
+                  AND ta.id_aluno IS NOT NULL
+                GROUP BY ta.id_aluno
+            )
+            SELECT id_aluno
+            FROM periodos
+            WHERE inicio <= $3::date
+              AND fim >= $2::date
+        `,
+            [id_turma_mentoria, data_inicio, data_final],
+        );
+
+        return (linhas || []).map((linha) => String(linha.id_aluno));
+    }
+
+    /** Gera `quantidade` números de crachá livres na turma, seguindo a sequência de 5 dígitos a partir de 01100. */
+    private async gerarNumerosCrachaEmLote(id_turma: number, quantidade: number): Promise<string[]> {
+        const numeroInicial = 1100;
+        const numeroMaximo = 99999;
+
+        const matriculasAtivas = await this.uow.turmasAlunosRP.find({
+            where: { id_turma, deletado_em: null },
+            select: { numero_cracha: true },
+        });
+
+        const numerosUsados = new Set<number>(
+            matriculasAtivas
+                .map((matricula) => matricula.numero_cracha)
+                .filter((numero): numero is string => !!numero && /^\d+$/.test(numero))
+                .map((numero) => Number.parseInt(numero, 10)),
+        );
+
+        const numeros: string[] = [];
+        for (let numero = numeroInicial; numero <= numeroMaximo && numeros.length < quantidade; numero++) {
+            if (numerosUsados.has(numero)) continue;
+            numerosUsados.add(numero);
+            numeros.push(numero.toString().padStart(5, '0'));
+        }
+
+        if (numeros.length < quantidade) {
+            throw new BadRequestException('Não foi possível gerar números de crachá suficientes para esta turma');
+        }
+
+        return numeros;
+    }
+
+    /**
+     * Matricula no evento os mentorados vigentes da mentoria vinculada (`id_turma_mentoria_vinculada`).
+     *
+     * Idempotente e seguro para rodar várias vezes: alunos que já têm matrícula na turma
+     * (inclusive removida/cancelada) são ignorados, para não desfazer remoções manuais.
+     * Mentorados entram como venda em evento (COMPROU_INGRESSO): a participação já está
+     * paga pela mentoria. Retorna quantos alunos foram inseridos.
+     */
+    async sincronizarMentoradosEventoVinculado(id_turma_evento: number, userId?: number): Promise<number> {
+        if (this.mentoradosEventoEmSincronizacao.has(id_turma_evento)) {
+            return 0;
+        }
+
+        this.mentoradosEventoEmSincronizacao.add(id_turma_evento);
+        try {
+            const turmaEvento = await this.uow.turmasRP.findOne({
+                where: { id: id_turma_evento, deletado_em: null },
+                relations: ['id_treinamento_fk'],
+            });
+
+            const idTurmaMentoria = turmaEvento?.id_turma_mentoria_vinculada ?? null;
+            if (!turmaEvento || !idTurmaMentoria) {
+                return 0;
+            }
+
+            if (turmaEvento.status_turma === EStatusTurmas.INSCRICOES_PAUSADAS) {
+                this.logger.warn(`evento.mentoria.sync | Turma=${id_turma_evento} com inscrições pausadas, sincronização ignorada`);
+                return 0;
+            }
+
+            // Evento já encerrado/congelado não recebe novas matrículas automáticas.
+            if (this.isTurmaCongelada(turmaEvento) || this.eventoTurmaTerminou(turmaEvento) === true) {
+                return 0;
+            }
+
+            const dataInicio = (turmaEvento.data_inicio || turmaEvento.data_final || '').slice(0, 10);
+            const dataFinal = (turmaEvento.data_final || turmaEvento.data_inicio || '').slice(0, 10);
+            if (!dataInicio || !dataFinal) {
+                this.logger.warn(`evento.mentoria.sync | Turma=${id_turma_evento} sem datas de evento, sincronização ignorada`);
+                return 0;
+            }
+
+            const idsMentorados = await this.buscarMentoradosVigentesNoPeriodo(idTurmaMentoria, dataInicio, dataFinal);
+            if (!idsMentorados.length) {
+                return 0;
+            }
+
+            // Considera também matrículas removidas: quem já foi tirado do evento na mão
+            // não volta a ser inserido pela sincronização automática.
+            const matriculasExistentes = await this.uow.turmasAlunosRP.find({
+                where: { id_turma: id_turma_evento },
+                select: { id_aluno: true },
+                withDeleted: true,
+            });
+            const jaNoEvento = new Set(matriculasExistentes.map((matricula) => String(matricula.id_aluno)));
+
+            const idsParaInserir = idsMentorados.filter((idAluno) => !jaNoEvento.has(idAluno));
+            if (!idsParaInserir.length) {
+                return 0;
+            }
+
+            const numerosCracha = await this.gerarNumerosCrachaEmLote(id_turma_evento, idsParaInserir.length);
+            const statusInicial = EStatusAlunosTurmas.FALTA_ENVIAR_LINK_CONFIRMACAO;
+
+            const novasMatriculas = idsParaInserir.map((idAluno, indice) =>
+                this.uow.turmasAlunosRP.create({
+                    id_turma: id_turma_evento,
+                    id_aluno: idAluno,
+                    numero_cracha: numerosCracha[indice],
+                    vaga_bonus: false,
+                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                    status_aluno_turma: statusInicial,
+                    ...this.buildConfirmacaoCheckinFlags(statusInicial, null),
+                }),
+            );
+
+            const matriculasSalvas = await this.uow.turmasAlunosRP.save(novasMatriculas, { chunk: 200 });
+
+            const agora = new Date();
+            const logs = matriculasSalvas.map((matricula) =>
+                this.uow.historicoAlunosTurmasLogsRP.create({
+                    id_turma_aluno: String(matricula.id),
+                    id_turma: id_turma_evento,
+                    id_aluno: String(matricula.id_aluno),
+                    tipo_acao: 'CRIACAO',
+                    titulo: 'Aluno inscrito na turma',
+                    descricao: 'Matrícula criada automaticamente: mentorado da mentoria vinculada ao evento.',
+                    detalhes: {
+                        origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                        id_turma_mentoria_vinculada: idTurmaMentoria,
+                    },
+                    data_acao: agora,
+                    criado_por: userId,
+                    atualizado_por: userId,
+                }),
+            );
+            if (logs.length) {
+                await this.uow.historicoAlunosTurmasLogsRP.save(logs, { chunk: 500 });
+            }
+
+            await this.registrarLogTurma(
+                {
+                    id_turma: id_turma_evento,
+                    tipo_acao: 'ATUALIZACAO',
+                    titulo: 'Mentorados inseridos automaticamente',
+                    descricao: `${matriculasSalvas.length} mentorado(s) da mentoria vinculada foram matriculados neste evento.`,
+                    detalhes: { id_turma_mentoria_vinculada: idTurmaMentoria, inseridos: matriculasSalvas.length },
+                },
+                userId,
+            );
+
+            const turmaAtualizada = await this.uow.turmasRP.findOne({
+                where: { id: id_turma_evento },
+                relations: ['id_treinamento_fk', 'turmasAlunos'],
+            });
+            if (turmaAtualizada) {
+                await this.verificarEAtualizarStatusTurma(turmaAtualizada);
+            }
+            await this.uow.bumparPicoMetricasTurmas([id_turma_evento]);
+
+            this.logger.log(
+                `evento.mentoria.sync | Evento=${id_turma_evento} mentoria=${idTurmaMentoria} | ${matriculasSalvas.length} mentorado(s) inserido(s)`,
+            );
+
+            return matriculasSalvas.length;
+        } finally {
+            this.mentoradosEventoEmSincronizacao.delete(id_turma_evento);
+        }
+    }
+
+    /**
+     * Propaga um novo mentorado para os eventos futuros vinculados àquela mentoria.
+     * Chamado quando um aluno entra em uma turma de mentoria (venda, adição manual
+     * ou importação) — a sincronização em si é idempotente.
+     */
+    private async propagarMentoradosParaEventosVinculados(id_turma_mentoria: number, userId?: number): Promise<void> {
+        const eventosVinculados = await this.uow.turmasRP.find({
+            where: { id_turma_mentoria_vinculada: id_turma_mentoria, deletado_em: null },
+            select: { id: true },
+        });
+
+        for (const evento of eventosVinculados) {
+            await this.sincronizarMentoradosEventoVinculado(evento.id, userId);
+        }
+    }
+
+    @Cron('45 1 * * *')
+    async sincronizarEventosMentoriaVinculadaCron(): Promise<void> {
+        if (this.eventosMentoriaVinculadaCronEmExecucao) {
+            this.logger.warn('evento.mentoria.cron | Execução anterior ainda em andamento, pulando ciclo');
+            return;
+        }
+
+        this.eventosMentoriaVinculadaCronEmExecucao = true;
+        try {
+            const resultado = await this.sincronizarEventosMentoriaVinculadaPendentes();
+            this.logger.log(`evento.mentoria.cron | Eventos verificados: ${resultado.eventos} | Mentorados inseridos: ${resultado.inseridos}`);
+        } catch (error) {
+            this.logger.error('evento.mentoria.cron | Erro ao sincronizar eventos de mentoria', error instanceof Error ? error.stack : undefined);
+        } finally {
+            this.eventosMentoriaVinculadaCronEmExecucao = false;
+        }
+    }
+
+    /**
+     * Rede de segurança da sincronização automática: percorre os eventos vinculados a
+     * uma mentoria que ainda vão acontecer e insere quem passou a ser mentorado desde
+     * a última execução (cobre caminhos que não passam por `addAlunoTurma`).
+     */
+    async sincronizarEventosMentoriaVinculadaPendentes(): Promise<{ eventos: number; inseridos: number }> {
+        const eventos: Array<{ id: number }> = await this.uow.turmasRP.query(`
+            SELECT id
+            FROM turmas
+            WHERE deletado_em IS NULL
+              AND id_turma_mentoria_vinculada IS NOT NULL
+              AND COALESCE(data_final, data_inicio) >= CURRENT_DATE
+            ORDER BY id
+        `);
+
+        let inseridos = 0;
+        for (const evento of eventos || []) {
+            try {
+                inseridos += await this.sincronizarMentoradosEventoVinculado(Number(evento.id));
+            } catch (error) {
+                this.logger.error(
+                    `evento.mentoria.cron | Falha ao sincronizar evento=${evento.id}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                );
+            }
+        }
+
+        return { eventos: (eventos || []).length, inseridos };
+    }
+
     /**
      * Buscar contadores de pré-cadastrados por turmas
      */
@@ -2017,6 +2309,7 @@ export class TurmasService {
             detalhamento_bonus: turma.detalhamento_bonus,
             turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
             turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+            id_turma_mentoria_vinculada: turma.id_turma_mentoria_vinculada ?? null,
             times_equipes: turma.times_equipes || [],
             url_midia_kit: turma.url_midia_kit,
             url_grupo_whatsapp: turma.url_grupo_whatsapp,
@@ -2260,6 +2553,7 @@ export class TurmasService {
                     detalhamento_bonus: turma.detalhamento_bonus,
                     turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
                     turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+                    id_turma_mentoria_vinculada: turma.id_turma_mentoria_vinculada ?? null,
                     times_equipes: turma.times_equipes || [],
                     url_midia_kit: turma.url_midia_kit,
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
@@ -2398,6 +2692,7 @@ export class TurmasService {
                 detalhamento_bonus: turma.detalhamento_bonus,
                 turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
                 turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+                id_turma_mentoria_vinculada: turma.id_turma_mentoria_vinculada ?? null,
                 times_equipes: turma.times_equipes || [],
                 url_midia_kit: turma.url_midia_kit,
                 url_grupo_whatsapp: turma.url_grupo_whatsapp,
@@ -2490,6 +2785,11 @@ export class TurmasService {
                 if (!lider) {
                     throw new NotFoundException('Líder do evento não encontrado');
                 }
+            }
+
+            // Evento de mentoria: a turma vinculada precisa ser de uma mentoria.
+            if (createTurmaDto.id_turma_mentoria_vinculada) {
+                await this.validarTurmaMentoriaVinculada(createTurmaDto.id_turma_mentoria_vinculada);
             }
 
             // Processar endereço: se tiver id_endereco_evento, buscar o endereço predefinido
@@ -2638,8 +2938,23 @@ export class TurmasService {
                 descricao: 'A turma/evento foi criada no IAM Control.',
             });
 
+            // Evento de mentoria: já matricula os mentorados vigentes da mentoria vinculada.
+            // Uma falha aqui não invalida a criação da turma (o cron e as próximas
+            // adições de mentorados reprocessam a sincronização).
+            let mentoradosInseridos = 0;
+            if (turmaSalva.id_turma_mentoria_vinculada) {
+                try {
+                    mentoradosInseridos = await this.sincronizarMentoradosEventoVinculado(turmaSalva.id, createTurmaDto.criado_por);
+                } catch (error) {
+                    this.logger.error(
+                        `evento.mentoria.sync | Falha ao inserir mentorados no evento=${turmaSalva.id}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                    );
+                }
+            }
+
             // Retornar turma criada com relações
-            return this.findById(turmaSalva.id);
+            const turmaCriada = await this.findById(turmaSalva.id);
+            return { ...turmaCriada, mentorados_vinculados_inseridos: mentoradosInseridos };
         } catch (error) {
             console.error('Erro ao criar turma:', error);
             if (error instanceof NotFoundException || error instanceof BadRequestException) {
@@ -3352,6 +3667,7 @@ export class TurmasService {
                     detalhamento_bonus: turma.detalhamento_bonus,
                     turmas_imersao_ofertadas: turma.turmas_imersao_ofertadas || [],
                     turmas_ipr_relacionadas: turma.turmas_ipr_relacionadas || [],
+                    id_turma_mentoria_vinculada: turma.id_turma_mentoria_vinculada ?? null,
                     times_equipes: turma.times_equipes || [],
                     url_midia_kit: turma.url_midia_kit,
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
@@ -3491,6 +3807,13 @@ export class TurmasService {
                 if (!lider) {
                     throw new NotFoundException('Líder do evento não encontrado');
                 }
+            }
+
+            if (updateTurmaDto.id_turma_mentoria_vinculada) {
+                if (updateTurmaDto.id_turma_mentoria_vinculada === id) {
+                    throw new BadRequestException('A turma não pode ser vinculada a ela mesma como mentoria');
+                }
+                await this.validarTurmaMentoriaVinculada(updateTurmaDto.id_turma_mentoria_vinculada);
             }
 
             // Processar endereço: se tiver id_endereco_evento, buscar o endereço predefinido
@@ -3662,8 +3985,25 @@ export class TurmasService {
                 }
             }
 
+            // Evento de mentoria: ao vincular (ou trocar) a mentoria, ou ao mexer nas
+            // datas do evento, os mentorados vigentes são (re)sincronizados.
+            let mentoradosInseridos = 0;
+            const vinculoMentoriaAtual = turmaAtualizada?.id_turma_mentoria_vinculada ?? null;
+            const mexeuNasDatas = updateDataWithDates.data_inicio !== undefined || updateDataWithDates.data_final !== undefined;
+            const trocouVinculo = vinculoMentoriaAtual !== (turma.id_turma_mentoria_vinculada ?? null);
+            if (vinculoMentoriaAtual && (trocouVinculo || mexeuNasDatas)) {
+                try {
+                    mentoradosInseridos = await this.sincronizarMentoradosEventoVinculado(id, updateTurmaDto.atualizado_por);
+                } catch (error) {
+                    this.logger.error(
+                        `evento.mentoria.sync | Falha ao inserir mentorados no evento=${id}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                    );
+                }
+            }
+
             // Retornar turma atualizada
-            return this.findById(id);
+            const turmaResposta = await this.findById(id);
+            return { ...turmaResposta, mentorados_vinculados_inseridos: mentoradosInseridos };
         } catch (error) {
             console.error('Erro ao atualizar turma:', error);
             if (error instanceof NotFoundException) {
@@ -4658,6 +4998,18 @@ export class TurmasService {
 
             // Congela a meta no novo pico de inscritos/extras, se aplicável.
             await this.uow.bumparPicoMetricasTurmas([id_turma]);
+
+            // Novo mentorado: entra também nos eventos futuros vinculados a esta mentoria
+            // (encontros do Liberty / Liberty Begin). Best-effort — o cron cobre falhas.
+            if (turmaAtualizada?.id_treinamento_fk?.tipo_mentoria === true) {
+                try {
+                    await this.propagarMentoradosParaEventosVinculados(id_turma, userId);
+                } catch (error) {
+                    this.logger.error(
+                        `evento.mentoria.sync | Falha ao propagar mentorado da mentoria=${id_turma} para eventos vinculados: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                    );
+                }
+            }
 
             // Retornar com as relações
             const turmaAlunoCompleta = await this.uow.turmasAlunosRP.findOne({

@@ -817,7 +817,9 @@ export class ContractTemplateService {
                 campos_variaveis?.['Quantidade de Inscricoes'] ||
                 pagamento?.valores_formas_pagamento?.quantidade_inscricoes ||
                 '1';
-            const destinationProfile = getContractDestinationProfile(nomeTreinamento);
+            const destinationProfile = getContractDestinationProfile(nomeTreinamento, {
+                tipoMentoria: treinamento?.tipo_mentoria ?? null,
+            });
             const normalizedTrainingName = normalizeString(nomeTreinamento);
             const isMentoriaLiberty =
                 destinationProfile.brand === 'LIBERTY' && destinationProfile.treinamentoLabel === 'MENTORIA' && normalizedTrainingName.includes('LIBERTY');
@@ -1096,7 +1098,9 @@ export class ContractTemplateService {
 
         // Função para gerar footer com logo
         const destinationTrainingName = treinamento?.nome || treinamento?.treinamento || campos_variaveis?.['Nome do Treinamento Contratado'] || '';
-        const destinationProfileEmbedded = getContractDestinationProfile(destinationTrainingName);
+        const destinationProfileEmbedded = getContractDestinationProfile(destinationTrainingName, {
+            tipoMentoria: treinamento?.tipo_mentoria ?? null,
+        });
         const normalizedDestinationTrainingName = String(destinationTrainingName)
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')
@@ -2420,6 +2424,9 @@ export class ContractTemplateService {
                 treinamento: {
                     nome: data.treinamento?.treinamento || '',
                     url_logo_treinamento: data.treinamento?.url_logo_treinamento || '',
+                    // Necessário para o perfil do contrato distinguir a mentoria
+                    // Liberty de um evento presencial da Liberty (mesmo nome-base).
+                    tipo_mentoria: data.treinamento?.tipo_mentoria ?? null,
                 },
                 pagamento: {
                     forma_pagamento: data.pagamento?.forma_pagamento || '',

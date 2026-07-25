@@ -159,6 +159,13 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'boolean', name: 'liberacao_temporaria_processada', default: false, nullable: false })
     liberacao_temporaria_processada: boolean;
 
+    // Evento de mentoria (ex.: encontros esporádicos do Liberty / Liberty Begin):
+    // turma da MENTORIA cujos mentorados são matriculados automaticamente neste
+    // evento (na criação e a cada novo mentorado, até a data do evento).
+    // NULL = evento sem inserção automática (comportamento padrão).
+    @Column({ type: 'int', name: 'id_turma_mentoria_vinculada', nullable: true })
+    id_turma_mentoria_vinculada: number | null;
+
     @Column({ type: 'jsonb', name: 'detalhamento_bonus', nullable: true })
     detalhamento_bonus: { id_treinamento_db: number }[];
 
@@ -206,6 +213,10 @@ export class Turmas extends BaseEntity {
     @ManyToOne(() => EnderecoEventos)
     @JoinColumn([{ name: 'id_endereco_evento', referencedColumnName: 'id' }])
     id_endereco_evento_fk: EnderecoEventos;
+
+    @ManyToOne(() => Turmas, { nullable: true })
+    @JoinColumn([{ name: 'id_turma_mentoria_vinculada', referencedColumnName: 'id' }])
+    id_turma_mentoria_vinculada_fk: Turmas | null;
 
     @OneToMany(() => TurmasAlunos, (turmasAlunos) => turmasAlunos.id_turma_fk)
     turmasAlunos: TurmasAlunos[];

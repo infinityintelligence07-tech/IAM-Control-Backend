@@ -65,11 +65,12 @@ jobs:
             fi
             echo "[deploy] nest build OK"
 
-            pkill -f 'iam-pdf-chrome-' 2>/dev/null || true
-            pkill -f 'chrome-headless' 2>/dev/null || true
+            # NÃO usar pkill -f 'chrome-headless' aqui: o padrão casa com a
+            # própria linha do script SSH e mata a sessão (SIGTERM 143).
 
             echo "[deploy] smoke test do PDF..."
             node scripts/pdf-smoke.js
+            echo "[deploy] smoke OK"
 
             pm2 restart all --update-env
             echo "[deploy] concluído"

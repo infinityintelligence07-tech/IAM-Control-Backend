@@ -23,41 +23,43 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
           passphrase: ${{ secrets.VPS_SSH_KEY_PASSPHRASE }}
-          command_timeout: 30m
-          script: /root/deploy.sh
+          script_stop: true
+          command_timeout: 45m
+          script: |
             set -e
             cd "${{ secrets.VPS_BACKEND_PATH }}"
             git fetch
             git stash || true
             git pull origin main
             npm i --legacy-peer-deps
+
             # Cache do Chrome DENTRO do projeto (espelha .puppeteerrc.cjs).
             export PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer"
             npx puppeteer browsers install chrome
             npx puppeteer browsers install chrome-headless-shell || true
-            # Libs gráficas mínimas — Chrome for Testing morre no handshake
-            # (Target closed) quando faltam (libnss3/libgbm/etc.).
+
+            # Libs do Chrome: um único apt-get (Ubuntu 24.04 / t64).
+            # Evita o loop pacote-a-pacote que estourava o timeout do SSH.
             if command -v apt-get >/dev/null 2>&1; then
               sudo DEBIAN_FRONTEND=noninteractive apt-get update -y || true
-              # Ubuntu 24.04 usa sufixo t64; nomes antigos ficam como fallback.
-              # Instala pacote a pacote para um nome inválido não abortar o resto.
-              for pkg in \
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 ca-certificates fonts-liberation wget xdg-utils \
-                libasound2t64 libasound2 \
-                libatk-bridge2.0-0t64 libatk-bridge2.0-0 \
-                libatk1.0-0t64 libatk1.0-0 \
-                libatspi2.0-0t64 libatspi2.0-0 \
-                libcairo2 libcups2t64 libcups2 libdbus-1-3 libdrm2 libgbm1 \
-                libglib2.0-0t64 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 \
+                libasound2t64 \
+                libatk-bridge2.0-0t64 \
+                libatk1.0-0t64 \
+                libatspi2.0-0t64 \
+                libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 \
+                libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 \
                 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
-                libxkbcommon0 libxrandr2
-              do
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" || true
-              done
+                libxkbcommon0 libxrandr2 \
+                || true
             fi
+
             npm run build
+
             pkill -f 'iam-pdf-chrome-' 2>/dev/null || true
             pkill -f 'chrome-headless' 2>/dev/null || true
+
             # Smoke test ANTES do pm2: se falhar, o deploy para com o erro real.
             node <<'SMOKE'
             const fs = require('fs');
@@ -109,4 +111,5 @@ jobs:
               process.exit(1);
             });
             SMOKE
+
             pm2 restart all --update-env

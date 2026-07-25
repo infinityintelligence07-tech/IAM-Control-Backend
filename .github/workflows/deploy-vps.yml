@@ -41,22 +41,24 @@ jobs:
 
             echo "[deploy] memória:"
             free -h || true
-            export NODE_OPTIONS="--max-old-space-size=1536"
+            # 1536 causava exit 134 (heap OOM / SIGABRT). VPS tem ~31Gi.
+            export NODE_OPTIONS="--max-old-space-size=8192"
 
-            # Heartbeat evita SIGTERM 143 por SSH ocioso durante nest build
+            # Heartbeat em background; build em foreground (evita SIGABRT no job group).
             echo "[deploy] iniciando nest build..."
-            npm run build > /tmp/iam-nest-build.log 2>&1 &
-            BUILD_PID=$!
-            while kill -0 "$BUILD_PID" 2>/dev/null; do
-              echo "[deploy] nest build em andamento pid=$BUILD_PID $(date -u +%H:%M:%S)"
-              sleep 20
-            done
+            (
+              while true; do
+                echo "[deploy] nest build heartbeat $(date -u +%H:%M:%S)"
+                sleep 20
+              done
+            ) &
+            HB_PID=$!
             set +e
-            wait "$BUILD_PID"
+            npm run build
             BUILD_EC=$?
+            kill "$HB_PID" 2>/dev/null || true
+            wait "$HB_PID" 2>/dev/null || true
             set -e
-            echo "[deploy] --- nest build log (tail) ---"
-            tail -n 80 /tmp/iam-nest-build.log || true
             if [ "$BUILD_EC" -ne 0 ]; then
               echo "[deploy] nest build falhou exit=$BUILD_EC"
               exit "$BUILD_EC"

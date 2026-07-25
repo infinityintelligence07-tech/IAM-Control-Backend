@@ -28,52 +28,47 @@ jobs:
           script: |
             set -e
             cd "${{ secrets.VPS_BACKEND_PATH }}"
+            echo "[deploy] pwd=$(pwd)"
+
             git fetch
             git stash || true
             git pull origin main
-            npm i --legacy-peer-deps
+            echo "[deploy] git OK"
 
-            # Cache do Chrome DENTRO do projeto (espelha .puppeteerrc.cjs).
             export PUPPETEER_CACHE_DIR="$(pwd)/.cache/puppeteer"
-            if ! find "$PUPPETEER_CACHE_DIR/chrome" -type f -name chrome 2>/dev/null | grep -q .; then
+            npm i --legacy-peer-deps
+            echo "[deploy] npm i OK"
+
+            # postinstall já instala o Chrome; reforço só se o binário sumiu
+            CHROME_BIN=""
+            if [ -d "$PUPPETEER_CACHE_DIR/chrome" ]; then
+              CHROME_BIN="$(find "$PUPPETEER_CACHE_DIR/chrome" -type f -name chrome 2>/dev/null | head -n 1 || true)"
+            fi
+            if [ -z "$CHROME_BIN" ]; then
+              echo "[deploy] instalando Chrome..."
               npx puppeteer browsers install chrome
             else
-              echo "[deploy] Chrome já no cache, skip install"
-            fi
-            if ! find "$PUPPETEER_CACHE_DIR/chrome-headless-shell" -type f -name chrome-headless-shell 2>/dev/null | grep -q .; then
-              npx puppeteer browsers install chrome-headless-shell || true
+              echo "[deploy] Chrome OK: $CHROME_BIN"
             fi
 
-            # Libs já estavam instaladas; só tenta se faltar algo crítico.
-            if command -v apt-get >/dev/null 2>&1 && ! dpkg -s libnss3 >/dev/null 2>&1; then
-              sudo DEBIAN_FRONTEND=noninteractive apt-get update -y || true
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                ca-certificates fonts-liberation wget xdg-utils \
-                libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
-                libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 \
-                libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 \
-                libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
-                libxkbcommon0 libxrandr2 \
-                || true
-            else
-              echo "[deploy] deps Chrome OK, skip apt"
-            fi
-
-            echo "[deploy] memória antes do build:"
+            echo "[deploy] memória:"
             free -h || true
             export NODE_OPTIONS="--max-old-space-size=1536"
 
-            # Heartbeat: nest build fica minutos sem stdout e a sessão SSH
-            # recebe SIGTERM (143). Mantém output a cada 20s.
+            # Heartbeat evita SIGTERM 143 por SSH ocioso durante nest build
             echo "[deploy] iniciando nest build..."
-            npm run build &
+            npm run build > /tmp/iam-nest-build.log 2>&1 &
             BUILD_PID=$!
             while kill -0 "$BUILD_PID" 2>/dev/null; do
               echo "[deploy] nest build em andamento pid=$BUILD_PID $(date -u +%H:%M:%S)"
               sleep 20
             done
+            set +e
             wait "$BUILD_PID"
             BUILD_EC=$?
+            set -e
+            echo "[deploy] --- nest build log (tail) ---"
+            tail -n 80 /tmp/iam-nest-build.log || true
             if [ "$BUILD_EC" -ne 0 ]; then
               echo "[deploy] nest build falhou exit=$BUILD_EC"
               exit "$BUILD_EC"
@@ -83,7 +78,6 @@ jobs:
             pkill -f 'iam-pdf-chrome-' 2>/dev/null || true
             pkill -f 'chrome-headless' 2>/dev/null || true
 
-            # Smoke test ANTES do pm2: se falhar, o deploy para com o erro real.
             node <<'SMOKE'
             const fs = require('fs');
             const path = require('path');
@@ -136,3 +130,4 @@ jobs:
             SMOKE
 
             pm2 restart all --update-env
+            echo "[deploy] concluído"

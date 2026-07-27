@@ -16,7 +16,7 @@ export interface ContractDestinationProfile {
   showTestemunhas: boolean;
 }
 
-export const IAM_LOGO_PATH = "/images/logo/logo-claro.png";
+export const IAM_LOGO_PATH = "/images/logo/logo-iam.png";
 export const LIBERTY_LOGO_PATH = "/images/logo/LOGO LIBERTY H OFICIAL.png";
 
 const normalize = (value: string) =>
@@ -25,6 +25,38 @@ const normalize = (value: string) =>
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .trim();
+
+/**
+ * Contratos da marca IAM devem exibir a logo no cabeçalho,
+ * exceto Leader Skills e PEA.
+ */
+export const shouldShowContractHeaderLogo = (
+  brand: ContractBrand,
+  treinamentoNome?: string | null,
+): boolean => {
+  if (brand === "LIBERTY") return true;
+  const n = normalize(treinamentoNome || "");
+  if (!n) return true;
+  if (
+    n.includes("leader skills") ||
+    n.includes("lider skills") ||
+    n.includes("leaderskills") ||
+    n.includes("liderskills")
+  ) {
+    return false;
+  }
+  // PEA como produto (evita falso positivo em palavras longas).
+  if (
+    n === "pea" ||
+    n.startsWith("pea ") ||
+    n.endsWith(" pea") ||
+    n.includes(" pea ") ||
+    /\bpea\b/.test(n)
+  ) {
+    return false;
+  }
+  return true;
+};
 
 const PROFILE_DEFAULT_IAM: ContractDestinationProfile = {
   key: "DEFAULT_IAM",

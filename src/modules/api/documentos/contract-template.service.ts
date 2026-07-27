@@ -3,7 +3,7 @@ import {
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT,
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT,
 } from './constants/contract-signature.constants';
-import { getContractDestinationProfile, IAM_LOGO_PATH, LIBERTY_LOGO_PATH } from '@/utils/contract-destination-profile';
+import { getContractDestinationProfile, IAM_LOGO_PATH, LIBERTY_LOGO_PATH, shouldShowContractHeaderLogo } from '@/utils/contract-destination-profile';
 import { PdfBrowserService } from './pdf-browser.service';
 
 @Injectable()
@@ -828,8 +828,14 @@ export class ContractTemplateService {
             const normalizedTrainingName = normalizeString(nomeTreinamento);
             const isMentoriaLiberty =
                 destinationProfile.brand === 'LIBERTY' && destinationProfile.treinamentoLabel === 'MENTORIA' && normalizedTrainingName.includes('LIBERTY');
+            const mostrarLogoCabecalho = shouldShowContractHeaderLogo(
+                destinationProfile.brand,
+                nomeTreinamento,
+            );
             const trainingLogoPath = destinationProfile.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH;
-            const trainingLogoUrl = getAbsoluteImageUrl(trainingLogoPath);
+            const trainingLogoUrl = mostrarLogoCabecalho
+                ? getAbsoluteImageUrl(trainingLogoPath)
+                : '';
             const trainingDataLabel = destinationProfile.dataLabel || 'DATA';
             const trainingDataValue =
                 destinationProfile.dataLabel === 'DATA DA REALIZAÇÃO'
@@ -1050,6 +1056,18 @@ export class ContractTemplateService {
                 renderedTemplate = renderedTemplate.replace(regex, value ?? '');
             });
 
+            // Leader Skills / PEA: remove o bloco de logo do cabeçalho e rodapé de marca.
+            if (!trainingLogoUrl) {
+                renderedTemplate = renderedTemplate.replace(
+                    /<div class="header">\s*<div class="iam-brand">\s*<img[^>]*>\s*<\/div>\s*<\/div>/i,
+                    '',
+                );
+                renderedTemplate = renderedTemplate.replace(
+                    /<div class="training-logo-bottom">\s*<img[^>]*>\s*<\/div>/i,
+                    '',
+                );
+            }
+
             // Corrige possíveis vírgulas sobrando quando o template monta endereço com campos vazios
             renderedTemplate = renderedTemplate.replace(/,\s*,/g, ', ').replace(/,\s*,/g, ', ');
             if (!enderecoFormatado) {
@@ -1115,7 +1133,15 @@ export class ContractTemplateService {
             destinationProfileEmbedded.brand === 'LIBERTY' &&
             destinationProfileEmbedded.treinamentoLabel === 'MENTORIA' &&
             normalizedDestinationTrainingName.includes('LIBERTY');
-        const trainingLogoUrlEmbedded = getAbsoluteImageUrl(destinationProfileEmbedded.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH);
+        const mostrarLogoCabecalhoEmbedded = shouldShowContractHeaderLogo(
+            destinationProfileEmbedded.brand,
+            destinationTrainingName,
+        );
+        const trainingLogoUrlEmbedded = mostrarLogoCabecalhoEmbedded
+            ? getAbsoluteImageUrl(
+                  destinationProfileEmbedded.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH,
+              )
+            : '';
         const dataTreinamentoLabelEmbedded = destinationProfileEmbedded.dataLabel || 'DATA PREVISTA';
         // Toda venda pode conceder bônus de IPR: o quadro de Bônus aparece
         // quando o perfil o exibe (Confronto) OU quando o contrato tem bônus.
@@ -1143,7 +1169,7 @@ export class ContractTemplateService {
             return `
               <div class="footer">
                 ${
-                    showLogo
+                    showLogo && trainingLogoUrlEmbedded
                         ? `<img src="${trainingLogoUrlEmbedded}" alt="Logo do Treinamento" style="max-height: 40px; max-width: 200px; object-fit: contain; margin-top: 5px;" onerror="this.style.display='none';">`
                         : '<div style="height: 40px;"></div>'
                 }
@@ -1917,9 +1943,13 @@ export class ContractTemplateService {
               <!-- Primeira Página -->
               <div class="page">
               <div class="header">
-                <div class="logo-container">
+                ${
+                    trainingLogoUrlEmbedded
+                        ? `<div class="logo-container">
                   <img src="${trainingLogoUrlEmbedded}" alt="Logo da Empresa" class="logo-image" onerror="this.style.display='none';">
-                </div>
+                </div>`
+                        : ''
+                }
               </div>
               
               <p class="intro-text">

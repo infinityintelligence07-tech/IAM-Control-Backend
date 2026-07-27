@@ -12,7 +12,6 @@ const LOGO_FILE_BY_PUBLIC_PATH: Record<string, string> = {
   [LIBERTY_LOGO_PATH]: 'logo-liberty.png',
   // Fallbacks de nomes antigos / aliases.
   '/images/logo/logo-claro.png': 'logo-iam.png',
-  '/images/logo/LOGO LIBERTY H OFICIAL.png': 'logo-liberty.png',
 };
 
 function candidatosDiretorioLogos(): string[] {

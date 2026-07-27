@@ -13,6 +13,9 @@ export interface ContractDestinationProfile {
   showPayment: boolean;
   allowBoletoParcelado: boolean;
   showQuantidadeInscricoes: boolean;
+  // Regra de negócio: TODA venda de treinamento/mentoria tem testemunhas no
+  // contrato (a QUANTIDADE varia pela origem da venda — ex.: IPR com origem
+  // Masterclass tem uma única testemunha, o usuário logado).
   showTestemunhas: boolean;
 }
 
@@ -118,7 +121,7 @@ const PROFILE_RULES: Array<{
       showPayment: false,
       allowBoletoParcelado: false,
       showQuantidadeInscricoes: true,
-      showTestemunhas: false,
+      showTestemunhas: true,
     },
   },
   {
@@ -132,7 +135,7 @@ const PROFILE_RULES: Array<{
       showPayment: false,
       allowBoletoParcelado: false,
       showQuantidadeInscricoes: true,
-      showTestemunhas: false,
+      showTestemunhas: true,
     },
   },
   {
@@ -146,7 +149,7 @@ const PROFILE_RULES: Array<{
       showPayment: false,
       allowBoletoParcelado: false,
       showQuantidadeInscricoes: false,
-      showTestemunhas: false,
+      showTestemunhas: true,
     },
   },
   {
@@ -191,7 +194,7 @@ const PROFILE_RULES: Array<{
       showPayment: false,
       allowBoletoParcelado: false,
       showQuantidadeInscricoes: true,
-      showTestemunhas: false,
+      showTestemunhas: true,
     },
   },
   {

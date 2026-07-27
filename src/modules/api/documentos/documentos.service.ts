@@ -652,6 +652,22 @@ export class DocumentosService {
                 throw new NotFoundException('Aluno não encontrado');
             }
 
+            // Assinatura do contrato digital: o CPF é OBRIGATÓRIO tanto para o
+            // aluno quanto para toda testemunha informada. Validado ANTES de
+            // qualquer gravação para não deixar estado parcial.
+            if (criarContratoDto.contrato_manual !== true) {
+                const digitosDocumento = (valor?: string | null) => String(valor || '').replace(/\D/g, '');
+                if (digitosDocumento(aluno.cpf).length < 11) {
+                    throw new BadRequestException('CPF do aluno é obrigatório para a assinatura do contrato.');
+                }
+                if (criarContratoDto.testemunha_um_nome && digitosDocumento(criarContratoDto.testemunha_um_cpf).length < 11) {
+                    throw new BadRequestException('CPF da Testemunha 1 é obrigatório para a assinatura do contrato.');
+                }
+                if (criarContratoDto.testemunha_dois_nome && digitosDocumento(criarContratoDto.testemunha_dois_cpf).length < 11) {
+                    throw new BadRequestException('CPF da Testemunha 2 é obrigatório para a assinatura do contrato.');
+                }
+            }
+
             // Buscar dados do treinamento
             const treinamento = await this.uow.treinamentosRP.findOne({
                 where: { id: parseInt(criarContratoDto.id_treinamento), deletado_em: null },
@@ -1127,6 +1143,9 @@ export class DocumentosService {
                     testemunhas: (() => {
                         const temTestemunhas = criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome;
                         if (temTestemunhas) {
+                            // Testemunha 2 só é gravada quando informada: venda de
+                            // IPR com origem Masterclass tem testemunha ÚNICA (o
+                            // usuário logado) e o contrato não exibe a segunda.
                             const testemunhasData = {
                                 testemunha_um: {
                                     nome: criarContratoDto.testemunha_um_nome || '',
@@ -1135,13 +1154,17 @@ export class DocumentosService {
                                     telefone: criarContratoDto.testemunha_um_telefone || '',
                                     id: criarContratoDto.testemunha_um_id || null,
                                 },
-                                testemunha_dois: {
-                                    nome: criarContratoDto.testemunha_dois_nome || '',
-                                    cpf: criarContratoDto.testemunha_dois_cpf || '',
-                                    email: criarContratoDto.testemunha_dois_email || '',
-                                    telefone: criarContratoDto.testemunha_dois_telefone || '',
-                                    id: criarContratoDto.testemunha_dois_id || null,
-                                },
+                                ...(criarContratoDto.testemunha_dois_nome
+                                    ? {
+                                          testemunha_dois: {
+                                              nome: criarContratoDto.testemunha_dois_nome || '',
+                                              cpf: criarContratoDto.testemunha_dois_cpf || '',
+                                              email: criarContratoDto.testemunha_dois_email || '',
+                                              telefone: criarContratoDto.testemunha_dois_telefone || '',
+                                              id: criarContratoDto.testemunha_dois_id || null,
+                                          },
+                                      }
+                                    : {}),
                             };
                             this.logger.debug('zapsign.create.contract | Testemunhas processadas para salvar no contrato');
                             return testemunhasData;
@@ -1377,6 +1400,8 @@ export class DocumentosService {
             valores_bonus: bonusData.valores_bonus,
             compradores_adicionais: criarContratoDto.compradores_adicionais || [],
             campos_variaveis: bonusData.campos_variaveis,
+            // Testemunha 2 só entra no template quando informada: venda de IPR
+            // com origem Masterclass tem testemunha ÚNICA (o usuário logado).
             testemunhas:
                 criarContratoDto.testemunha_um_nome || criarContratoDto.testemunha_dois_nome
                     ? {
@@ -1387,13 +1412,17 @@ export class DocumentosService {
                               telefone: criarContratoDto.testemunha_um_telefone || '',
                               id: criarContratoDto.testemunha_um_id || null,
                           },
-                          testemunha_dois: {
-                              nome: criarContratoDto.testemunha_dois_nome || '',
-                              cpf: criarContratoDto.testemunha_dois_cpf || '',
-                              email: criarContratoDto.testemunha_dois_email || '',
-                              telefone: criarContratoDto.testemunha_dois_telefone || '',
-                              id: criarContratoDto.testemunha_dois_id || null,
-                          },
+                          ...(criarContratoDto.testemunha_dois_nome
+                              ? {
+                                    testemunha_dois: {
+                                        nome: criarContratoDto.testemunha_dois_nome || '',
+                                        cpf: criarContratoDto.testemunha_dois_cpf || '',
+                                        email: criarContratoDto.testemunha_dois_email || '',
+                                        telefone: criarContratoDto.testemunha_dois_telefone || '',
+                                        id: criarContratoDto.testemunha_dois_id || null,
+                                    },
+                                }
+                              : {}),
                       }
                     : undefined,
             observacoes: criarContratoDto.observacoes || '',

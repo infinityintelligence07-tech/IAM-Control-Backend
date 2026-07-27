@@ -46,7 +46,12 @@ export class ContractTemplateService {
             Boolean(testemunhas?.testemunha_um?.nome && testemunhas?.testemunha_um?.cpf) ||
             Boolean(testemunhas?.testemunha_dois?.nome && testemunhas?.testemunha_dois?.cpf);
 
-        const mostrarTestemunhas = possuiTestemunhas && !isIPRContract;
+        // Regra de negócio: TODA venda tem testemunhas no contrato (inclusive
+        // IPR — que, com origem Masterclass, tem testemunha ÚNICA). A exibição
+        // é guiada pelos DADOS gravados: contratos antigos sem testemunhas
+        // continuam sem a seção.
+        const mostrarTestemunhas = possuiTestemunhas;
+        const possuiTestemunhaDois = Boolean(testemunhas?.testemunha_dois?.nome);
 
         const possuiBonusRelevante =
             !isIPRContract &&
@@ -292,6 +297,16 @@ export class ContractTemplateService {
         
         .witness {
             flex: 1;
+        }
+
+        /* Testemunha única (venda de IPR com origem Masterclass): bloco
+           centralizado, sem ocupar a largura das duas colunas. */
+        .witnesses-section[data-testemunha-unica="true"] {
+            justify-content: center;
+        }
+
+        .witnesses-section[data-testemunha-unica="true"] .witness {
+            flex: 0 0 60%;
         }
         
         .witness-line {
@@ -1119,10 +1134,35 @@ export class ContractTemplateService {
                 );
             }
 
-            if (!destinationProfile.showTestemunhas) {
+            // Seção de testemunhas guiada pelos DADOS do contrato: sem nenhuma
+            // testemunha gravada (perfil sem testemunhas ou contrato antigo de
+            // IPR), a seção sai por completo; com apenas a Testemunha 1 (venda
+            // de IPR com origem Masterclass — testemunha única, o usuário
+            // logado), o bloco da Testemunha 2 é removido e os textos ficam no
+            // singular.
+            const temTestemunhaUm = Boolean(testemunhas?.testemunha_um?.nome);
+            const temTestemunhaDois = Boolean(testemunhas?.testemunha_dois?.nome);
+            if (!destinationProfile.showTestemunhas || (!temTestemunhaUm && !temTestemunhaDois)) {
                 renderedTemplate = renderedTemplate.replace(/<div class="witnesses-section"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/i, '</div></div>');
                 renderedTemplate = renderedTemplate.replace(/na presença de 2 testemunhas\./gi, 'na forma digital.');
                 renderedTemplate = renderedTemplate.replace(/na presença das testemunhas abaixo\./gi, 'na forma digital.');
+            } else if (!temTestemunhaDois) {
+                renderedTemplate = renderedTemplate.replace(
+                    /<div class="witness">\s*<div class="witness-line"><\/div>\s*<div class="witness-info">\s*<div><span class="bold">Testemunha 2<\/span><\/div>[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi,
+                    '',
+                );
+                renderedTemplate = renderedTemplate.replace(/na presença de 2 testemunhas\./gi, 'na presença de 1 testemunha.');
+                renderedTemplate = renderedTemplate.replace(/na presença das testemunhas abaixo\./gi, 'na presença da testemunha abaixo.');
+                // Testemunha única não é numerada.
+                renderedTemplate = renderedTemplate.replace(
+                    /<div><span class="bold">Testemunha 1<\/span><\/div>/gi,
+                    '<div><span class="bold">Testemunha</span></div>',
+                );
+                // Bloco único centralizado (a seção usa layout lado a lado).
+                renderedTemplate = renderedTemplate.replace(
+                    /<div class="witnesses-section"( style="[^"]*")?>/gi,
+                    '<div class="witnesses-section"$1 data-testemunha-unica="true">',
+                );
             }
 
             return renderedTemplate;
@@ -1304,7 +1344,9 @@ export class ContractTemplateService {
                     Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
                     CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
                   </div>
-                  <div style="flex: 1; line-height: 1;">
+                  ${
+                      possuiTestemunhaDois
+                          ? `<div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                       ${renderSignatureVisual(contrato.assinatura_testemunha_dois_base64, 'Assinatura Testemunha 2')}
                     </div>
@@ -1312,7 +1354,9 @@ export class ContractTemplateService {
                     <strong>Testemunha 2</strong><br>
                     Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
                     CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
-                  </div>
+                  </div>`
+                          : ''
+                  }
                 </div>`
                         : ''
                 }
@@ -1416,7 +1460,9 @@ export class ContractTemplateService {
                       <div class="page clauses-page">
                         <div class="clauses-section">
                           ${pageContent}
-                          <p style="text-align: center; margin-top: 20px; margin-bottom: 20px; font-size: 12px;"><strong>E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma, na presença das testemunhas abaixo.</strong></p>
+                          <p style="text-align: center; margin-top: 20px; margin-bottom: 20px; font-size: 12px;"><strong>E, por estarem de acordo, firmam o presente contrato em duas vias de igual teor e forma${
+                              mostrarTestemunhas ? (possuiTestemunhaDois ? ', na presença das testemunhas abaixo' : ', na presença da testemunha abaixo') : ''
+                          }.</strong></p>
                           
                           <!-- Local e Data -->
                           <table style="border: none; margin-top: 30px; margin-bottom: 20px;">
@@ -1452,7 +1498,9 @@ export class ContractTemplateService {
                     Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
                     CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
                   </div>
-                  <div style="flex: 1; line-height: 1;">
+                  ${
+                      possuiTestemunhaDois
+                          ? `<div style="flex: 1; line-height: 1;">
                     <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                       ${renderSignatureVisual(contrato.assinatura_testemunha_dois_base64, 'Assinatura Testemunha 2')}
                     </div>
@@ -1460,7 +1508,9 @@ export class ContractTemplateService {
                     <strong>Testemunha 2</strong><br>
                     Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
                     CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
-                  </div>
+                  </div>`
+                          : ''
+                  }
                 </div>`
                         : ''
                 }
@@ -2371,8 +2421,10 @@ export class ContractTemplateService {
               <!-- Assinaturas -->
               <p style="margin-bottom: 5px; margin-top: 5px; font-size: 12px; text-align: justify; line-height: 1;">
                 ${
-                    destinationProfileEmbedded.showTestemunhas
-                        ? 'Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de 2 testemunhas.'
+                    mostrarTestemunhas
+                        ? `Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo e na presença de ${
+                              possuiTestemunhaDois ? '2 testemunhas' : '1 testemunha'
+                          }.`
                         : 'Declaro que li e concordo com todas as cláusulas deste contrato, redigidas em 2 laudas, estando ciente de todas elas, por meio da assinatura abaixo.'
                 }
               </p>
@@ -2410,7 +2462,9 @@ export class ContractTemplateService {
                   Nome: ${testemunhas?.testemunha_um?.nome || '_________________'}<br>
                   CPF: ${testemunhas?.testemunha_um?.cpf || '_________________'}
                 </div>
-                <div style="flex: 1; line-height: 1;">
+                ${
+                    possuiTestemunhaDois
+                        ? `<div style="flex: 1; line-height: 1;">
                   <div style="height: 50px; display: flex; align-items: center; justify-content: center;">
                     ${renderSignatureVisual(contrato.assinatura_testemunha_dois_base64, 'Assinatura Testemunha 2')}
                   </div>
@@ -2418,7 +2472,9 @@ export class ContractTemplateService {
                   <strong>Testemunha 2</strong><br>
                   Nome: ${testemunhas?.testemunha_dois?.nome || '_________________'}<br>
                   CPF: ${testemunhas?.testemunha_dois?.cpf || '_________________'}
-                </div>
+                </div>`
+                        : ''
+                }
               </div>`
                       : ''
               }
@@ -2497,6 +2553,8 @@ export class ContractTemplateService {
                         edicao_turma: '',
                     },
                 },
+                // Testemunha 2 só é repassada quando existe (venda de IPR com
+                // origem Masterclass tem testemunha única — o usuário logado).
                 testemunhas: data.testemunhas
                     ? {
                           testemunha_um: {
@@ -2505,12 +2563,16 @@ export class ContractTemplateService {
                               email: data.testemunhas.testemunha_um?.email || '',
                               telefone: data.testemunhas.testemunha_um?.telefone || '',
                           },
-                          testemunha_dois: {
-                              nome: data.testemunhas.testemunha_dois?.nome || '',
-                              cpf: data.testemunhas.testemunha_dois?.cpf || '',
-                              email: data.testemunhas.testemunha_dois?.email || '',
-                              telefone: data.testemunhas.testemunha_dois?.telefone || '',
-                          },
+                          ...(data.testemunhas.testemunha_dois?.nome
+                              ? {
+                                    testemunha_dois: {
+                                        nome: data.testemunhas.testemunha_dois?.nome || '',
+                                        cpf: data.testemunhas.testemunha_dois?.cpf || '',
+                                        email: data.testemunhas.testemunha_dois?.email || '',
+                                        telefone: data.testemunhas.testemunha_dois?.telefone || '',
+                                    },
+                                }
+                              : {}),
                       }
                     : undefined,
                 campos_variaveis: {

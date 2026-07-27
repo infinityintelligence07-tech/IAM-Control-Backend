@@ -4,6 +4,7 @@ import {
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT,
 } from './constants/contract-signature.constants';
 import { getContractDestinationProfile, IAM_LOGO_PATH, LIBERTY_LOGO_PATH, shouldShowContractHeaderLogo } from '@/utils/contract-destination-profile';
+import { resolveContractLogoDataUri } from '@/utils/contract-logo-assets';
 import { PdfBrowserService } from './pdf-browser.service';
 
 @Injectable()
@@ -91,6 +92,14 @@ export class ContractTemplateService {
         // Função para converter URLs relativas em absolutas
         const getAbsoluteImageUrl = (url: string): string => {
             return convertGoogleDriveUrl(url);
+        };
+
+        /** Logo de marca embutida (data URI) — não depende de rede no Puppeteer. */
+        const resolveBrandLogoUrl = (publicPath: string): string => {
+            return (
+                resolveContractLogoDataUri(publicPath) ||
+                getAbsoluteImageUrl(publicPath)
+            );
         };
 
         const useTsContractTemplate = process.env.CONTRACT_TEMPLATE_MODE !== 'legacy-embedded';
@@ -834,7 +843,7 @@ export class ContractTemplateService {
             );
             const trainingLogoPath = destinationProfile.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH;
             const trainingLogoUrl = mostrarLogoCabecalho
-                ? getAbsoluteImageUrl(trainingLogoPath)
+                ? resolveBrandLogoUrl(trainingLogoPath)
                 : '';
             const trainingDataLabel = destinationProfile.dataLabel || 'DATA';
             const trainingDataValue =
@@ -1138,7 +1147,7 @@ export class ContractTemplateService {
             destinationTrainingName,
         );
         const trainingLogoUrlEmbedded = mostrarLogoCabecalhoEmbedded
-            ? getAbsoluteImageUrl(
+            ? resolveBrandLogoUrl(
                   destinationProfileEmbedded.brand === 'LIBERTY' ? LIBERTY_LOGO_PATH : IAM_LOGO_PATH,
               )
             : '';

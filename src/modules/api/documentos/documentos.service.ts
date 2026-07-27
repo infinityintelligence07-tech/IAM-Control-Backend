@@ -908,7 +908,9 @@ export class DocumentosService {
             // anexadas em seguida via salvarAssinatura (foto_documento_aluno_base64).
             const isContratoManual = criarContratoDto.contrato_manual === true;
 
-            // Preparar signers (aluno + testemunhas)
+            // Preparar signers: SOMENTE o assinante (aluno) recebe acesso ao
+            // contrato no ZapSign. Testemunhas ficam registradas no PDF/dados
+            // do contrato, mas NÃO recebem link nem acesso ao documento.
             const signers = [
                 {
                     name: aluno.nome,
@@ -917,25 +919,6 @@ export class DocumentosService {
                     action: 'sign' as const,
                 },
             ];
-
-            // Adicionar testemunhas aos signers se existirem
-            if (criarContratoDto.testemunha_um_nome && criarContratoDto.testemunha_um_cpf) {
-                signers.push({
-                    name: criarContratoDto.testemunha_um_nome,
-                    email: criarContratoDto.testemunha_um_email || '',
-                    phone: criarContratoDto.testemunha_um_telefone || '',
-                    action: 'sign' as const,
-                });
-            }
-
-            if (criarContratoDto.testemunha_dois_nome && criarContratoDto.testemunha_dois_cpf) {
-                signers.push({
-                    name: criarContratoDto.testemunha_dois_nome,
-                    email: criarContratoDto.testemunha_dois_email || '',
-                    phone: criarContratoDto.testemunha_dois_telefone || '',
-                    action: 'sign' as const,
-                });
-            }
 
             let zapSignResponse: ZapSignResponse | null = null;
             if (isContratoManual) {
@@ -1236,7 +1219,8 @@ export class DocumentosService {
                 );
             }
 
-            // Mapear signers com informações completas incluindo testemunhas
+            // Mapear signers com informações completas — apenas o assinante
+            // (testemunhas não têm acesso ao contrato digital).
             const signersResponse = signers.map((signer, index) => {
                 const zapSignSigner = zapSignResponse?.signers[index] || zapSignResponse?.signers.find((s) => s.name === signer.name);
                 return {

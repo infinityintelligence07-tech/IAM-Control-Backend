@@ -125,7 +125,9 @@ export class ContractTemplateService {
 
         @page {
             size: A4;
-            margin: 3cm 2cm 2cm 3cm;
+            /* Margem superior reduzida (3cm -> 1.2cm) para levar a logo/header
+               mais para o topo e aproveitar melhor o espaço da página. */
+            margin: 1.2cm 2cm 2cm 3cm;
         }
         
         body {
@@ -144,7 +146,7 @@ export class ContractTemplateService {
         }
         
         .header {
-            margin-bottom: 18px;
+            margin-bottom: 12px;
             text-align: center;
             page-break-inside: avoid;
         }
@@ -154,7 +156,7 @@ export class ContractTemplateService {
             align-items: center;
             justify-content: center;
             gap: 14px;
-            margin: 0 auto 12px auto;
+            margin: 0 auto 8px auto;
         }
 
         .iam-logo-image {

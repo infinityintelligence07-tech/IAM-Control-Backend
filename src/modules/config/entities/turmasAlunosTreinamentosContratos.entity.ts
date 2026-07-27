@@ -159,6 +159,7 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
         cpf: string; // cpf do assinante
         status: string; // status da assinatura
         signing_url: string; // url para assinatura do usuário
+        tipo?: 'sign' | 'witness'; // papel do signatário: assinante (aluno) ou testemunha
     }>; // Array de objetos com dados de todos os assinantes (aluno e testemunhas)
 
     @Column({ type: 'jsonb', name: 'zapsign_document_status', nullable: true })

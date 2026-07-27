@@ -924,10 +924,12 @@ export class DocumentosService {
             // anexadas em seguida via salvarAssinatura (foto_documento_aluno_base64).
             const isContratoManual = criarContratoDto.contrato_manual === true;
 
-            // Preparar signers: SOMENTE o assinante (aluno) recebe acesso ao
-            // contrato no ZapSign. Testemunhas ficam registradas no PDF/dados
-            // do contrato, mas NÃO recebem link nem acesso ao documento.
-            const signers = [
+            // Preparar signers: o assinante (aluno) E as testemunhas do
+            // contrato entram como signatários no ZapSign — cada um com seu
+            // próprio link de assinatura. Na modal de envio, o aluno tem
+            // WhatsApp/E-mail/Copiar/Abrir e as testemunhas apenas "Abrir"
+            // (contatos delas são os institucionais padrão das Configurações).
+            const signers: Array<{ name: string; email: string; phone: string; action: 'sign' | 'witness' }> = [
                 {
                     name: aluno.nome,
                     email: aluno.email,
@@ -935,6 +937,24 @@ export class DocumentosService {
                     action: 'sign' as const,
                 },
             ];
+            if (criarContratoDto.testemunha_um_nome) {
+                signers.push({
+                    name: criarContratoDto.testemunha_um_nome,
+                    email: criarContratoDto.testemunha_um_email || '',
+                    phone: criarContratoDto.testemunha_um_telefone || '',
+                    action: 'witness' as const,
+                });
+            }
+            // Venda de IPR com origem Masterclass tem testemunha ÚNICA (o
+            // usuário logado): a Testemunha 2 só entra quando informada.
+            if (criarContratoDto.testemunha_dois_nome) {
+                signers.push({
+                    name: criarContratoDto.testemunha_dois_nome,
+                    email: criarContratoDto.testemunha_dois_email || '',
+                    phone: criarContratoDto.testemunha_dois_telefone || '',
+                    action: 'witness' as const,
+                });
+            }
 
             let zapSignResponse: ZapSignResponse | null = null;
             if (isContratoManual) {
@@ -983,6 +1003,7 @@ export class DocumentosService {
                     cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
                     status: isContratoManual ? 'signed' : zapSignSigner?.status || 'pending',
                     signing_url: zapSignSigner?.sign_url || '',
+                    tipo: signer.action === 'witness' ? ('witness' as const) : ('sign' as const),
                 };
             });
 
@@ -1012,6 +1033,21 @@ export class DocumentosService {
                     ? String(criarContratoDto.status_conciliacao)
                     : 'NOVO';
 
+            // IDs de USUÁRIO das testemunhas (quando informados): habilitam a
+            // sincronização de status de assinatura das testemunhas (colunas
+            // status_ass_test_um/dois) junto à ZapSign. As colunas são FK para
+            // `usuarios`, então só gravamos ids que existem lá (o fluxo antigo
+            // de documentos envia id de ALUNO nesses campos — nesse caso, não
+            // gravamos para não violar a FK).
+            const resolverUsuarioTestemunhaId = async (idStr?: string): Promise<number | undefined> => {
+                const idNum = idStr ? parseInt(idStr) : NaN;
+                if (!Number.isFinite(idNum)) return undefined;
+                const usuario = await this.uow.usuariosRP.findOne({ where: { id: idNum } });
+                return usuario ? idNum : undefined;
+            };
+            const testemunhaUmUsuarioId = isContratoManual ? undefined : await resolverUsuarioTestemunhaId(criarContratoDto.testemunha_um_id);
+            const testemunhaDoisUsuarioId = isContratoManual ? undefined : await resolverUsuarioTestemunhaId(criarContratoDto.testemunha_dois_id);
+
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
@@ -1019,6 +1055,8 @@ export class DocumentosService {
                     ? EStatusAssinaturasContratos.ASSINADO
                     : EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
                 data_ass_aluno: isContratoManual ? new Date() : undefined,
+                testemunha_um: testemunhaUmUsuarioId,
+                testemunha_dois: testemunhaDoisUsuarioId,
                 status_conciliacao: statusConciliacao,
                 // Comprovante(s) de pagamento desta venda, vinculados ao contrato.
                 comprovantes_pagamento: comprovantesVenda.length > 0 ? comprovantesVenda : null,
@@ -1242,9 +1280,9 @@ export class DocumentosService {
                 );
             }
 
-            // Mapear signers com informações completas — apenas o assinante
-            // (testemunhas não têm acesso ao contrato digital).
-            const signersResponse = signers.map((signer, index) => {
+            // Mapear signers com informações completas: assinante (aluno) +
+            // testemunhas, cada um com o próprio link de assinatura da ZapSign.
+            const signersResponse = signersParaGravar.map((signer, index) => {
                 const zapSignSigner = zapSignResponse?.signers[index] || zapSignResponse?.signers.find((s) => s.name === signer.name);
                 return {
                     nome: signer.name,
@@ -1252,7 +1290,7 @@ export class DocumentosService {
                     telefone: signer.phone || '',
                     cpf: this.getSignerCPF(signer, aluno, criarContratoDto),
                     status: zapSignSigner?.status || 'pending',
-                    tipo: 'sign' as const,
+                    tipo: signer.action === 'witness' ? ('witness' as const) : ('sign' as const),
                     signing_url: zapSignSigner?.sign_url || '',
                 };
             });
@@ -7473,6 +7511,10 @@ export class DocumentosService {
                     cpf: cpfFinal,
                     status: signer.status,
                     signing_url: signer.sign_url || signerExistente?.signing_url || '',
+                    // Preserva o papel do signatário (assinante/testemunha) gravado
+                    // na criação; sem tipo (registros antigos), o frontend assume o
+                    // 1º como assinante e os demais como testemunhas.
+                    tipo: signerExistente?.tipo || (index === 0 ? 'sign' : 'witness'),
                 };
             });
 

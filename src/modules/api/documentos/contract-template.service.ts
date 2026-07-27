@@ -33,7 +33,12 @@ export class ContractTemplateService {
         ];
 
         const isIPRContract = referencias.some(
-            (texto) => texto?.includes('contrato do ipr') || texto?.includes('imersão prosperar') || texto?.includes('imersao prosperar'),
+            (texto) =>
+                texto?.includes('contrato do ipr') ||
+                texto?.includes('contrato ipr') ||
+                texto?.includes('mc para imers') ||
+                texto?.includes('imersão prosperar') ||
+                texto?.includes('imersao prosperar'),
         );
 
         const possuiTestemunhas =
@@ -1165,7 +1170,19 @@ export class ContractTemplateService {
                   <td class="table-cell full-width" colspan="2"><strong>Nome Completo:</strong> ${aluno?.nome || '_________________'}</td>
                 </tr>
                 <tr class="table-row">
-                  <td class="table-cell half-width"><strong>Telefone:</strong> ${aluno?.telefone_um || '_________________'}</td>
+                  <td class="table-cell half-width"><strong>CPF:</strong> ${aluno?.cpf || '_________________'}</td>
+                  <td class="table-cell half-width"><strong>Data de nascimento:</strong> ${(() => {
+                      if (!aluno?.data_nascimento) return '___/___/___';
+                      const dataISO = aluno.data_nascimento;
+                      if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                          const [ano, mes, dia] = dataISO.split('-');
+                          return `${dia}/${mes}/${ano}`;
+                      }
+                      return new Date(dataISO).toLocaleDateString('pt-BR');
+                  })()}</td>
+                </tr>
+                <tr class="table-row">
+                  <td class="table-cell half-width"><strong>WhatsApp:</strong> ${aluno?.telefone_um || '_________________'}</td>
                   <td class="table-cell half-width"><strong>E-mail:</strong> ${aluno?.email || '_________________'}</td>
                 </tr>
               </table>

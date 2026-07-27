@@ -34,13 +34,14 @@ export class SeedContratosIprTresVariantes1777000000000
     }
 
     private clausulasMcEventos(): string {
+        // Fonte: "IAM - Contrato MC para Imersão.docx"
         return [
             'Cláusula 1ª: O presente contrato é realizado presencialmente entre o ALUNO (devidamente qualificado na ficha de inscrição) e o Instituto Academy Mind Treinamentos LTDA, pessoa jurídica devidamente inscrita no CNPJ nº 03.727.532/0001-13, com sede na Rua Major Rehder, nº 245 - Vila Rehder, Americana - SP, CEP 13465-390, doravante denominada IAM.',
             'Cláusula 2ª: Por ser uma oferta feita exclusiva e com condição comercial abaixo do praticado, não será possível o cancelamento, estorno, estando o mesmo ciente e de acordo com o descrito.',
             'Cláusula 3ª: A troca de turma poderá ser solicitada até 30 dias antes da data prevista para realização do treinamento, desde que haja disponibilidade e viabilidade na nova turma escolhida para efetivação da transferência.',
-            'Parágrafo único: Será permitido o ALUNO(a) trocar de turma 01 (uma) vez e nessa troca haverá a cobrança de 10% do total da inscrição que for solicitada troca pelo ALUNO(a) a título de taxa administrativa, sendo isenta apenas a primeira troca.',
-            'Cláusula 4ª: O(A) aluno(a) autoriza o uso de sua voz e imagem captados durante o evento para fins institucionais e publicitários.',
-            'Cláusula 5ª: A data e local do treinamento são uma previsão de realização, podendo serem alterados, contudo a comunicação qualquer alteração ocorrerá com antecedência via telefone/whatsapp ou e-mail nos dados informados na ficha de inscrição. O ALUNO(a) se responsabiliza por sempre manter seus dados atualizados e comunicar quaisquer alterações.',
+            'Parágrafo único - Será permitido o ALUNO(a) trocar de turma 01 (uma) vez e nessa troca haverá a cobrança de 10% do total da inscrição que for solicitada troca pelo ALUNO(a) a título de taxa administrativa, sendo isenta apenas a primeira troca.',
+            'Cláusula 4ª. O(A) aluno(a) autoriza o uso de sua voz e imagem captados durante o evento para fins institucionais e publicitários',
+            'Cláusula 5ª: A data e local do treinamento são uma previsão de realização, podendo serem alterados, contudo a comunicação qualquer alteração ocorrerá com antecedência via telefone/whatsapp ou e-mail nos dados informados na ficha de inscrição. o ALUNO(a) se responsabiliza por sempre manter seus dados atualizados e comunicar quaisquer alterações',
         ].join('\n\n');
     }
 

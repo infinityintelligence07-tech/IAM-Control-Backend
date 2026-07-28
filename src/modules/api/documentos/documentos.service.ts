@@ -148,6 +148,7 @@ export class DocumentosService {
                 turmas_origem: string[];
                 turmas_destino: string[];
                 turmas_destino_por_origem: Record<string, string[]>;
+                ids_turma_origem: number[];
             };
         }
     >();
@@ -4453,6 +4454,7 @@ export class DocumentosService {
         turmas_origem: string[];
         turmas_destino: string[];
         turmas_destino_por_origem: Record<string, string[]>;
+        ids_turma_origem: number[];
     } | null {
         const registro = this.opcoesOrigemCache.get(chave);
         if (!registro) return null;
@@ -4472,6 +4474,7 @@ export class DocumentosService {
             turmas_origem: string[];
             turmas_destino: string[];
             turmas_destino_por_origem: Record<string, string[]>;
+            ids_turma_origem: number[];
         },
     ): void {
         const agora = Date.now();
@@ -5052,6 +5055,7 @@ export class DocumentosService {
         turmas_origem: string[];
         turmas_destino: string[];
         turmas_destino_por_origem: Record<string, string[]>;
+        ids_turma_origem: number[];
     }> {
         const cacheKey = this.montarChaveCacheOpcoesOrigem(filtros);
         const cacheHit = this.lerCacheOpcoesOrigem(cacheKey);
@@ -5112,6 +5116,7 @@ export class DocumentosService {
             .select(this.sqlTreinamentoOrigemHistoricoDisplay, 'treinamento_origem')
             .addSelect(this.sqlTurmaOrigemHistoricoDisplay, 'turma_origem')
             .addSelect(this.sqlTurmaDestinoHistoricoDisplay, 'turma_destino')
+            .addSelect(this.sqlIdTurmaOrigemHistorico, 'id_turma_origem')
             // Itens de COMBO da venda: as turmas dos produtos secundários também
             // entram nas opções de turma de destino (o filtro casa combos).
             .addSelect(`contrato.dados_contrato->'combo_itens'`, 'combo_itens')
@@ -5146,6 +5151,7 @@ export class DocumentosService {
             treinamento_origem?: string | null;
             turma_origem?: string | null;
             turma_destino?: string | null;
+            id_turma_origem?: string | number | null;
             combo_itens?: unknown;
             canal_venda?: string | null;
             status_documento?: string | null;
@@ -5184,6 +5190,7 @@ export class DocumentosService {
         const turmasOrigem = new Set<string>();
         const turmasDestino = new Set<string>();
         const turmasDestinoPorOrigem = new Map<string, Set<string>>();
+        const idsTurmaOrigem = new Set<number>();
 
         linhasOpcoes.forEach((linha) => {
             const treinamentoOrigem = String(linha.treinamento_origem || '').trim();
@@ -5205,6 +5212,11 @@ export class DocumentosService {
 
             const matchStatus = !statusFiltro || statusFiltro === 'all' || (statusFiltro === 'completed' ? concluido : !concluido);
             if (!matchStatus) return;
+
+            const idTurmaOrigemNum = Number(linha.id_turma_origem);
+            if (Number.isFinite(idTurmaOrigemNum) && idTurmaOrigemNum > 0) {
+                idsTurmaOrigem.add(idTurmaOrigemNum);
+            }
 
             if (treinamentoOrigem) {
                 treinamentos.add(treinamentoOrigem);
@@ -5258,12 +5270,14 @@ export class DocumentosService {
         turmasDestinoPorOrigem.forEach((destinos, origem) => {
             turmasDestinoPorOrigemOrdenadas[origem] = this.ordenarListaTurmasHistorico(destinos);
         });
+        const idsTurmaOrigemOrdenados = Array.from(idsTurmaOrigem).sort((a, b) => a - b);
 
         const resultado = {
             treinamentos_origem: treinamentosOrdenados,
             turmas_origem: turmasOrigemOrdenadas,
             turmas_destino: turmasDestinoOrdenadas,
             turmas_destino_por_origem: turmasDestinoPorOrigemOrdenadas,
+            ids_turma_origem: idsTurmaOrigemOrdenados,
         };
         this.salvarCacheOpcoesOrigem(cacheKey, resultado);
 

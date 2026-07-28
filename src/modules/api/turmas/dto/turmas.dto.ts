@@ -1434,6 +1434,11 @@ export class ExtratoMovimentacaoTurmaDto {
      * compunham a turma no início do período.
      */
     inicio_detalhes: ExtratoMovimentacaoDetalheDto[];
+    /**
+     * Estratificação do saldo final por estratégia/canal (mesma partição do
+     * início): permite ver, por canal, a queda/alta Início → Saldo.
+     */
+    fim_detalhes: ExtratoMovimentacaoDetalheDto[];
     entrada_detalhes: ExtratoMovimentacaoDetalheDto[];
     saida_detalhes: ExtratoMovimentacaoDetalheDto[];
     por_dia: ExtratoMovimentacaoDiaDto[];

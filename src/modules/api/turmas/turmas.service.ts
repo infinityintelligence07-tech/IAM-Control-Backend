@@ -2085,9 +2085,7 @@ export class TurmasService {
             }
             await this.uow.bumparPicoMetricasTurmas([id_turma_evento]);
 
-            this.logger.log(
-                `evento.mentoria.sync | Evento=${id_turma_evento} mentoria=${idTurmaMentoria} | ${matriculasSalvas.length} mentorado(s) inserido(s)`,
-            );
+            this.logger.log(`evento.mentoria.sync | Evento=${id_turma_evento} mentoria=${idTurmaMentoria} | ${matriculasSalvas.length} mentorado(s) inserido(s)`);
 
             return matriculasSalvas.length;
         } finally {
@@ -2481,9 +2479,7 @@ export class TurmasService {
             // evitando os N round-trips de auto-status/pico e as agregações pesadas
             // que estouravam o timeout com limit alto.
             if (sem_metricas) {
-                const turmasResponseLeve: TurmaResponseDto[] = turmasFiltradas.map((turma) =>
-                    this.mapTurmaBasicResponse(turma),
-                );
+                const turmasResponseLeve: TurmaResponseDto[] = turmasFiltradas.map((turma) => this.mapTurmaBasicResponse(turma));
                 return {
                     data: turmasResponseLeve,
                     total: turmasFiltradas.length,
@@ -2892,33 +2888,32 @@ export class TurmasService {
             const diasMontagemResolvido = isPalestra
                 ? 0
                 : createTurmaDto.dias_montagem !== undefined && createTurmaDto.dias_montagem !== null
-                    ? Math.max(0, Math.floor(createTurmaDto.dias_montagem))
-                    : (() => {
-                          const cidadeNorm = String(cidadeMontagem)
-                              .normalize('NFD')
-                              .replace(/\p{Diacritic}/gu, '')
-                              .toLowerCase()
-                              .trim();
-                          if (cidadeNorm.includes('campinas')) return 2;
-                          const sigla = String(polo.sigla_polo || '')
-                              .normalize('NFD')
-                              .replace(/\p{Diacritic}/gu, '')
-                              .toLowerCase()
-                              .trim();
-                          const nomePolo = String(polo.polo || '')
-                              .normalize('NFD')
-                              .replace(/\p{Diacritic}/gu, '')
-                              .toLowerCase()
-                              .trim();
-                          const cidadePolo = String(polo.cidade || '')
-                              .normalize('NFD')
-                              .replace(/\p{Diacritic}/gu, '')
-                              .toLowerCase()
-                              .trim();
-                          const isAmericana =
-                              sigla === 'am' || nomePolo === 'americana' || cidadePolo === 'americana';
-                          return isAmericana ? 0 : 1;
-                      })();
+                  ? Math.max(0, Math.floor(createTurmaDto.dias_montagem))
+                  : (() => {
+                        const cidadeNorm = String(cidadeMontagem)
+                            .normalize('NFD')
+                            .replace(/\p{Diacritic}/gu, '')
+                            .toLowerCase()
+                            .trim();
+                        if (cidadeNorm.includes('campinas')) return 2;
+                        const sigla = String(polo.sigla_polo || '')
+                            .normalize('NFD')
+                            .replace(/\p{Diacritic}/gu, '')
+                            .toLowerCase()
+                            .trim();
+                        const nomePolo = String(polo.polo || '')
+                            .normalize('NFD')
+                            .replace(/\p{Diacritic}/gu, '')
+                            .toLowerCase()
+                            .trim();
+                        const cidadePolo = String(polo.cidade || '')
+                            .normalize('NFD')
+                            .replace(/\p{Diacritic}/gu, '')
+                            .toLowerCase()
+                            .trim();
+                        const isAmericana = sigla === 'am' || nomePolo === 'americana' || cidadePolo === 'americana';
+                        return isAmericana ? 0 : 1;
+                    })();
 
             // Criar nova turma
             const novaTurma = this.uow.turmasRP.create({
@@ -5447,12 +5442,11 @@ export class TurmasService {
 
     /**
      * Extrato extratificado de movimentação de turmas (acompanhamento/conferência).
-     * Para cada turma no período: Início e Saldo final vêm da contagem de matrículas
-     * (`criado_em`/`deletado_em` — mesma fonte do detalhe por canal e dos modais);
-     * Entrada/Saída vêm dos logs `CRIACAO`/`CANCELAMENTO`/`REMOCAO` + transferências,
-     * ignorando entradas fantasma (log/transf. sobre matrícula já existente antes do período).
-     * Perf. = (Saldo − Início) / Início. Cancelamentos via turma CANCELADA não contam
-     * como saída de transferência (já entram como cancelamento).
+     * Fonte única de verdade: matrículas (`criado_em`/`deletado_em`), a mesma dos
+     * modais de saldo — assim Início + Entrada − Saída = Saldo final sempre fecha.
+     * Logs e transferências só classificam o canal/motivo (e o dia quando faltam
+     * datas). Réplica em turma congelada (origem sem soft delete) NÃO é saída.
+     * Perf. = (Entrada − Saída) / Início.
      */
     async getExtratoMovimentacaoTurmas(filtros: GetExtratoMovimentacaoDto): Promise<ExtratoMovimentacaoResponseDto> {
         try {
@@ -5553,23 +5547,55 @@ export class TurmasService {
                 };
             }
 
-            // Movimentos a partir dos logs (CRIACAO/CANCELAMENTO/REMOCAO) no período exibido.
+            // Matrículas ativas em algum momento do período (= fonte única de Início/Entrada/Saída/Saldo).
+            const matRows = await this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .withDeleted()
+                .select('ta.id', 'id_turma_aluno')
+                .addSelect('ta.id_turma', 'id_turma')
+                .addSelect('ta.criado_em', 'criado_em')
+                .addSelect('ta.deletado_em', 'deletado_em')
+                .addSelect(`to_char(ta.criado_em, 'YYYY-MM-DD')`, 'dia_criado')
+                .addSelect(`to_char(ta.deletado_em, 'YYYY-MM-DD')`, 'dia_deletado')
+                .where('ta.id_turma IN (:...ids)', { ids })
+                .andWhere('ta.criado_em <= :end', { end: endInclusive })
+                .andWhere('(ta.deletado_em IS NULL OR ta.deletado_em >= :start)', { start })
+                .getRawMany<{
+                    id_turma_aluno: string;
+                    id_turma: number;
+                    criado_em: Date | string;
+                    deletado_em: Date | string | null;
+                    dia_criado: string;
+                    dia_deletado: string | null;
+                }>();
+
+            const toDate = (v: Date | string | null | undefined): Date | null => {
+                if (v == null || v === '') return null;
+                const d = v instanceof Date ? v : new Date(v);
+                return Number.isNaN(d.getTime()) ? null : d;
+            };
+
+            // Logs/transferências: só para classificar canal/motivo (não definem a contagem).
             const logRows = await this.uow.historicoAlunosTurmasLogsRP
                 .createQueryBuilder('l')
-                .select('l.id_turma', 'id_turma')
-                .addSelect('l.id_turma_aluno', 'id_turma_aluno')
+                .select('l.id_turma_aluno', 'id_turma_aluno')
                 .addSelect('l.tipo_acao', 'tipo_acao')
-                .addSelect(`to_char(l.data_acao, 'YYYY-MM-DD')`, 'dia')
                 .where('l.id_turma IN (:...ids)', { ids })
-                .andWhere(`l.tipo_acao IN ('CRIACAO', 'CANCELAMENTO', 'REMOCAO')`)
+                .andWhere(`l.tipo_acao IN ('CANCELAMENTO', 'REMOCAO')`)
                 .andWhere('l.data_acao >= :start', { start })
                 .andWhere('l.data_acao <= :end', { end: endInclusive })
                 .andWhere('l.deletado_em IS NULL')
-                .getRawMany<{ id_turma: number; id_turma_aluno: string; tipo_acao: string; dia: string }>();
+                .getRawMany<{ id_turma_aluno: string; tipo_acao: string }>();
+            const logSaidaPorMatricula = new Map<string, 'Cancelamento' | 'Exclusão/Remoção'>();
+            for (const row of logRows) {
+                if (row.id_turma_aluno == null) continue;
+                const id = String(row.id_turma_aluno);
+                if (row.tipo_acao === 'REMOCAO') logSaidaPorMatricula.set(id, 'Exclusão/Remoção');
+                else if (row.tipo_acao === 'CANCELAMENTO' && !logSaidaPorMatricula.has(id)) {
+                    logSaidaPorMatricula.set(id, 'Cancelamento');
+                }
+            }
 
-            // Movimentos de transferência (entrada/saída) no período.
-            // Join na matrícula de origem para distinguir saída real (soft delete) de
-            // transferência réplica em turma congelada (aluno permanece na origem).
             const transferRows = await this.uow.historicoTransferenciasRP
                 .createQueryBuilder('h')
                 .leftJoin('turmas_alunos', 'ta_de', 'ta_de.id = h.id_turma_aluno_de')
@@ -5577,121 +5603,96 @@ export class TurmasService {
                 .addSelect('h.id_turma_para', 'id_turma_para')
                 .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
                 .addSelect('h.id_turma_aluno_para', 'id_turma_aluno_para')
+                .addSelect('h.criado_em', 'criado_em')
                 .addSelect('ta_de.deletado_em', 'origem_deletado_em')
-                .addSelect(`to_char(h.criado_em, 'YYYY-MM-DD')`, 'dia')
                 .where('(h.id_turma_de IN (:...ids) OR h.id_turma_para IN (:...ids))', { ids })
                 .andWhere('h.id_turma_de <> h.id_turma_para')
                 .andWhere('h.deletado_em IS NULL')
-                .andWhere('h.criado_em >= :start', { start })
-                .andWhere('h.criado_em <= :end', { end: endInclusive })
                 .getRawMany<{
                     id_turma_de: number;
                     id_turma_para: number;
                     id_turma_aluno_de: string | null;
                     id_turma_aluno_para: string | null;
+                    criado_em: Date | string;
                     origem_deletado_em: Date | string | null;
-                    dia: string;
                 }>();
-
-            // criado_em das matrículas envolvidas: filtra entradas fantasma
-            // (CRIACAO/transferência sobre matrícula que já existia antes do período).
-            const idsMatriculaMov = new Set<string>();
-            for (const row of logRows) {
-                if (row.id_turma_aluno != null) idsMatriculaMov.add(String(row.id_turma_aluno));
-            }
+            const transferenciaEntradaIds = new Set<string>();
+            const transferenciaSaidaIds = new Set<string>();
+            const UM_DIA_MS = 24 * 60 * 60 * 1000;
             for (const row of transferRows) {
-                if (row.id_turma_aluno_para != null) idsMatriculaMov.add(String(row.id_turma_aluno_para));
+                if (row.id_turma_aluno_para != null) transferenciaEntradaIds.add(String(row.id_turma_aluno_para));
+                // Réplica (origem sem soft delete) não é saída. Soft delete muito depois da
+                // transferência (ex.: cancelamento posterior) também não conta como "Transferência".
+                if (row.id_turma_aluno_de == null || specialSet.has(Number(row.id_turma_para))) continue;
+                const origemDel = toDate(row.origem_deletado_em);
+                const transferCriado = toDate(row.criado_em);
+                if (!origemDel || !transferCriado) continue;
+                if (Math.abs(origemDel.getTime() - transferCriado.getTime()) > UM_DIA_MS) continue;
+                transferenciaSaidaIds.add(String(row.id_turma_aluno_de));
             }
-            const criadoEmPorMatricula = new Map<string, Date>();
-            if (idsMatriculaMov.size > 0) {
-                const criadoRows = await this.uow.turmasAlunosRP
-                    .createQueryBuilder('ta')
-                    .withDeleted()
-                    .select('ta.id', 'id')
-                    .addSelect('ta.criado_em', 'criado_em')
-                    .where('ta.id IN (:...idsMat)', { idsMat: Array.from(idsMatriculaMov) })
-                    .getRawMany<{ id: string; criado_em: Date | string }>();
-                for (const r of criadoRows) {
-                    const criado = r.criado_em instanceof Date ? r.criado_em : new Date(r.criado_em);
-                    if (!Number.isNaN(criado.getTime())) criadoEmPorMatricula.set(String(r.id), criado);
-                }
-            }
-            /** Entrada real no período: matrícula criada a partir do início (não pré-existente). */
-            const matriculaNovaNoPeriodo = (idTurmaAluno?: string | null): boolean => {
-                if (!idTurmaAluno) return true;
-                const criado = criadoEmPorMatricula.get(String(idTurmaAluno));
-                if (!criado) return true;
-                return criado >= start;
-            };
 
-            type Mov = { dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string; id_turma_aluno?: string; classificarCanal?: boolean };
+            type Mov = { dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string; id_turma_aluno: string };
             const movsPorTurma = new Map<number, Mov[]>();
             const pushMov = (idTurma: number, mov: Mov) => {
                 const arr = movsPorTurma.get(idTurma);
                 if (arr) arr.push(mov);
                 else movsPorTurma.set(idTurma, [mov]);
             };
-            const idsSet = new Set(ids);
 
-            // CRIACAO -> entrada (canal a classificar); CANCELAMENTO/REMOCAO -> saída.
-            // Ignora CRIACAO cuja matrícula já existia antes do período (log fantasma/backfill).
-            const criacaoIdsPorTurma = new Map<number, Set<string>>();
-            for (const row of logRows) {
+            const inicioIdsPorTurma = new Map<number, string[]>();
+            const fimIdsPorTurma = new Map<number, string[]>();
+            const entradaIdsPorTurma = new Map<number, string[]>();
+
+            for (const row of matRows) {
                 const idTurma = Number(row.id_turma);
-                if (row.tipo_acao === 'CRIACAO') {
-                    const idTurmaAluno = String(row.id_turma_aluno);
-                    if (!matriculaNovaNoPeriodo(idTurmaAluno)) continue;
+                const idTurmaAluno = String(row.id_turma_aluno);
+                const criado = toDate(row.criado_em);
+                const deletado = toDate(row.deletado_em);
+                if (!criado) continue;
+
+                const inInicio = criado < start && (deletado == null || deletado >= start);
+                const inFim = criado <= endInclusive && (deletado == null || deletado > endInclusive);
+                const isEntrada = criado >= start && criado <= endInclusive;
+                const isSaida = deletado != null && deletado >= start && deletado <= endInclusive;
+
+                if (inInicio) {
+                    const arr = inicioIdsPorTurma.get(idTurma) ?? [];
+                    arr.push(idTurmaAluno);
+                    inicioIdsPorTurma.set(idTurma, arr);
+                }
+                if (inFim) {
+                    const arr = fimIdsPorTurma.get(idTurma) ?? [];
+                    arr.push(idTurmaAluno);
+                    fimIdsPorTurma.set(idTurma, arr);
+                }
+                if (isEntrada) {
+                    const arr = entradaIdsPorTurma.get(idTurma) ?? [];
+                    arr.push(idTurmaAluno);
+                    entradaIdsPorTurma.set(idTurma, arr);
+                    const categoria = transferenciaEntradaIds.has(idTurmaAluno) ? 'Transferência' : 'Vendas em Eventos'; // placeholder; classificado abaixo
                     pushMov(idTurma, {
-                        dia: row.dia,
+                        dia: row.dia_criado || dataInicioStr,
                         tipo: 'ENTRADA',
-                        categoria: 'Vendas em Eventos',
+                        categoria,
                         id_turma_aluno: idTurmaAluno,
-                        classificarCanal: true,
-                    });
-                    const set = criacaoIdsPorTurma.get(idTurma) ?? new Set<string>();
-                    set.add(idTurmaAluno);
-                    criacaoIdsPorTurma.set(idTurma, set);
-                } else if (row.tipo_acao === 'CANCELAMENTO') {
-                    pushMov(idTurma, { dia: row.dia, tipo: 'SAIDA', categoria: 'Cancelamento' });
-                } else if (row.tipo_acao === 'REMOCAO') {
-                    pushMov(idTurma, { dia: row.dia, tipo: 'SAIDA', categoria: 'Exclusão/Remoção' });
-                }
-            }
-
-            for (const row of transferRows) {
-                const de = Number(row.id_turma_de);
-                const para = Number(row.id_turma_para);
-                // Entrada por transferência recebida — só conta se a matrícula de destino
-                // foi criada no período (ignora reaproveitamento de vínculo já ativo).
-                if (idsSet.has(para) && matriculaNovaNoPeriodo(row.id_turma_aluno_para)) {
-                    pushMov(para, {
-                        dia: row.dia,
-                        tipo: 'ENTRADA',
-                        categoria: 'Transferência',
-                        id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : undefined,
                     });
                 }
-                // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
-                // Réplica (turma congelada/robô): matrícula de origem continua ativa → NÃO é saída.
-                const origemPermaneceuAtiva = row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
-                if (idsSet.has(de) && !specialSet.has(para) && !origemPermaneceuAtiva) {
-                    pushMov(de, { dia: row.dia, tipo: 'SAIDA', categoria: 'Transferência' });
+                if (isSaida) {
+                    // Prioriza log (cancelamento/remoção) sobre transferência, para não
+                    // rotular cancelamento posterior a réplica como "Transferência".
+                    let categoria: string = logSaidaPorMatricula.get(idTurmaAluno) ?? 'Cancelamento';
+                    if (!logSaidaPorMatricula.has(idTurmaAluno) && transferenciaSaidaIds.has(idTurmaAluno)) {
+                        categoria = 'Transferência';
+                    }
+                    pushMov(idTurma, {
+                        dia: row.dia_deletado || dataFinalStr,
+                        tipo: 'SAIDA',
+                        categoria,
+                        id_turma_aluno: idTurmaAluno,
+                    });
                 }
             }
 
-            // Classificação de canal (mesma regra do dashboard) para as entradas por nova inscrição.
-            const canalPorTurmaAluno = new Map<string, string>(); // key `${idTurma}:${idTurmaAluno}`
-            for (const [idTurma, set] of criacaoIdsPorTurma.entries()) {
-                const idsAlunos = Array.from(set);
-                if (idsAlunos.length === 0) continue;
-                const classif = await this.getClassificacaoOrigemPorTurmaAluno(idTurma, idsAlunos);
-                for (const idAluno of idsAlunos) {
-                    canalPorTurmaAluno.set(`${idTurma}:${idAluno}`, classif.get(idAluno)?.canal || 'Vendas em Eventos');
-                }
-            }
-
-            // Saldo INICIAL e FINAL: mesma fonte do modal (criado_em/deletado_em),
-            // para o total bater com a soma do detalhamento por canal.
             const ORDEM_CANAIS_EXTRATO = [
                 'Vendas em Eventos',
                 'Masterclass',
@@ -5703,44 +5704,8 @@ export class TurmasService {
                 'Transferência',
                 'Presente',
             ];
-            const inicioRows = await this.uow.turmasAlunosRP
-                .createQueryBuilder('ta')
-                .withDeleted()
-                .select('ta.id_turma', 'id_turma')
-                .addSelect('ta.id', 'id_turma_aluno')
-                .where('ta.id_turma IN (:...ids)', { ids })
-                .andWhere('ta.criado_em < :start', { start })
-                .andWhere('(ta.deletado_em IS NULL OR ta.deletado_em >= :start)', { start })
-                .getRawMany<{ id_turma: number; id_turma_aluno: string }>();
-            const inicioIdsPorTurma = new Map<number, string[]>();
-            for (const r of inicioRows) {
-                const idTurma = Number(r.id_turma);
-                const arr = inicioIdsPorTurma.get(idTurma) ?? [];
-                arr.push(String(r.id_turma_aluno));
-                inicioIdsPorTurma.set(idTurma, arr);
-            }
-            const fimRows = await this.uow.turmasAlunosRP
-                .createQueryBuilder('ta')
-                .withDeleted()
-                .select('ta.id_turma', 'id_turma')
-                .addSelect('COUNT(*)', 'total')
-                .where('ta.id_turma IN (:...ids)', { ids })
-                .andWhere('ta.criado_em <= :end', { end: endInclusive })
-                .andWhere('(ta.deletado_em IS NULL OR ta.deletado_em > :end)', { end: endInclusive })
-                .groupBy('ta.id_turma')
-                .getRawMany<{ id_turma: number; total: string }>();
-            const fimCountPorTurma = new Map<number, number>();
-            for (const r of fimRows) fimCountPorTurma.set(Number(r.id_turma), Number(r.total));
-
-            const inicioDetalhesPorTurma = new Map<number, ExtratoMovimentacaoDetalheDto[]>();
-            for (const [idTurma, idsAlunos] of inicioIdsPorTurma.entries()) {
-                const classif = await this.getClassificacaoOrigemPorTurmaAluno(idTurma, idsAlunos);
-                const contagem = new Map<string, number>();
-                for (const idAluno of idsAlunos) {
-                    const canal = classif.get(idAluno)?.canal || 'Vendas em Eventos';
-                    contagem.set(canal, (contagem.get(canal) ?? 0) + 1);
-                }
-                const detalhes = Array.from(contagem.entries())
+            const ordenarDetalhesCanal = (contagem: Map<string, number>): ExtratoMovimentacaoDetalheDto[] =>
+                Array.from(contagem.entries())
                     .map(([label, total]) => ({ label, total }))
                     .sort((a, b) => {
                         const ia = ORDEM_CANAIS_EXTRATO.indexOf(a.label);
@@ -5750,8 +5715,53 @@ export class TurmasService {
                         if (ib !== -1) return 1;
                         return b.total - a.total;
                     });
-                inicioDetalhesPorTurma.set(idTurma, detalhes);
+
+            // Classificação unificada de canal (dashboard) para início, fim e entradas (não-transferência).
+            const canalPorTurmaAluno = new Map<string, string>(); // `${idTurma}:${idTurmaAluno}`
+            const idsParaClassificarPorTurma = new Map<number, Set<string>>();
+            const addClassificar = (idTurma: number, idTurmaAluno: string) => {
+                const set = idsParaClassificarPorTurma.get(idTurma) ?? new Set<string>();
+                set.add(idTurmaAluno);
+                idsParaClassificarPorTurma.set(idTurma, set);
+            };
+            for (const [idTurma, lista] of inicioIdsPorTurma) for (const id of lista) addClassificar(idTurma, id);
+            for (const [idTurma, lista] of fimIdsPorTurma) for (const id of lista) addClassificar(idTurma, id);
+            for (const [idTurma, lista] of entradaIdsPorTurma) {
+                for (const id of lista) {
+                    if (!transferenciaEntradaIds.has(id)) addClassificar(idTurma, id);
+                }
             }
+            for (const [idTurma, set] of idsParaClassificarPorTurma) {
+                const lista = Array.from(set);
+                if (lista.length === 0) continue;
+                const classif = await this.getClassificacaoOrigemPorTurmaAluno(idTurma, lista);
+                for (const id of lista) {
+                    canalPorTurmaAluno.set(`${idTurma}:${id}`, classif.get(id)?.canal || 'Vendas em Eventos');
+                }
+            }
+
+            // Aplica canal real nas entradas que não são transferência.
+            for (const [idTurma, movs] of movsPorTurma) {
+                for (const m of movs) {
+                    if (m.tipo !== 'ENTRADA' || m.categoria === 'Transferência') continue;
+                    m.categoria = canalPorTurmaAluno.get(`${idTurma}:${m.id_turma_aluno}`) || 'Vendas em Eventos';
+                }
+            }
+
+            const montarDetalhesSaldo = (idsPorTurma: Map<number, string[]>): Map<number, ExtratoMovimentacaoDetalheDto[]> => {
+                const out = new Map<number, ExtratoMovimentacaoDetalheDto[]>();
+                for (const [idTurma, idsAlunos] of idsPorTurma) {
+                    const contagem = new Map<string, number>();
+                    for (const idAluno of idsAlunos) {
+                        const canal = canalPorTurmaAluno.get(`${idTurma}:${idAluno}`) || 'Vendas em Eventos';
+                        contagem.set(canal, (contagem.get(canal) ?? 0) + 1);
+                    }
+                    out.set(idTurma, ordenarDetalhesCanal(contagem));
+                }
+                return out;
+            };
+            const inicioDetalhesPorTurma = montarDetalhesSaldo(inicioIdsPorTurma);
+            const fimDetalhesPorTurma = montarDetalhesSaldo(fimIdsPorTurma);
 
             // Dias do período (para a quebra diária encadeada).
             const diasPeriodo: string[] = [];
@@ -5770,15 +5780,11 @@ export class TurmasService {
                 if (diff === 0) return 0;
                 return diff > 0 ? 100 : -100;
             };
-            const agruparDetalhes = (movs: Mov[], tipo: 'ENTRADA' | 'SAIDA', idTurma: number): ExtratoMovimentacaoDetalheDto[] => {
+            const agruparDetalhes = (movs: Mov[], tipo: 'ENTRADA' | 'SAIDA'): ExtratoMovimentacaoDetalheDto[] => {
                 const mapa = new Map<string, number>();
                 for (const m of movs) {
                     if (m.tipo !== tipo) continue;
-                    let label = m.categoria;
-                    if (tipo === 'ENTRADA' && m.classificarCanal && m.id_turma_aluno) {
-                        label = canalPorTurmaAluno.get(`${idTurma}:${m.id_turma_aluno}`) || 'Vendas em Eventos';
-                    }
-                    mapa.set(label, (mapa.get(label) ?? 0) + 1);
+                    mapa.set(m.categoria, (mapa.get(m.categoria) ?? 0) + 1);
                 }
                 return Array.from(mapa.entries())
                     .map(([label, total]) => ({ label, total }))
@@ -5787,21 +5793,15 @@ export class TurmasService {
 
             const data: ExtratoMovimentacaoTurmaDto[] = [];
             for (const turma of turmas) {
-                const movs = movsPorTurma.get(turma.id) ?? [];
+                const movsPeriodo = (movsPorTurma.get(turma.id) ?? []).filter((m) => m.dia >= dataInicioStr && m.dia <= dataFinalStr);
 
-                // Início/Saldo = contagem real de matrículas (igual ao detalhe por canal e aos modais).
                 const saldoInicio = inicioIdsPorTurma.get(turma.id)?.length ?? 0;
-                const resultado = fimCountPorTurma.get(turma.id) ?? 0;
-
-                // Movimentos do período (já filtrados de entradas fantasma).
-                const movsPeriodo = movs.filter((m) => m.dia >= dataInicioStr && m.dia <= dataFinalStr);
+                const resultado = fimIdsPorTurma.get(turma.id)?.length ?? 0;
                 const entradaPeriodo = movsPeriodo.filter((m) => m.tipo === 'ENTRADA').length;
                 const saidaPeriodo = movsPeriodo.filter((m) => m.tipo === 'SAIDA').length;
+                // Identidade: Início + Entrada − Saída = Saldo (garantida pela fonte única).
+                const performance = calcPerformance(saldoInicio, entradaPeriodo, saidaPeriodo);
 
-                // Perf. = (Saldo − Início) / Início — mesma Dif. dos totais de matrícula.
-                const performance = calcPerformance(saldoInicio, resultado - saldoInicio + saidaPeriodo, saidaPeriodo);
-
-                // Quebra diária encadeada a partir do saldo inicial real.
                 const porDiaMap = new Map<string, Mov[]>();
                 for (const m of movsPeriodo) {
                     const arr = porDiaMap.get(m.dia);
@@ -5825,8 +5825,8 @@ export class TurmasService {
                         saida: s,
                         saldo_final: finalDia,
                         performance: calcPerformance(inicial, e, s),
-                        entrada_detalhes: agruparDetalhes(movsDia, 'ENTRADA', turma.id),
-                        saida_detalhes: agruparDetalhes(movsDia, 'SAIDA', turma.id),
+                        entrada_detalhes: agruparDetalhes(movsDia, 'ENTRADA'),
+                        saida_detalhes: agruparDetalhes(movsDia, 'SAIDA'),
                     });
                 }
 
@@ -5848,8 +5848,9 @@ export class TurmasService {
                     resultado,
                     performance,
                     inicio_detalhes: inicioDetalhesPorTurma.get(turma.id) ?? [],
-                    entrada_detalhes: agruparDetalhes(movsPeriodo, 'ENTRADA', turma.id),
-                    saida_detalhes: agruparDetalhes(movsPeriodo, 'SAIDA', turma.id),
+                    fim_detalhes: fimDetalhesPorTurma.get(turma.id) ?? [],
+                    entrada_detalhes: agruparDetalhes(movsPeriodo, 'ENTRADA'),
+                    saida_detalhes: agruparDetalhes(movsPeriodo, 'SAIDA'),
                     por_dia,
                 });
             }
@@ -5867,7 +5868,7 @@ export class TurmasService {
                 },
                 { saldo: 0, entrada: 0, saida: 0, resultado: 0, performance: 0 },
             );
-            totais.performance = calcPerformance(totais.saldo, totais.resultado - totais.saldo + totais.saida, totais.saida);
+            totais.performance = calcPerformance(totais.saldo, totais.entrada, totais.saida);
 
             // Dias (colunas) com movimentação em qualquer turma, ordenados crescentemente.
             const diasComMovimento = new Set<string>();
@@ -5886,8 +5887,8 @@ export class TurmasService {
 
     /**
      * Lista os alunos que participaram das movimentações (entradas/saídas) de UMA turma dentro do período.
-     * Reaproveita a mesma fonte do extrato (logs CRIACAO/CANCELAMENTO/REMOCAO + transferências) e a
-     * classificação unificada de canal do dashboard, retornando apenas os alunos das movimentações.
+     * Mesma fonte do extrato: matrículas (`criado_em`/`deletado_em`); logs e transferências
+     * só classificam canal/motivo e preenchem origem/destino.
      */
     async getMovimentacaoAlunosTurma(id_turma: number, filtros: GetMovimentacaoAlunosDto): Promise<MovimentacaoAlunosResponseDto> {
         try {
@@ -5923,6 +5924,12 @@ export class TurmasService {
                 .getRawMany<{ id: number }>();
             const specialSet = new Set(specialRows.map((r) => Number(r.id)));
 
+            const toDate = (v: Date | string | null | undefined): Date | null => {
+                if (v == null || v === '') return null;
+                const d = v instanceof Date ? v : new Date(v);
+                return Number.isNaN(d.getTime()) ? null : d;
+            };
+
             type ItemMov = {
                 id_aluno: number;
                 id_turma_aluno: string | null;
@@ -5934,22 +5941,47 @@ export class TurmasService {
             };
             const itens: ItemMov[] = [];
 
-            // Logs (CRIACAO/CANCELAMENTO/REMOCAO) com o aluno, dentro do período.
+            const matRows = await this.uow.turmasAlunosRP
+                .createQueryBuilder('ta')
+                .withDeleted()
+                .select('ta.id', 'id_turma_aluno')
+                .addSelect('ta.id_aluno', 'id_aluno')
+                .addSelect('ta.criado_em', 'criado_em')
+                .addSelect('ta.deletado_em', 'deletado_em')
+                .addSelect(`to_char(ta.criado_em, 'YYYY-MM-DD')`, 'dia_criado')
+                .addSelect(`to_char(ta.deletado_em, 'YYYY-MM-DD')`, 'dia_deletado')
+                .where('ta.id_turma = :id_turma', { id_turma })
+                .andWhere('ta.criado_em <= :end', { end: endInclusive })
+                .andWhere('(ta.deletado_em IS NULL OR ta.deletado_em >= :start)', { start })
+                .getRawMany<{
+                    id_turma_aluno: string;
+                    id_aluno: string;
+                    criado_em: Date | string;
+                    deletado_em: Date | string | null;
+                    dia_criado: string;
+                    dia_deletado: string | null;
+                }>();
+
             const logRows = await this.uow.historicoAlunosTurmasLogsRP
                 .createQueryBuilder('l')
-                .select('l.id_aluno', 'id_aluno')
-                .addSelect('l.id_turma_aluno', 'id_turma_aluno')
+                .select('l.id_turma_aluno', 'id_turma_aluno')
                 .addSelect('l.tipo_acao', 'tipo_acao')
-                .addSelect(`to_char(l.data_acao, 'YYYY-MM-DD')`, 'dia')
                 .where('l.id_turma = :id_turma', { id_turma })
-                .andWhere(`l.tipo_acao IN ('CRIACAO', 'CANCELAMENTO', 'REMOCAO')`)
+                .andWhere(`l.tipo_acao IN ('CANCELAMENTO', 'REMOCAO')`)
                 .andWhere('l.data_acao >= :start', { start })
                 .andWhere('l.data_acao <= :end', { end: endInclusive })
                 .andWhere('l.deletado_em IS NULL')
-                .getRawMany<{ id_aluno: string; id_turma_aluno: string; tipo_acao: string; dia: string }>();
+                .getRawMany<{ id_turma_aluno: string; tipo_acao: string }>();
+            const logSaidaPorMatricula = new Map<string, 'Cancelamento' | 'Exclusão/Remoção'>();
+            for (const row of logRows) {
+                if (row.id_turma_aluno == null) continue;
+                const id = String(row.id_turma_aluno);
+                if (row.tipo_acao === 'REMOCAO') logSaidaPorMatricula.set(id, 'Exclusão/Remoção');
+                else if (row.tipo_acao === 'CANCELAMENTO' && !logSaidaPorMatricula.has(id)) {
+                    logSaidaPorMatricula.set(id, 'Cancelamento');
+                }
+            }
 
-            // Transferências (entrada recebida / saída enviada) dentro do período.
-            // Join na matrícula de origem para ignorar réplicas (aluno permanece na origem).
             const transferRows = await this.uow.historicoTransferenciasRP
                 .createQueryBuilder('h')
                 .leftJoin('turmas_alunos', 'ta_de', 'ta_de.id = h.id_turma_aluno_de')
@@ -5958,103 +5990,96 @@ export class TurmasService {
                 .addSelect('h.id_turma_para', 'id_turma_para')
                 .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
                 .addSelect('h.id_turma_aluno_para', 'id_turma_aluno_para')
+                .addSelect('h.criado_em', 'criado_em')
                 .addSelect('ta_de.deletado_em', 'origem_deletado_em')
-                .addSelect(`to_char(h.criado_em, 'YYYY-MM-DD')`, 'dia')
                 .where('(h.id_turma_de = :id_turma OR h.id_turma_para = :id_turma)', { id_turma })
                 .andWhere('h.id_turma_de <> h.id_turma_para')
                 .andWhere('h.deletado_em IS NULL')
-                .andWhere('h.criado_em >= :start', { start })
-                .andWhere('h.criado_em <= :end', { end: endInclusive })
                 .getRawMany<{
                     id_aluno: string;
                     id_turma_de: number;
                     id_turma_para: number;
                     id_turma_aluno_de: string | null;
                     id_turma_aluno_para: string | null;
+                    criado_em: Date | string;
                     origem_deletado_em: Date | string | null;
-                    dia: string;
                 }>();
 
-            // criado_em: filtra entradas fantasma (CRIACAO/transf. sobre matrícula pré-existente).
-            const idsMatriculaMov = new Set<string>();
-            for (const row of logRows) {
-                if (row.id_turma_aluno != null) idsMatriculaMov.add(String(row.id_turma_aluno));
-            }
+            const transferenciaEntrada = new Map<string, { id_turma_de: number; id_turma_para: number }>();
+            const transferenciaSaida = new Map<string, { id_turma_de: number; id_turma_para: number }>();
+            const UM_DIA_MS = 24 * 60 * 60 * 1000;
             for (const row of transferRows) {
-                if (row.id_turma_aluno_para != null) idsMatriculaMov.add(String(row.id_turma_aluno_para));
-            }
-            const criadoEmPorMatricula = new Map<string, Date>();
-            if (idsMatriculaMov.size > 0) {
-                const criadoRows = await this.uow.turmasAlunosRP
-                    .createQueryBuilder('ta')
-                    .withDeleted()
-                    .select('ta.id', 'id')
-                    .addSelect('ta.criado_em', 'criado_em')
-                    .where('ta.id IN (:...idsMat)', { idsMat: Array.from(idsMatriculaMov) })
-                    .getRawMany<{ id: string; criado_em: Date | string }>();
-                for (const r of criadoRows) {
-                    const criado = r.criado_em instanceof Date ? r.criado_em : new Date(r.criado_em);
-                    if (!Number.isNaN(criado.getTime())) criadoEmPorMatricula.set(String(r.id), criado);
+                if (row.id_turma_aluno_para != null && Number(row.id_turma_para) === id_turma) {
+                    transferenciaEntrada.set(String(row.id_turma_aluno_para), {
+                        id_turma_de: Number(row.id_turma_de),
+                        id_turma_para: Number(row.id_turma_para),
+                    });
                 }
-            }
-            const matriculaNovaNoPeriodo = (idTurmaAluno?: string | null): boolean => {
-                if (!idTurmaAluno) return true;
-                const criado = criadoEmPorMatricula.get(String(idTurmaAluno));
-                if (!criado) return true;
-                return criado >= start;
-            };
-
-            const criacaoIds = new Set<string>();
-            for (const row of logRows) {
-                const idTurmaAluno = row.id_turma_aluno != null ? String(row.id_turma_aluno) : null;
-                if (row.tipo_acao === 'CRIACAO') {
-                    if (!matriculaNovaNoPeriodo(idTurmaAluno)) continue;
-                    if (idTurmaAluno) criacaoIds.add(idTurmaAluno);
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'ENTRADA', categoria: 'Vendas em Eventos' });
-                } else if (row.tipo_acao === 'CANCELAMENTO') {
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'SAIDA', categoria: 'Cancelamento' });
-                } else if (row.tipo_acao === 'REMOCAO') {
-                    itens.push({ id_aluno: Number(row.id_aluno), id_turma_aluno: idTurmaAluno, dia: row.dia, tipo: 'SAIDA', categoria: 'Exclusão/Remoção' });
-                }
+                if (row.id_turma_aluno_de == null || Number(row.id_turma_de) !== id_turma) continue;
+                if (specialSet.has(Number(row.id_turma_para))) continue;
+                const origemDel = toDate(row.origem_deletado_em);
+                const transferCriado = toDate(row.criado_em);
+                if (!origemDel || !transferCriado) continue;
+                if (Math.abs(origemDel.getTime() - transferCriado.getTime()) > UM_DIA_MS) continue;
+                transferenciaSaida.set(String(row.id_turma_aluno_de), {
+                    id_turma_de: Number(row.id_turma_de),
+                    id_turma_para: Number(row.id_turma_para),
+                });
             }
 
-            // Classificação de canal (mesma regra do dashboard) para as entradas por nova inscrição.
-            if (criacaoIds.size > 0) {
-                const classif = await this.getClassificacaoOrigemPorTurmaAluno(id_turma, Array.from(criacaoIds));
-                for (const item of itens) {
-                    if (item.tipo === 'ENTRADA' && item.id_turma_aluno) {
-                        item.categoria = classif.get(item.id_turma_aluno)?.canal || 'Vendas em Eventos';
+            const entradaIdsParaCanal: string[] = [];
+            for (const row of matRows) {
+                const idTurmaAluno = String(row.id_turma_aluno);
+                const criado = toDate(row.criado_em);
+                const deletado = toDate(row.deletado_em);
+                if (!criado) continue;
+                const isEntrada = criado >= start && criado <= endInclusive;
+                const isSaida = deletado != null && deletado >= start && deletado <= endInclusive;
+                const idAluno = Number(row.id_aluno);
+
+                if (isEntrada) {
+                    const transf = transferenciaEntrada.get(idTurmaAluno);
+                    if (transf) {
+                        itens.push({
+                            id_aluno: idAluno,
+                            id_turma_aluno: idTurmaAluno,
+                            dia: row.dia_criado || dataInicioStr,
+                            tipo: 'ENTRADA',
+                            categoria: 'Transferência',
+                            id_turma_de: transf.id_turma_de,
+                            id_turma_para: transf.id_turma_para,
+                        });
+                    } else {
+                        entradaIdsParaCanal.push(idTurmaAluno);
+                        itens.push({
+                            id_aluno: idAluno,
+                            id_turma_aluno: idTurmaAluno,
+                            dia: row.dia_criado || dataInicioStr,
+                            tipo: 'ENTRADA',
+                            categoria: 'Vendas em Eventos',
+                        });
                     }
                 }
-            }
-
-            for (const row of transferRows) {
-                const de = Number(row.id_turma_de);
-                const para = Number(row.id_turma_para);
-                if (para === id_turma && matriculaNovaNoPeriodo(row.id_turma_aluno_para)) {
+                if (isSaida) {
+                    const logCat = logSaidaPorMatricula.get(idTurmaAluno);
+                    const transf = !logCat ? transferenciaSaida.get(idTurmaAluno) : undefined;
                     itens.push({
-                        id_aluno: Number(row.id_aluno),
-                        id_turma_aluno: row.id_turma_aluno_para != null ? String(row.id_turma_aluno_para) : null,
-                        dia: row.dia,
-                        tipo: 'ENTRADA',
-                        categoria: 'Transferência',
-                        id_turma_de: de,
-                        id_turma_para: para,
+                        id_aluno: idAluno,
+                        id_turma_aluno: idTurmaAluno,
+                        dia: row.dia_deletado || dataFinalStr,
+                        tipo: 'SAIDA',
+                        categoria: logCat ?? (transf ? 'Transferência' : 'Cancelamento'),
+                        id_turma_de: transf?.id_turma_de ?? null,
+                        id_turma_para: transf?.id_turma_para ?? null,
                     });
                 }
-                // Saída por transferência enviada (exclui cancelamentos: destino é turma especial/CANCELADA).
-                // Réplica (turma congelada/robô): matrícula de origem continua ativa → NÃO é saída.
-                const origemPermaneceuAtiva = row.id_turma_aluno_de != null && (row.origem_deletado_em == null || row.origem_deletado_em === '');
-                if (de === id_turma && !specialSet.has(para) && !origemPermaneceuAtiva) {
-                    itens.push({
-                        id_aluno: Number(row.id_aluno),
-                        id_turma_aluno: row.id_turma_aluno_de != null ? String(row.id_turma_aluno_de) : null,
-                        dia: row.dia,
-                        tipo: 'SAIDA',
-                        categoria: 'Transferência',
-                        id_turma_de: de,
-                        id_turma_para: para,
-                    });
+            }
+
+            if (entradaIdsParaCanal.length > 0) {
+                const classif = await this.getClassificacaoOrigemPorTurmaAluno(id_turma, entradaIdsParaCanal);
+                for (const item of itens) {
+                    if (item.tipo !== 'ENTRADA' || item.categoria === 'Transferência' || !item.id_turma_aluno) continue;
+                    item.categoria = classif.get(item.id_turma_aluno)?.canal || 'Vendas em Eventos';
                 }
             }
 

@@ -2317,6 +2317,7 @@ export class TurmasService {
             url_grupo_whatsapp: turma.url_grupo_whatsapp,
             url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
             url_pagamento_cartao: turma.url_pagamento_cartao,
+            taxa_inscricao_masterclass: turma.taxa_inscricao_masterclass != null ? Number(turma.taxa_inscricao_masterclass) : null,
             created_at: turma.criado_em,
             updated_at: turma.atualizado_em,
             polo: turma.id_polo_fk
@@ -2561,6 +2562,7 @@ export class TurmasService {
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
                     url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
                     url_pagamento_cartao: turma.url_pagamento_cartao,
+                    taxa_inscricao_masterclass: turma.taxa_inscricao_masterclass != null ? Number(turma.taxa_inscricao_masterclass) : null,
                     created_at: turma.criado_em,
                     updated_at: turma.atualizado_em,
                     polo: turma.id_polo_fk
@@ -2700,6 +2702,7 @@ export class TurmasService {
                 url_grupo_whatsapp: turma.url_grupo_whatsapp,
                 url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
                 url_pagamento_cartao: turma.url_pagamento_cartao,
+                taxa_inscricao_masterclass: turma.taxa_inscricao_masterclass != null ? Number(turma.taxa_inscricao_masterclass) : null,
                 created_at: turma.criado_em,
                 updated_at: turma.atualizado_em,
                 polo: turma.id_polo_fk
@@ -3675,6 +3678,7 @@ export class TurmasService {
                     url_grupo_whatsapp: turma.url_grupo_whatsapp,
                     url_grupo_whatsapp_2: turma.url_grupo_whatsapp_2,
                     url_pagamento_cartao: turma.url_pagamento_cartao,
+                    taxa_inscricao_masterclass: turma.taxa_inscricao_masterclass != null ? Number(turma.taxa_inscricao_masterclass) : null,
                     created_at: turma.criado_em,
                     updated_at: turma.atualizado_em,
                     polo: turma.id_polo_fk

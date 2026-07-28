@@ -24,7 +24,13 @@ export const CONFIG_KEYS = {
     TAXA_PIX_PERCENTUAL: 'taxa_pix_percentual',
     // Percentual usado no cálculo da comissão sobre as vendas.
     COMISSAO_PERCENTUAL: 'comissao_percentual',
+    // Valor padrão (R$) da taxa de inscrição do IPR vendido com origem em
+    // masterclass; cada palestra pode sobrescrever nas informações da turma.
+    TAXA_INSCRICAO_IPR_MASTERCLASS: 'taxa_inscricao_ipr_masterclass',
 } as const;
+
+/** Chaves cujo valor é monetário em reais (>= 0, aceita decimais). */
+export const CONFIG_KEYS_MONETARIAS: string[] = [CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS];
 
 /** Chaves cujo valor é um percentual (0 a 100, aceita decimais). */
 export const CONFIG_KEYS_PERCENTUAIS: string[] = [
@@ -52,6 +58,8 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
     [CONFIG_KEYS.TAXA_CARTAO_DEBITO_PERCENTUAL]: '0',
     [CONFIG_KEYS.TAXA_PIX_PERCENTUAL]: '0',
     [CONFIG_KEYS.COMISSAO_PERCENTUAL]: '0',
+    // Taxa de inscrição padrão (R$) do IPR vendido nas masterclasses.
+    [CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS]: '250',
 };
 
 @Injectable()
@@ -122,6 +130,17 @@ export class ConfiguracoesService {
         };
     }
 
+    /**
+     * Valor padrão (R$) da taxa de inscrição do IPR vendido com origem em
+     * masterclass. Usado quando a turma de palestra não define valor próprio.
+     */
+    async getTaxaInscricaoIprMasterclass(): Promise<number> {
+        const config = await this.findAll();
+        const numero = Number(String(config[CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS] ?? '').replace(',', '.'));
+        const fallback = Number(CONFIG_DEFAULTS[CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS]);
+        return Number.isFinite(numero) && numero >= 0 ? numero : fallback;
+    }
+
     async findAll(): Promise<ConfiguracoesResponseDto> {
         const registros = await this.uow.configuracoesSistemaRP.find();
 
@@ -153,6 +172,17 @@ export class ConfiguracoesService {
                 const numero = texto === '' ? 0 : Number(texto);
                 if (!Number.isFinite(numero) || numero < 0 || numero > 100) {
                     throw new BadRequestException(`Valor inválido para "${chave}": informe um percentual entre 0 e 100.`);
+                }
+                valor = String(numero);
+            }
+
+            if (CONFIG_KEYS_MONETARIAS.includes(chave)) {
+                const texto = String(valor ?? '')
+                    .replace(',', '.')
+                    .trim();
+                const numero = texto === '' ? 0 : Number(texto);
+                if (!Number.isFinite(numero) || numero < 0) {
+                    throw new BadRequestException(`Valor inválido para "${chave}": informe um valor em reais maior ou igual a zero.`);
                 }
                 valor = String(numero);
             }

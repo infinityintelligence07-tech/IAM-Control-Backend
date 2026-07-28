@@ -5933,6 +5933,13 @@ export class DocumentosService {
         tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
         treinamento_origem?: string;
         turma_origem?: string;
+        /**
+         * Filtro EXATO pelo id da turma de ORIGEM da venda (snapshot
+         * dados_contrato, fallback matrícula vinculada). Usado pelas métricas de
+         * palestra/masterclass, cujo rótulo de origem ("MC - Cidade" + data)
+         * nunca casa com o formato "Treinamento - Edição" do filtro textual.
+         */
+        id_turma_origem?: string | number;
         turma_destino?: string;
         staff_lider_id?: string;
         // Origem do aluno (canal do dashboard/planilha). Aceita múltiplos valores
@@ -6012,6 +6019,7 @@ export class DocumentosService {
                 tipo_filtro_busca: filtros?.tipo_filtro_busca || null,
                 treinamento_origem: filtros?.treinamento_origem || null,
                 turma_origem: filtros?.turma_origem || null,
+                id_turma_origem: filtros?.id_turma_origem || null,
                 turma_destino: filtros?.turma_destino || null,
                 staff_lider_id: staffLiderId || null,
                 origem: filtros?.origem || null,
@@ -6042,6 +6050,8 @@ export class DocumentosService {
                 .split('|')
                 .map((valor) => this.normalizarTexto(valor))
                 .filter(Boolean);
+            const idTurmaOrigemFiltro = Number(filtros?.id_turma_origem);
+            const idTurmaOrigemFiltroAtivo = Number.isFinite(idTurmaOrigemFiltro) && idTurmaOrigemFiltro > 0;
             // Aplica filtro de turma no modo legado ("turma"/"treinamento") OU
             // quando origem/destino foram enviados (período + turma juntos).
             const filtroTurmaAtivo =
@@ -6324,6 +6334,17 @@ export class DocumentosService {
                 baseQb.andWhere(`${turmaOrigemSql} IN (:...turmasOrigemFiltro)`, {
                     turmasOrigemFiltro,
                 });
+            }
+
+            // Filtro EXATO por id da turma de origem: mesma resolução dos rótulos
+            // (snapshot dados_contrato, fallback matrícula vinculada ao contrato).
+            // Usado pelas métricas de palestra/masterclass (vendas com origem
+            // naquela cidade e naquele dia).
+            if (idTurmaOrigemFiltroAtivo) {
+                baseQb.andWhere(
+                    `COALESCE(${idTurmaOrigemDadosContratoSql}, ta.id_turma) = :idTurmaOrigemFiltro`,
+                    { idTurmaOrigemFiltro },
+                );
             }
 
             if (filtroTurmaAtivo && turmasDestinoFiltro.length > 0) {

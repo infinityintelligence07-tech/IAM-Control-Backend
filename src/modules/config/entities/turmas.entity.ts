@@ -190,6 +190,13 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'varchar', name: 'url_pagamento_cartao', nullable: true })
     url_pagamento_cartao: string;
 
+    // Valor (R$) da taxa de inscrição do IPR vendido com origem NESTA masterclass
+    // (aquela cidade, aquele dia). NULL = usar o padrão configurado em
+    // /configuracoes (chave taxa_inscricao_ipr_masterclass). Só faz sentido em
+    // turmas de palestra/masterclass.
+    @Column({ type: 'numeric', precision: 12, scale: 2, name: 'taxa_inscricao_masterclass', nullable: true })
+    taxa_inscricao_masterclass: string | number | null;
+
     @ManyToOne(() => Polos, (polos) => polos.turmas)
     @JoinColumn([{ name: 'id_polo', referencedColumnName: 'id' }])
     id_polo_fk: Polos;

@@ -219,6 +219,20 @@ export class CreateTurmaDto {
     })
     dias_montagem?: number | null;
 
+    /**
+     * Valor (R$) da taxa de inscrição do IPR vendido com origem nesta
+     * masterclass. NULL = usar o padrão de /configuracoes.
+     */
+    @IsOptional()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(0)
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value);
+        return Number.isFinite(n) ? n : null;
+    })
+    taxa_inscricao_masterclass?: number | null;
+
     @IsOptional()
     @IsBoolean()
     turma_aberta?: boolean = false;
@@ -417,6 +431,21 @@ export class UpdateTurmaDto {
         return isNaN(n) ? undefined : n;
     })
     dias_montagem?: number | null;
+
+    /**
+     * Valor (R$) da taxa de inscrição do IPR vendido com origem nesta
+     * masterclass. NULL = volta a usar o padrão de /configuracoes.
+     */
+    @IsOptional()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(0)
+    @Transform(({ value }) => {
+        if (value === undefined) return undefined;
+        if (value === '' || value === null) return null;
+        const n = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value);
+        return Number.isFinite(n) ? n : null;
+    })
+    taxa_inscricao_masterclass?: number | null;
 
     @IsOptional()
     @IsBoolean()
@@ -785,6 +814,8 @@ export class TurmaResponseDto {
     url_grupo_whatsapp?: string;
     url_grupo_whatsapp_2?: string;
     url_pagamento_cartao?: string;
+    /** Taxa de inscrição (R$) do IPR vendido com origem nesta masterclass (null = padrão de /configuracoes). */
+    taxa_inscricao_masterclass?: number | null;
     created_at: Date;
     updated_at: Date;
     polo?: {

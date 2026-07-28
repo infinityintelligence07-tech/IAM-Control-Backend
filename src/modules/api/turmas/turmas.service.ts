@@ -4134,8 +4134,8 @@ export class TurmasService {
     private async resolverFormasPagamentoPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, string[]>> {
         const dadosContratoPorTurmaAluno = await this.resolverDadosContratoPorTurmaAluno(id_turma, turmaAlunoIds);
         const resultado = new Map<string, string[]>();
-        for (const [idTa, dadosContrato] of dadosContratoPorTurmaAluno.entries()) {
-            resultado.set(idTa, this.extrairFormasDeContrato(dadosContrato));
+        for (const [idTa, contrato] of dadosContratoPorTurmaAluno.entries()) {
+            resultado.set(idTa, this.extrairFormasDeContrato(contrato.dados_contrato));
         }
         return resultado;
     }
@@ -4187,14 +4187,17 @@ export class TurmasService {
      * aluno para a turma, percorrendo a cadeia de transferências para trás. Base compartilhada
      * para derivar formas de pagamento e a observação interna da venda.
      */
-    private async resolverDadosContratoPorTurmaAluno(id_turma: number, turmaAlunoIds: string[]): Promise<Map<string, any>> {
-        const resultado = new Map<string, any>();
+    private async resolverDadosContratoPorTurmaAluno(
+        id_turma: number,
+        turmaAlunoIds: string[],
+    ): Promise<Map<string, { id_contrato: string | null; dados_contrato: any }>> {
+        const resultado = new Map<string, { id_contrato: string | null; dados_contrato: any }>();
         if (!turmaAlunoIds || turmaAlunoIds.length === 0) {
             return resultado;
         }
 
         try {
-            const linhas: Array<{ id_ta: string; dados_contrato: any }> = await this.uow.turmasAlunosRP.query(
+            const linhas: Array<{ id_ta: string; id_contrato: string | null; dados_contrato: any }> = await this.uow.turmasAlunosRP.query(
                 `
                 WITH RECURSIVE alvo AS (
                     SELECT ta.id AS id_ta, ta.id_aluno
@@ -4263,7 +4266,7 @@ export class TurmasService {
                       ON ctr.id_turma_aluno_treinamento = tat.id
                      AND ctr.deletado_em IS NULL
                 )
-                SELECT DISTINCT ON (id_ta) id_ta, dados_contrato
+                SELECT DISTINCT ON (id_ta) id_ta, id_contrato, dados_contrato
                 FROM contratos
                 ORDER BY id_ta, profundidade ASC, criado_em DESC, id_contrato DESC
                 `,
@@ -4271,7 +4274,10 @@ export class TurmasService {
             );
 
             for (const linha of linhas) {
-                resultado.set(String(linha.id_ta), linha.dados_contrato);
+                resultado.set(String(linha.id_ta), {
+                    id_contrato: linha.id_contrato !== null && linha.id_contrato !== undefined ? String(linha.id_contrato) : null,
+                    dados_contrato: linha.dados_contrato,
+                });
             }
         } catch (error) {
             this.logger.error('turma.aluno.contrato | Falha ao resolver dados do contrato', error instanceof Error ? error.stack : undefined);
@@ -4527,7 +4533,13 @@ export class TurmasService {
             const formasPagamentoPorTurmaAlunoId = new Map<string, string[]>();
             const observacaoVendaPorTurmaAlunoId = new Map<string, string>();
             const boletoContratoPorTurmaAlunoId = new Map<string, { parcelas: number | null; data_primeiro_boleto: string | null; dia_vencimento: number | null }>();
-            for (const [idTa, dadosContrato] of dadosContratoPorTurmaAlunoId.entries()) {
+            // Contrato que trouxe o aluno: habilita o botão "Detalhes da venda" na lista.
+            const idContratoPorTurmaAlunoId = new Map<string, string>();
+            for (const [idTa, contratoAluno] of dadosContratoPorTurmaAlunoId.entries()) {
+                const dadosContrato = contratoAluno.dados_contrato;
+                if (contratoAluno.id_contrato) {
+                    idContratoPorTurmaAlunoId.set(idTa, contratoAluno.id_contrato);
+                }
                 const formasContrato = this.extrairFormasDeContrato(dadosContrato);
                 formasPagamentoPorTurmaAlunoId.set(idTa, formasContrato);
                 if (formasContrato.includes(EFormasPagamento.BOLETO)) {
@@ -4588,6 +4600,7 @@ export class TurmasService {
                     boleto_dia_vencimento_manual: formaManual === EFormasPagamento.BOLETO ? (turmaAluno.boleto_dia_vencimento_manual ?? null) : null,
                     boleto_quantidade_manual: formaManual === EFormasPagamento.BOLETO ? (turmaAluno.boleto_quantidade_manual ?? null) : null,
                     boleto_contrato: boletoContratoPorTurmaAlunoId.get(turmaAluno.id) ?? null,
+                    id_contrato_venda: idContratoPorTurmaAlunoId.get(turmaAluno.id) ?? null,
                     id_acessor: turmaAluno.id_acessor ?? acessorResolvido?.id ?? null,
                     acessor,
                     created_at: turmaAluno.criado_em,

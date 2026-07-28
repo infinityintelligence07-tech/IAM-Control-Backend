@@ -15,7 +15,7 @@ import {
 } from '@/modules/config/entities/enum';
 import * as crypto from 'crypto';
 import axios from 'axios';
-import { Not, IsNull, In, Between, Brackets } from 'typeorm';
+import { Not, IsNull, In, Brackets } from 'typeorm';
 import {
     CreateDocumentoDto,
     UpdateDocumentoDto,
@@ -3250,6 +3250,10 @@ export class DocumentosService {
 
         await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
 
+        // Mesma razão da sincronização com a ZapSign: sem invalidar, o Histórico
+        // de Vendas continuaria servindo o status antigo do cache.
+        this.invalidarCachesHistoricoVendas();
+
         this.logger.debug(
             `contract.signature.save | Assinatura salva | contratoId=${contrato.id} signer=${signer} hasDocument=${Boolean(signatureData.documentPhoto)}`,
         );
@@ -3413,8 +3417,13 @@ export class DocumentosService {
                 )}`,
             );
 
+            // Itens do COMBO da venda: nomes/edições atualizados pela relação
+            // (turmas dos itens) com fallback para o snapshot da venda.
+            const comboItensDetalhe = await this.resolverComboItensContratoComTurmas(dadosContrato);
+
             const contratoMapeado = {
                 id: contrato.id,
+                status_conciliacao: contrato.status_conciliacao,
                 status_ass_aluno: contrato.status_ass_aluno,
                 status_ass_test_um: contrato.status_ass_test_um,
                 status_ass_test_dois: contrato.status_ass_test_dois,
@@ -3462,6 +3471,11 @@ export class DocumentosService {
                         url_logo_treinamento: treinamento?.url_logo_treinamento,
                         tipo_mentoria: treinamento?.tipo_mentoria ?? null,
                     },
+                    // Venda em COMBO: todos os treinamentos/edições comprados.
+                    combo_itens: comboItensDetalhe,
+                    // Inscrições adicionais e PDF do contrato do snapshot da venda.
+                    compradores_adicionais: dadosContrato.compradores_adicionais || [],
+                    contrato: dadosContrato.contrato || null,
                     template: {
                         id: documento?.id,
                         nome: documento?.documento,
@@ -4233,6 +4247,48 @@ export class DocumentosService {
                 edicao_turma: turma?.edicao_turma || null,
                 quantidade: Math.max(1, Number(item.quantidade) || 1),
                 principal: Boolean(item.principal),
+            };
+        });
+    }
+
+    /**
+     * Itens do combo de UM contrato (detalhe da venda): carrega as turmas dos
+     * itens para resolver nome/edição atualizados e reaproveita a mesma regra da
+     * listagem do Histórico.
+     */
+    private async resolverComboItensContratoComTurmas(dadosContrato: any): Promise<
+        Array<{
+            id_treinamento: number | null;
+            treinamento: string | null;
+            id_turma: number | null;
+            edicao_turma: string | null;
+            quantidade: number;
+            principal: boolean;
+            data_inicio: string | null;
+            data_final: string | null;
+        }>
+    > {
+        const itens = Array.isArray(dadosContrato?.combo_itens) ? dadosContrato.combo_itens : [];
+        if (itens.length === 0) return [];
+
+        const idsTurmas: number[] = Array.from(new Set(itens.map((item: any) => Number(item?.id_turma)).filter((id: number) => Number.isInteger(id) && id > 0)));
+
+        const turmaPorId = new Map<number, Turmas | null>();
+        if (idsTurmas.length > 0) {
+            const turmas = await this.uow.turmasRP.find({
+                where: { id: In(idsTurmas) },
+                relations: ['id_treinamento_fk'],
+                withDeleted: true,
+            });
+            turmas.forEach((turma) => turmaPorId.set(turma.id, turma));
+        }
+
+        return this.resolverComboItensContrato(dadosContrato, turmaPorId).map((item) => {
+            const turma = item.id_turma ? turmaPorId.get(item.id_turma) : null;
+            return {
+                ...item,
+                data_inicio: turma?.data_inicio ? String(turma.data_inicio).slice(0, 10) : null,
+                data_final: turma?.data_final ? String(turma.data_final).slice(0, 10) : null,
             };
         });
     }
@@ -7715,6 +7771,93 @@ export class DocumentosService {
         }
     }
 
+    /** Status da ZapSign (e legado do sistema) que significam assinatura concluída. */
+    private static readonly STATUS_ZAPSIGN_ASSINADO = ['signed', 'completed', 'complete', 'assinado'];
+
+    private zapSignSignatarioAssinou(signer?: { status?: string } | null): boolean {
+        const status = String(signer?.status || '')
+            .toLowerCase()
+            .trim();
+        return DocumentosService.STATUS_ZAPSIGN_ASSINADO.includes(status);
+    }
+
+    /**
+     * Casa cada signatário devolvido pela ZapSign com o papel que ele ocupa no
+     * contrato (aluno, testemunha 1 e testemunha 2) comparando e-mail, CPF e
+     * nome do snapshot `dados_contrato`. Papéis não resolvidos caem para a
+     * ordem original (0 = aluno, 1 e 2 = testemunhas), preservando o
+     * comportamento de contratos legados sem snapshot.
+     */
+    private resolverPapeisSignatariosZapSign<T extends { name?: string; email?: string; signed_at?: string; status?: string }>(
+        contrato: TurmasAlunosTreinamentosContratos,
+        signers: T[],
+    ): { aluno?: T; testemunhaUm?: T; testemunhaDois?: T } {
+        const lista = Array.isArray(signers) ? signers : [];
+        const dados = contrato.dados_contrato as
+            | {
+                  aluno?: { nome?: string; email?: string; cpf?: string };
+                  testemunhas?: {
+                      testemunha_um?: { nome?: string; email?: string; cpf?: string };
+                      testemunha_dois?: { nome?: string; email?: string; cpf?: string };
+                  };
+              }
+            | null
+            | undefined;
+
+        const pessoasPorPapel: Array<['aluno' | 'testemunhaUm' | 'testemunhaDois', { nome?: string; email?: string; cpf?: string } | undefined]> = [
+            ['aluno', dados?.aluno],
+            ['testemunhaUm', dados?.testemunhas?.testemunha_um],
+            ['testemunhaDois', dados?.testemunhas?.testemunha_dois],
+        ];
+
+        const resultado: { aluno?: T; testemunhaUm?: T; testemunhaDois?: T } = {};
+        const indicesUsados = new Set<number>();
+
+        for (const [papel, pessoa] of pessoasPorPapel) {
+            if (!pessoa) continue;
+
+            const indice = lista.findIndex((signer, i) => !indicesUsados.has(i) && this.mesmoSignatarioContrato(signer, pessoa));
+            if (indice >= 0) {
+                indicesUsados.add(indice);
+                resultado[papel] = lista[indice];
+            }
+        }
+
+        const ordemFallback: Array<'aluno' | 'testemunhaUm' | 'testemunhaDois'> = ['aluno', 'testemunhaUm', 'testemunhaDois'];
+        ordemFallback.forEach((papel, indice) => {
+            if (resultado[papel] || indicesUsados.has(indice) || !lista[indice]) return;
+            indicesUsados.add(indice);
+            resultado[papel] = lista[indice];
+        });
+
+        return resultado;
+    }
+
+    private mesmoSignatarioContrato(signer: { name?: string; email?: string } | undefined, pessoa: { nome?: string; email?: string; cpf?: string }): boolean {
+        if (!signer) return false;
+
+        const normalizarEmail = (valor?: string): string =>
+            String(valor || '')
+                .toLowerCase()
+                .trim();
+        const normalizarDocumento = (valor?: string): string => String(valor || '').replace(/\D/g, '');
+
+        const signerAny = signer as Record<string, string | undefined>;
+        const emailSigner = normalizarEmail(signer.email);
+        const emailPessoa = normalizarEmail(pessoa.email);
+        if (emailSigner && emailPessoa && emailSigner === emailPessoa) return true;
+
+        const cpfSigner = normalizarDocumento(
+            signerAny.cpf || signerAny.document || signerAny.document_number || signerAny.tax_id || signerAny.cpf_cnpj || signerAny.identifier,
+        );
+        const cpfPessoa = normalizarDocumento(pessoa.cpf);
+        if (cpfSigner && cpfPessoa && cpfSigner === cpfPessoa) return true;
+
+        const nomeSigner = this.normalizarTexto(signer.name);
+        const nomePessoa = this.normalizarTexto(pessoa.nome);
+        return Boolean(nomeSigner && nomePessoa && nomeSigner === nomePessoa);
+    }
+
     /**
      * Sincroniza o status de assinatura do contrato com o ZapSign
      * Atualiza os status individuais e determina o status geral do documento
@@ -7753,6 +7896,15 @@ export class DocumentosService {
 
             const signersDataExistentes = Array.isArray(contrato.zapsign_signers_data) ? contrato.zapsign_signers_data : [];
 
+            // Papel de cada signatário resolvido por identidade (e-mail/CPF/nome),
+            // usando a ordem só como fallback: a ZapSign pode devolver os
+            // signatários em ordem diferente da criação e, com índice fixo, o
+            // status de uma pessoa era gravado na coluna de outra.
+            const papeisSignatarios = this.resolverPapeisSignatariosZapSign(contrato, zapSignDocument.signers);
+            const alunoSigner = papeisSignatarios.aluno;
+            const testemunhaUmSigner = papeisSignatarios.testemunhaUm;
+            const testemunhaDoisSigner = papeisSignatarios.testemunhaDois;
+
             // Atualizar os dados dos signatários preservando CPF/telefone quando ZapSign não retornar esses dados
             const signersData = zapSignDocument.signers.map((signer: any, index: number) => {
                 const signerEmail = (signer.email || '').toLowerCase().trim();
@@ -7768,8 +7920,19 @@ export class DocumentosService {
                     signer?.cpf || signer?.document || signer?.document_number || signer?.tax_id || signer?.cpf_cnpj || signer?.cpfCnpj || signer?.identifier,
                 );
                 const cpfExistente = normalizeCpf(signerExistente?.cpf);
-                const cpfPorOrdem = index === 0 ? alunoCpf : index === 1 ? testemunhaUmCpf : index === 2 ? testemunhaDoisCpf : '';
-                const cpfFinal = cpfDoZapSign || cpfExistente || cpfPorOrdem;
+                const cpfPorPapel =
+                    signer === alunoSigner ? alunoCpf : signer === testemunhaUmSigner ? testemunhaUmCpf : signer === testemunhaDoisSigner ? testemunhaDoisCpf : '';
+                const cpfFinal = cpfDoZapSign || cpfExistente || cpfPorPapel;
+
+                // Papel do signatário (assinante/testemunha) pelo casamento com o
+                // contrato; sem casamento, preserva o tipo gravado na criação e,
+                // por último, assume o 1º como assinante e os demais testemunhas.
+                const tipoSignatario: 'sign' | 'witness' =
+                    signer === alunoSigner
+                        ? 'sign'
+                        : signer === testemunhaUmSigner || signer === testemunhaDoisSigner
+                          ? 'witness'
+                          : signerExistente?.tipo || (index === 0 ? 'sign' : 'witness');
 
                 return {
                     name: signer.name || signerExistente?.name || '',
@@ -7778,46 +7941,36 @@ export class DocumentosService {
                     cpf: cpfFinal,
                     status: signer.status,
                     signing_url: signer.sign_url || signerExistente?.signing_url || '',
-                    // Preserva o papel do signatário (assinante/testemunha) gravado
-                    // na criação; sem tipo (registros antigos), o frontend assume o
-                    // 1º como assinante e os demais como testemunhas.
-                    tipo: signerExistente?.tipo || (index === 0 ? 'sign' : 'witness'),
+                    tipo: tipoSignatario,
                 };
             });
 
-            // Atualizar o status do documento
-            const documentStatus = {
-                status: zapSignDocument.status,
-                created_at: zapSignDocument.created_at,
-                document_id: zapSignDocument.token,
-                signing_url: zapSignDocument.signers[0]?.sign_url || '',
-            };
-
             // Contar assinaturas
             const totalSigners = zapSignDocument.signers.length;
-            const assinaturasCompletas = zapSignDocument.signers.filter((signer) => signer.status === 'signed' || signer.status === 'completed').length;
+            const assinaturasCompletas = zapSignDocument.signers.filter((signer) => this.zapSignSignatarioAssinou(signer)).length;
+            const todosAssinaram = totalSigners > 0 && assinaturasCompletas === totalSigners;
 
-            // Determinar qual signatário é qual baseado na ordem e nos dados do contrato
-            // Assumindo que o primeiro signatário é sempre o aluno
-            const alunoSigner = zapSignDocument.signers[0];
-            const testemunhaUmSigner = zapSignDocument.signers[1];
-            const testemunhaDoisSigner = zapSignDocument.signers[2];
+            // Status do documento derivado da contagem de assinaturas. O Histórico
+            // de Vendas lê este campo e a aba Documentos lê as colunas status_ass_*:
+            // derivar ambos da mesma contagem é o que mantém as duas telas iguais
+            // (a ZapSign às vezes devolve o documento como pendente/assinado sem
+            // refletir a soma dos signatários).
+            const statusDocumentoNormalizado =
+                totalSigners === 0 ? String(zapSignDocument.status || 'pending') : todosAssinaram ? 'signed' : assinaturasCompletas > 0 ? 'partial' : 'pending';
 
-            // Atualizar status do aluno
+            const documentStatus = {
+                status: statusDocumentoNormalizado,
+                created_at: zapSignDocument.created_at,
+                document_id: zapSignDocument.token,
+                signing_url: alunoSigner?.sign_url || zapSignDocument.signers[0]?.sign_url || '',
+            };
+
+            // As colunas status_ass_* refletem SOMENTE a pessoa correspondente; o
+            // "parcialmente assinado" é do documento (zapsign_document_status) e
+            // não deve sobrescrever o status individual do aluno.
             if (alunoSigner) {
-                if (alunoSigner.status === 'signed' || alunoSigner.status === 'completed') {
-                    // Se for 1 assinatura de 1: ASSINADO
-                    // Se for 1 assinatura de 3 ou mais: PARCIALMENTE_ASSINADO
-                    if (totalSigners === 1) {
-                        contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
-                    } else if (totalSigners > 1 && assinaturasCompletas < totalSigners) {
-                        contrato.status_ass_aluno = EStatusAssinaturasContratos.PARCIALMENTE_ASSINADO;
-                    } else if (assinaturasCompletas === totalSigners) {
-                        contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
-                    } else {
-                        contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINATURA_PENDENTE;
-                    }
-
+                if (this.zapSignSignatarioAssinou(alunoSigner)) {
+                    contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
                     if (alunoSigner.signed_at) {
                         contrato.data_ass_aluno = new Date(alunoSigner.signed_at);
                     }
@@ -7826,9 +7979,13 @@ export class DocumentosService {
                 }
             }
 
-            // Atualizar status da testemunha 1
-            if (testemunhaUmSigner && contrato.testemunha_um) {
-                if (testemunhaUmSigner.status === 'signed' || testemunhaUmSigner.status === 'completed') {
+            // As testemunhas são sincronizadas mesmo sem as FKs testemunha_um/dois
+            // preenchidas (contratos do fluxo antigo, ou em que o id enviado não
+            // era de usuário): a FK indica quem é a testemunha no sistema, não se
+            // ela assinou — exigi-la deixava a coluna pendente para sempre e a aba
+            // Documentos divergindo do Histórico.
+            if (testemunhaUmSigner) {
+                if (this.zapSignSignatarioAssinou(testemunhaUmSigner)) {
                     contrato.status_ass_test_um = EStatusAssinaturasContratos.ASSINADO;
                     if (testemunhaUmSigner.signed_at) {
                         contrato.data_ass_test_um = new Date(testemunhaUmSigner.signed_at);
@@ -7838,9 +7995,8 @@ export class DocumentosService {
                 }
             }
 
-            // Atualizar status da testemunha 2
-            if (testemunhaDoisSigner && contrato.testemunha_dois) {
-                if (testemunhaDoisSigner.status === 'signed' || testemunhaDoisSigner.status === 'completed') {
+            if (testemunhaDoisSigner) {
+                if (this.zapSignSignatarioAssinou(testemunhaDoisSigner)) {
                     contrato.status_ass_test_dois = EStatusAssinaturasContratos.ASSINADO;
                     if (testemunhaDoisSigner.signed_at) {
                         contrato.data_ass_test_dois = new Date(testemunhaDoisSigner.signed_at);
@@ -7857,6 +8013,11 @@ export class DocumentosService {
             // Salvar as alterações
             await this.uow.turmasAlunosTreinamentosContratosRP.save(contrato);
 
+            // A listagem/resumo do Histórico de Vendas é cacheada por versão: sem
+            // invalidar, o status recém-sincronizado só apareceria lá quando o TTL
+            // expirasse, enquanto a aba Documentos já mostrava o novo valor.
+            this.invalidarCachesHistoricoVendas();
+
             // Determinar mensagem de status
             let statusMessage = '';
             if (assinaturasCompletas === totalSigners && totalSigners > 0) {
@@ -7869,7 +8030,7 @@ export class DocumentosService {
 
             return {
                 message: statusMessage,
-                status: zapSignDocument.status,
+                status: statusDocumentoNormalizado,
                 assinaturasCompletas,
                 totalAssinaturas: totalSigners,
             };
@@ -8016,14 +8177,27 @@ export class DocumentosService {
         const dataLimite = new Date();
         dataLimite.setDate(dataLimite.getDate() - janelaDias);
 
-        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
-            where: {
-                zapsign_document_id: Not(IsNull()),
-                deletado_em: null,
-                criado_em: Between(dataLimite, new Date()),
-                status_ass_aluno: Not(EStatusAssinaturasContratos.ASSINADO),
-            },
-        });
+        // Pendente = documento não concluído OU alguma assinatura individual em
+        // aberto. Filtrar só por status_ass_aluno parava a sincronização assim que
+        // o aluno assinava e congelava as testemunhas como pendentes para sempre.
+        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP
+            .createQueryBuilder('contrato')
+            .where('contrato.zapsign_document_id IS NOT NULL')
+            .andWhere('contrato.deletado_em IS NULL')
+            .andWhere('contrato.criado_em BETWEEN :inicio AND :fim', { inicio: dataLimite, fim: new Date() })
+            .andWhere(
+                `(
+                    LOWER(COALESCE(contrato.zapsign_document_status->>'status', '')) NOT IN (:...statusAssinado)
+                    OR contrato.status_ass_aluno::text <> :assinado
+                    OR (contrato.status_ass_test_um IS NOT NULL AND contrato.status_ass_test_um::text <> :assinado)
+                    OR (contrato.status_ass_test_dois IS NOT NULL AND contrato.status_ass_test_dois::text <> :assinado)
+                )`,
+                {
+                    statusAssinado: DocumentosService.STATUS_ZAPSIGN_ASSINADO,
+                    assinado: EStatusAssinaturasContratos.ASSINADO,
+                },
+            )
+            .getMany();
 
         let sincronizados = 0;
         let erros = 0;

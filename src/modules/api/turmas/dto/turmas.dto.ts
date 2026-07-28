@@ -934,6 +934,12 @@ export class AlunoTurmaResponseDto {
         data_primeiro_boleto?: string | null;
         dia_vencimento?: number | null;
     } | null;
+    /**
+     * Contrato da venda que trouxe o aluno para a turma (mesma resolução das formas
+     * de pagamento, seguindo a cadeia de transferências). Null quando o aluno entrou
+     * sem venda (importação, cortesia, bônus). O frontend usa para abrir os detalhes da venda.
+     */
+    id_contrato_venda?: string | null;
     /** Acessor responsável (apenas para alunos que vieram por boleto). */
     id_acessor?: number | null;
     acessor?: {

@@ -28,6 +28,7 @@ import {
     CampoDocumentoDto,
     DocumentosFilterDto,
     CriarContratoZapSignDto,
+    ComboItemVendaDto,
     RespostaContratoZapSignDto,
     AtualizarStatusContratoDto,
     CriarTermoZapSignDto,
@@ -637,9 +638,7 @@ export class DocumentosService {
 
             // Recriação: herda vendedor + staff líder do contrato original
             // (ex.: exclusão por erro de preenchimento / venda conciliada refeita).
-            const atribuicaoRecriacao = await this.resolverAtribuicaoRecriacaoContrato(
-                criarContratoDto.id_contrato_origem,
-            );
+            const atribuicaoRecriacao = await this.resolverAtribuicaoRecriacaoContrato(criarContratoDto.id_contrato_origem);
             const criadoPorAtribuicao = atribuicaoRecriacao?.vendedorId ?? userId;
 
             // Buscar dados do aluno
@@ -1028,8 +1027,7 @@ export class DocumentosService {
 
             // Salvar informações do contrato no banco de dados
             const statusConciliacao =
-                criarContratoDto.status_conciliacao &&
-                ['NOVO', 'CONCILIADO', 'PENDENTE'].includes(String(criarContratoDto.status_conciliacao))
+                criarContratoDto.status_conciliacao && ['NOVO', 'CONCILIADO', 'PENDENTE'].includes(String(criarContratoDto.status_conciliacao))
                     ? String(criarContratoDto.status_conciliacao)
                     : 'NOVO';
 
@@ -1048,12 +1046,17 @@ export class DocumentosService {
             const testemunhaUmUsuarioId = isContratoManual ? undefined : await resolverUsuarioTestemunhaId(criarContratoDto.testemunha_um_id);
             const testemunhaDoisUsuarioId = isContratoManual ? undefined : await resolverUsuarioTestemunhaId(criarContratoDto.testemunha_dois_id);
 
+            // Venda em COMBO: snapshot estruturado de todos os produtos vendidos
+            // (principal + secundários), com nome do treinamento e edição da turma
+            // resolvidos no ato da venda. O Histórico de Vendas usa esse snapshot
+            // para exibir todos os itens do combo e para o filtro de turma de
+            // destino casar qualquer turma que participe do combo.
+            const comboItensSnapshot = await this.montarSnapshotComboItens(criarContratoDto.combo_itens);
+
             const contrato = this.uow.turmasAlunosTreinamentosContratosRP.create({
                 id_turma_aluno_treinamento: turmaAlunoTreinamento.id,
                 id_documento: parseInt(criarContratoDto.template_id),
-                status_ass_aluno: isContratoManual
-                    ? EStatusAssinaturasContratos.ASSINADO
-                    : EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
+                status_ass_aluno: isContratoManual ? EStatusAssinaturasContratos.ASSINADO : EStatusAssinaturasContratos.ASSINATURA_PENDENTE,
                 data_ass_aluno: isContratoManual ? new Date() : undefined,
                 testemunha_um: testemunhaUmUsuarioId,
                 testemunha_dois: testemunhaDoisUsuarioId,
@@ -1149,6 +1152,9 @@ export class DocumentosService {
                     fluxo_evento_origem_id_turma: idTurmaOrigemContrato ?? null,
                     turma_origem: idTurmaOrigemContrato ? { id: idTurmaOrigemContrato } : null,
                     fluxo_evento_destino_id_turma: criarContratoDto.id_turma_destino ? Number(criarContratoDto.id_turma_destino) : null,
+                    // Itens do combo (quando a venda é em combo): produto principal
+                    // primeiro (principal: true) e os secundários na sequência.
+                    ...(comboItensSnapshot.length > 0 ? { combo_itens: comboItensSnapshot } : {}),
                     compradores_adicionais: criarContratoDto.compradores_adicionais || [],
                     // Comprovante compartilhado: outras compras pagas pelo mesmo
                     // comprovante desta venda (identifica quem paga para quem).
@@ -1213,11 +1219,10 @@ export class DocumentosService {
                 criado_por: criadoPorAtribuicao,
                 atualizado_por: userId,
             });
-            const colunasHistorico = await this.montarColunasHistoricoVendaCompletas(
-                contrato.dados_contrato,
-                criadoPorAtribuicao,
-                [idTurmaOrigemContrato, criarContratoDto.id_turma_destino],
-            );
+            const colunasHistorico = await this.montarColunasHistoricoVendaCompletas(contrato.dados_contrato, criadoPorAtribuicao, [
+                idTurmaOrigemContrato,
+                criarContratoDto.id_turma_destino,
+            ]);
             // Preferência: staff líder já materializado no contrato original
             // (evita “perder” o líder se o time IPR mudou entre exclusão e recriação).
             if (atribuicaoRecriacao?.staffLiderId) {
@@ -1249,7 +1254,8 @@ export class DocumentosService {
                             id_aluno: parseInt(criarContratoDto.id_aluno),
                             origem_aluno: 'COMPROU_INGRESSO',
                             pendencia_pagamento: criarContratoDto.pendencia_pagamento ?? false,
-                            quantidade_inscricoes: criarContratoDto.quantidade_inscricoes && criarContratoDto.quantidade_inscricoes > 0 ? criarContratoDto.quantidade_inscricoes : 1,
+                            quantidade_inscricoes:
+                                criarContratoDto.quantidade_inscricoes && criarContratoDto.quantidade_inscricoes > 0 ? criarContratoDto.quantidade_inscricoes : 1,
                             comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda) ?? undefined,
                         },
                         userId,
@@ -3200,11 +3206,9 @@ export class DocumentosService {
                 // Manuscrito anexado: aluno como assinante e contrato já assinado
                 // (espelha a regra de criação com contrato_manual).
                 const alunoNome =
-                    (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)
-                        ?.aluno?.nome || 'Aluno';
+                    (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)?.aluno?.nome || 'Aluno';
                 const alunoDados =
-                    (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)
-                        ?.aluno || {};
+                    (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)?.aluno || {};
                 contrato.zapsign_signers_data = [
                     {
                         name: alunoNome,
@@ -3789,9 +3793,7 @@ export class DocumentosService {
      * Recriação de contrato: resolve vendedor e staff líder do contrato original
      * (ativo ou soft-deleted) para o novo contrato herdar a atribuição no histórico.
      */
-    private async resolverAtribuicaoRecriacaoContrato(
-        idContratoOrigemRaw?: string | null,
-    ): Promise<{
+    private async resolverAtribuicaoRecriacaoContrato(idContratoOrigemRaw?: string | null): Promise<{
         idContratoOrigem: string;
         vendedorId: number | null;
         staffLiderId: number | null;
@@ -3812,9 +3814,7 @@ export class DocumentosService {
         });
 
         if (!contratoOrigem) {
-            throw new NotFoundException(
-                `Contrato original (${idContratoOrigem}) não encontrado para recriação.`,
-            );
+            throw new NotFoundException(`Contrato original (${idContratoOrigem}) não encontrado para recriação.`);
         }
 
         const dadosOrigem = (contratoOrigem.dados_contrato || {}) as Record<string, any>;
@@ -3837,9 +3837,7 @@ export class DocumentosService {
         }
 
         const staffLiderColuna = Number(contratoOrigem.hist_staff_lider_id);
-        const staffLiderSnapshot = Number(
-            dadosOrigem?.recriacao?.staff_lider_id_original ?? dadosOrigem?.hist_staff_lider_id,
-        );
+        const staffLiderSnapshot = Number(dadosOrigem?.recriacao?.staff_lider_id_original ?? dadosOrigem?.hist_staff_lider_id);
         let staffLiderId: number | null =
             Number.isFinite(staffLiderColuna) && staffLiderColuna > 0
                 ? staffLiderColuna
@@ -3852,9 +3850,7 @@ export class DocumentosService {
             staffLiderId = await this.resolverHistStaffLiderId(vendedorId, idsTurmas);
         }
 
-        this.logger.log(
-            `contract.recreate | origem=${idContratoOrigem} vendedor=${vendedorId ?? 'null'} staffLider=${staffLiderId ?? 'null'}`,
-        );
+        this.logger.log(`contract.recreate | origem=${idContratoOrigem} vendedor=${vendedorId ?? 'null'} staffLider=${staffLiderId ?? 'null'}`);
 
         return {
             idContratoOrigem,
@@ -3979,9 +3975,9 @@ export class DocumentosService {
         const camposVariaveis = dadosContrato?.campos_variaveis || {};
         const turmaAluno = contrato?.id_turma_aluno_treinamento_fk?.id_turma_aluno_fk;
         const turmaDestinoRel = turmaAluno?.id_turma_fk;
-        const treinamentoViaRelacao = String(turmaDestinoRel?.id_treinamento_fk?.treinamento || '').trim();
-        const edicaoViaRelacao = String(turmaDestinoRel?.edicao_turma || '').trim();
-        const turmaViaRelacao = treinamentoViaRelacao && edicaoViaRelacao ? `${treinamentoViaRelacao} - ${edicaoViaRelacao}` : treinamentoViaRelacao;
+        // Rótulo unificado (mentoria = "Nome (Mentoria)"; evento Liberty =
+        // "Nome - Mês"; demais = "Nome - Edição" ou só o nome sem edição).
+        const turmaViaRelacao = this.rotuloTurmaHistorico(turmaDestinoRel) || '';
 
         return (
             turmaViaRelacao ||
@@ -4046,11 +4042,7 @@ export class DocumentosService {
      */
     private get sqlTurmaOrigemHistoricoDisplay(): string {
         return `TRIM(COALESCE(
-            CASE
-                WHEN treinamento_origem_evento.treinamento IS NOT NULL AND turma_origem_evento.edicao_turma IS NOT NULL
-                    THEN CONCAT(treinamento_origem_evento.treinamento, ' - ', turma_origem_evento.edicao_turma)
-                ELSE NULL
-            END,
+            ${this.sqlRotuloTurmaRelacaoHistorico('turma_origem_evento', 'treinamento_origem_evento')},
             NULLIF(contrato.dados_contrato->>'fluxo_evento_origem_turma', ''),
             NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Origem', ''),
             NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Origem', ''),
@@ -4062,15 +4054,9 @@ export class DocumentosService {
     /** Turma de destino normalizada "Treinamento - Edição" (relação primeiro). */
     private get sqlTurmaDestinoHistoricoDisplay(): string {
         return `TRIM(COALESCE(
-            CASE
-                WHEN treinamento_destino_evento.treinamento IS NOT NULL AND turma_destino_evento.edicao_turma IS NOT NULL
-                    THEN CONCAT(treinamento_destino_evento.treinamento, ' - ', turma_destino_evento.edicao_turma)
-                WHEN treinamento_destino_tat.treinamento IS NOT NULL AND turma_destino_tat.edicao_turma IS NOT NULL
-                    THEN CONCAT(treinamento_destino_tat.treinamento, ' - ', turma_destino_tat.edicao_turma)
-                WHEN treinamento_destino.treinamento IS NOT NULL AND turma_destino.edicao_turma IS NOT NULL
-                    THEN CONCAT(treinamento_destino.treinamento, ' - ', turma_destino.edicao_turma)
-                ELSE NULL
-            END,
+            ${this.sqlRotuloTurmaRelacaoHistorico('turma_destino_evento', 'treinamento_destino_evento')},
+            ${this.sqlRotuloTurmaRelacaoHistorico('turma_destino_tat', 'treinamento_destino_tat')},
+            ${this.sqlRotuloTurmaRelacaoHistorico('turma_destino', 'treinamento_destino')},
             NULLIF(contrato.dados_contrato->>'fluxo_evento_destino_turma', ''),
             NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma de Destino', ''),
             NULLIF(contrato.dados_contrato->'campos_variaveis'->>'Turma Destino', ''),
@@ -4088,11 +4074,200 @@ export class DocumentosService {
         return inicio.getTime() <= hojeFim.getTime();
     }
 
-    private formatarTurmaHistorico(treinamento?: string | null, edicao?: string | null): string {
-        const nomeTreinamento = String(treinamento || '').trim();
-        const edicaoTurma = String(edicao || '').trim();
-        if (!nomeTreinamento) return '';
-        return edicaoTurma ? `${nomeTreinamento} - ${edicaoTurma}` : nomeTreinamento;
+    /** Meses pt-BR para o rótulo de competência dos eventos Liberty. */
+    private static readonly MESES_COMPETENCIA_PT = [
+        'Janeiro',
+        'Fevereiro',
+        'Março',
+        'Abril',
+        'Maio',
+        'Junho',
+        'Julho',
+        'Agosto',
+        'Setembro',
+        'Outubro',
+        'Novembro',
+        'Dezembro',
+    ];
+
+    /**
+     * Mês (pt-BR) da data de competência da turma (data_final, fallback
+     * data_inicio). A turma única de mentoria usa data placeholder com ano
+     * 2999 e retorna null (sem data real de evento).
+     */
+    private mesCompetenciaTurmaPt(dataFinal?: string | Date | null, dataInicio?: string | Date | null): string | null {
+        const valor = dataFinal || dataInicio || null;
+        if (!valor) return null;
+        let ano: number;
+        let mes: number;
+        if (valor instanceof Date) {
+            if (Number.isNaN(valor.getTime())) return null;
+            ano = valor.getFullYear();
+            mes = valor.getMonth() + 1;
+        } else {
+            const match = /^(\d{4})-(\d{2})/.exec(String(valor).slice(0, 10));
+            if (!match) return null;
+            ano = Number(match[1]);
+            mes = Number(match[2]);
+        }
+        if (ano >= 2999 || mes < 1 || mes > 12) return null;
+        return DocumentosService.MESES_COMPETENCIA_PT[mes - 1];
+    }
+
+    /**
+     * Rótulo unificado de turma no Histórico de Vendas (espelha
+     * `sqlRotuloTurmaRelacaoHistorico`):
+     * - Evento Liberty (vínculo `id_turma_mentoria_vinculada` ou produto
+     *   Liberty com data real de evento): "Nome - Mês" (mês da competência),
+     *   nunca a edição (eventos são salvos com edição em branco);
+     * - Mentoria pura: "Nome (Mentoria)" — mentorias não possuem edição;
+     * - Demais turmas: "Nome - Edição" (ou "Nome - id" com `usarIdSemEdicao`).
+     */
+    private rotuloTurmaHistorico(
+        turma:
+            | {
+                  id?: number;
+                  edicao_turma?: string | null;
+                  data_inicio?: string | Date | null;
+                  data_final?: string | Date | null;
+                  id_turma_mentoria_vinculada?: number | null;
+                  id_treinamento_fk?: { treinamento?: string | null; tipo_mentoria?: boolean | null } | null;
+              }
+            | null
+            | undefined,
+        opcoes?: { usarIdSemEdicao?: boolean },
+    ): string | null {
+        if (!turma) return null;
+        const nome = String(turma.id_treinamento_fk?.treinamento || '').trim();
+        if (!nome) return null;
+        const tipoMentoria = turma.id_treinamento_fk?.tipo_mentoria === true;
+        const nomeLiberty = nome
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .includes('liberty');
+        const mes = this.mesCompetenciaTurmaPt(turma.data_final, turma.data_inicio);
+        const ehEventoLiberty = Boolean(turma.id_turma_mentoria_vinculada) || ((tipoMentoria || nomeLiberty) && Boolean(mes));
+        if (ehEventoLiberty) return mes ? `${nome} - ${mes}` : nome;
+        if (tipoMentoria) return `${nome} (Mentoria)`;
+        const edicao = String(turma.edicao_turma || '').trim();
+        if (edicao) return `${nome} - ${edicao}`;
+        return opcoes?.usarIdSemEdicao && turma.id ? `${nome} - ${turma.id}` : nome;
+    }
+
+    /** Mês (pt-BR) da competência (data_final || data_inicio) em SQL. */
+    private sqlMesCompetenciaTurma(turmaAlias: string): string {
+        return `CASE EXTRACT(MONTH FROM COALESCE(${turmaAlias}.data_final, ${turmaAlias}.data_inicio))
+            WHEN 1 THEN 'Janeiro' WHEN 2 THEN 'Fevereiro' WHEN 3 THEN 'Março' WHEN 4 THEN 'Abril'
+            WHEN 5 THEN 'Maio' WHEN 6 THEN 'Junho' WHEN 7 THEN 'Julho' WHEN 8 THEN 'Agosto'
+            WHEN 9 THEN 'Setembro' WHEN 10 THEN 'Outubro' WHEN 11 THEN 'Novembro' WHEN 12 THEN 'Dezembro'
+            ELSE NULL END`;
+    }
+
+    /**
+     * Rótulo da turma resolvido PELA RELAÇÃO (mesma regra do TS
+     * `rotuloTurmaHistorico`): evento Liberty = "Nome - Mês"; mentoria =
+     * "Nome (Mentoria)"; demais = "Nome - Edição". Retorna NULL quando não há
+     * relação/edição, para cair nos fallbacks de texto cru do COALESCE.
+     */
+    private sqlRotuloTurmaRelacaoHistorico(turmaAlias: string, treinamentoAlias: string): string {
+        const competencia = `COALESCE(${turmaAlias}.data_final, ${turmaAlias}.data_inicio)`;
+        const competenciaReal = `(${competencia} IS NOT NULL AND EXTRACT(YEAR FROM ${competencia}) < 2999)`;
+        return `CASE
+            WHEN NULLIF(${treinamentoAlias}.treinamento, '') IS NULL THEN NULL
+            WHEN ${turmaAlias}.id_turma_mentoria_vinculada IS NOT NULL
+                OR ((${treinamentoAlias}.tipo_mentoria = true OR ${treinamentoAlias}.treinamento ILIKE '%liberty%') AND ${competenciaReal})
+                THEN TRIM(CONCAT(${treinamentoAlias}.treinamento, COALESCE(' - ' || (${this.sqlMesCompetenciaTurma(turmaAlias)}), '')))
+            WHEN ${treinamentoAlias}.tipo_mentoria = true
+                THEN CONCAT(${treinamentoAlias}.treinamento, ' (Mentoria)')
+            WHEN NULLIF(${turmaAlias}.edicao_turma, '') IS NOT NULL
+                THEN CONCAT(${treinamentoAlias}.treinamento, ' - ', ${turmaAlias}.edicao_turma)
+            ELSE NULL
+        END`;
+    }
+
+    /**
+     * Monta o snapshot dos itens do COMBO gravado em `dados_contrato.combo_itens`
+     * no ato da venda: resolve nome do treinamento e edição da turma pelos ids
+     * enviados pelo frontend (fonte autoritativa = banco).
+     */
+    private async montarSnapshotComboItens(comboItens?: ComboItemVendaDto[]): Promise<
+        Array<{
+            id_treinamento: number | null;
+            treinamento: string | null;
+            id_turma: number | null;
+            edicao_turma: string | null;
+            quantidade: number;
+            principal: boolean;
+        }>
+    > {
+        if (!Array.isArray(comboItens) || comboItens.length === 0) return [];
+
+        const idsTurmas = Array.from(new Set(comboItens.map((item) => Number(item.id_turma)).filter((id) => Number.isInteger(id) && id > 0)));
+        const idsTreinamentos = Array.from(new Set(comboItens.map((item) => Number(item.id_treinamento)).filter((id) => Number.isInteger(id) && id > 0)));
+
+        const turmasPorId = new Map<number, Turmas>();
+        if (idsTurmas.length > 0) {
+            const turmas = await this.uow.turmasRP.find({
+                where: { id: In(idsTurmas) },
+                relations: ['id_treinamento_fk'],
+            });
+            turmas.forEach((turma) => turmasPorId.set(turma.id, turma));
+        }
+
+        const nomeTreinamentoPorId = new Map<number, string>();
+        if (idsTreinamentos.length > 0) {
+            const treinamentos = await this.uow.treinamentosRP.find({ where: { id: In(idsTreinamentos) } });
+            treinamentos.forEach((treinamento) => nomeTreinamentoPorId.set(treinamento.id, treinamento.treinamento));
+        }
+
+        return comboItens.map((item) => {
+            const idTurma = Number(item.id_turma) > 0 ? Number(item.id_turma) : null;
+            const idTreinamento = Number(item.id_treinamento) > 0 ? Number(item.id_treinamento) : null;
+            const turma = idTurma ? turmasPorId.get(idTurma) : undefined;
+            const nomeTreinamento = turma?.id_treinamento_fk?.treinamento || (idTreinamento ? nomeTreinamentoPorId.get(idTreinamento) : null) || null;
+            return {
+                id_treinamento: idTreinamento ?? turma?.id_treinamento ?? null,
+                treinamento: nomeTreinamento,
+                id_turma: idTurma,
+                edicao_turma: turma?.edicao_turma || null,
+                quantidade: Math.max(1, Number(item.quantidade) || 1),
+                principal: Boolean(item.principal),
+            };
+        });
+    }
+
+    /**
+     * Itens do combo da venda para a LISTAGEM do Histórico: nomes/edições
+     * atualizados pela relação (cache de turmas por id) com fallback para o
+     * snapshot gravado no ato da venda.
+     */
+    private resolverComboItensContrato(
+        dadosContrato: any,
+        turmaPorId?: Map<number, Turmas | null>,
+    ): Array<{
+        id_treinamento: number | null;
+        treinamento: string | null;
+        id_turma: number | null;
+        edicao_turma: string | null;
+        quantidade: number;
+        principal: boolean;
+    }> {
+        const itens = Array.isArray(dadosContrato?.combo_itens) ? dadosContrato.combo_itens : [];
+        return itens.map((item: any) => {
+            const idTurma = Number(item?.id_turma) > 0 ? Number(item.id_turma) : null;
+            const turma = idTurma && turmaPorId ? turmaPorId.get(idTurma) : null;
+            const treinamentoSnapshot = String(item?.treinamento || '').trim();
+            const edicaoSnapshot = String(item?.edicao_turma || '').trim();
+            return {
+                id_treinamento: Number(item?.id_treinamento) > 0 ? Number(item.id_treinamento) : (turma?.id_treinamento ?? null),
+                treinamento: turma?.id_treinamento_fk?.treinamento || treinamentoSnapshot || null,
+                id_turma: idTurma,
+                edicao_turma: turma?.edicao_turma || edicaoSnapshot || null,
+                quantidade: Math.max(1, Number(item?.quantidade) || 1),
+                principal: Boolean(item?.principal),
+            };
+        });
     }
 
     private ordenarListaTurmasHistorico(turmas: Iterable<string>): string[] {
@@ -4363,14 +4538,10 @@ export class DocumentosService {
      */
     private assertContratoNaoConciliado(contrato: TurmasAlunosTreinamentosContratos): void {
         const statusColuna = String(contrato.status_conciliacao || '').toUpperCase();
-        const statusSnapshot = String(
-            (contrato.dados_contrato as { status_conciliacao?: string } | null)?.status_conciliacao || '',
-        ).toUpperCase();
+        const statusSnapshot = String((contrato.dados_contrato as { status_conciliacao?: string } | null)?.status_conciliacao || '').toUpperCase();
         const status = statusColuna || statusSnapshot || 'NOVO';
         if (status === 'CONCILIADO') {
-            throw new BadRequestException(
-                'Venda conciliada não pode ser alterada. Exclua a venda e crie uma nova.',
-            );
+            throw new BadRequestException('Venda conciliada não pode ser alterada. Exclua a venda e crie uma nova.');
         }
     }
 
@@ -4885,6 +5056,9 @@ export class DocumentosService {
             .select(this.sqlTreinamentoOrigemHistoricoDisplay, 'treinamento_origem')
             .addSelect(this.sqlTurmaOrigemHistoricoDisplay, 'turma_origem')
             .addSelect(this.sqlTurmaDestinoHistoricoDisplay, 'turma_destino')
+            // Itens de COMBO da venda: as turmas dos produtos secundários também
+            // entram nas opções de turma de destino (o filtro casa combos).
+            .addSelect(`contrato.dados_contrato->'combo_itens'`, 'combo_itens')
             .addSelect('contrato.hist_canal_venda', 'canal_venda')
             .addSelect(`LOWER(COALESCE(contrato.zapsign_document_status->>'status', ''))`, 'status_documento')
             .where('contrato.deletado_em IS NULL');
@@ -4916,6 +5090,7 @@ export class DocumentosService {
             treinamento_origem?: string | null;
             turma_origem?: string | null;
             turma_destino?: string | null;
+            combo_itens?: unknown;
             canal_venda?: string | null;
             status_documento?: string | null;
             aluno_nome?: string | null;
@@ -4930,11 +5105,19 @@ export class DocumentosService {
             },
             relations: ['id_treinamento_fk'],
         });
+        // Turmas por id: resolve o rótulo atual das turmas dos itens de combo
+        // (mesma regra do SQL do filtro — relação primeiro, snapshot depois).
+        const turmasCadastradasPorId = new Map<number, Turmas>();
+        turmasCadastradas.forEach((turma) => {
+            turmasCadastradasPorId.set(turma.id, turma);
+        });
         const turmasOrigemElegiveisPorNome = new Map<string, string>();
         turmasCadastradas.forEach((turma) => {
             const nomeTreinamento = String(turma?.id_treinamento_fk?.treinamento || '').trim();
-            const edicao = String(turma?.edicao_turma || '').trim();
-            const turmaFormatada = this.formatarTurmaHistorico(nomeTreinamento, edicao);
+            // Rótulo unificado (mesma regra do SQL das opções): evento Liberty
+            // usa "Nome - Mês" e mentoria "Nome (Mentoria)" — senão a opção
+            // gerada pelo SQL nunca casaria com a elegibilidade daqui.
+            const turmaFormatada = this.rotuloTurmaHistorico(turma) || '';
             if (!turmaFormatada || turmaEhInvalida(turmaFormatada)) return;
             if (!this.turmaHistoricoOrigemElegivel(turma?.data_inicio)) return;
             if (treinamentoOrigemSelecionado && this.normalizarTexto(nomeTreinamento) !== treinamentoOrigemSelecionado) return;
@@ -4989,6 +5172,27 @@ export class DocumentosService {
                     turmasDestinoPorOrigem.set(turmaOrigem, destinosDaOrigem);
                 }
             }
+
+            // Turmas dos ITENS DE COMBO da venda também são opções de destino:
+            // o rótulo segue a mesma resolução do filtro SQL (relação com
+            // prioridade, snapshot "Treinamento - Edição" como fallback).
+            const comboItensLinha = Array.isArray(linha.combo_itens) ? linha.combo_itens : [];
+            comboItensLinha.forEach((item: any) => {
+                const idTurmaCombo = Number(item?.id_turma);
+                const turmaCombo = Number.isFinite(idTurmaCombo) ? turmasCadastradasPorId.get(idTurmaCombo) : undefined;
+                const labelRelacao = turmaCombo ? this.rotuloTurmaHistorico(turmaCombo) || '' : '';
+                const treinamentoSnapshot = String(item?.treinamento || '').trim();
+                const edicaoSnapshot = String(item?.edicao_turma || '').trim();
+                const labelSnapshot = treinamentoSnapshot && edicaoSnapshot ? `${treinamentoSnapshot} - ${edicaoSnapshot}` : treinamentoSnapshot;
+                const labelCombo = (labelRelacao || labelSnapshot).trim();
+                if (!labelCombo || turmaEhInvalida(labelCombo)) return;
+                turmasDestino.add(labelCombo);
+                if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
+                    const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
+                    destinosDaOrigem.add(labelCombo);
+                    turmasDestinoPorOrigem.set(turmaOrigem, destinosDaOrigem);
+                }
+            });
         });
 
         const treinamentosOrdenados = Array.from(treinamentos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -5766,10 +5970,7 @@ export class DocumentosService {
                 const id = Number(filtros?.id_aluno);
                 return Number.isFinite(id) && id > 0;
             })();
-            const aplicarFiltroPeriodo =
-                !filtroPorAlunoAtivo &&
-                (!filtroTurmaSemPeriodo || temDatasExplicitas) &&
-                (!buscaPorTextoAtiva || temDatasExplicitas);
+            const aplicarFiltroPeriodo = !filtroPorAlunoAtivo && (!filtroTurmaSemPeriodo || temDatasExplicitas) && (!buscaPorTextoAtiva || temDatasExplicitas);
             const dataInicioPadrao = (() => {
                 const d = new Date();
                 d.setDate(d.getDate() - 30);
@@ -5851,20 +6052,14 @@ export class DocumentosService {
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
             const somenteSemAssinaturaAtivo =
-                filtros?.somente_sem_assinatura === true ||
-                filtros?.somente_sem_assinatura === 'true' ||
-                filtros?.somente_sem_assinatura === '1';
+                filtros?.somente_sem_assinatura === true || filtros?.somente_sem_assinatura === 'true' || filtros?.somente_sem_assinatura === '1';
             const somenteSemConciliacaoAtivo =
-                filtros?.somente_sem_conciliacao === true ||
-                filtros?.somente_sem_conciliacao === 'true' ||
-                filtros?.somente_sem_conciliacao === '1';
+                filtros?.somente_sem_conciliacao === true || filtros?.somente_sem_conciliacao === 'true' || filtros?.somente_sem_conciliacao === '1';
             const statusConciliacaoFiltro = String(filtros?.status_conciliacao || '')
                 .trim()
                 .toUpperCase();
             const statusConciliacaoFiltroAtivo =
-                statusConciliacaoFiltro === 'NOVO' ||
-                statusConciliacaoFiltro === 'CONCILIADO' ||
-                statusConciliacaoFiltro === 'PENDENTE';
+                statusConciliacaoFiltro === 'NOVO' || statusConciliacaoFiltro === 'CONCILIADO' || statusConciliacaoFiltro === 'PENDENTE';
             const idTurmaOrigemDadosContratoSql = this.sqlIdTurmaOrigemHistorico;
 
             // Expressões compartilhadas com listarOpcoesFiltrosOrigem: o rótulo
@@ -6132,7 +6327,30 @@ export class DocumentosService {
             }
 
             if (filtroTurmaAtivo && turmasDestinoFiltro.length > 0) {
-                baseQb.andWhere(`${turmaDestinoSql} IN (:...turmasDestinoFiltro)`, {
+                // Além do destino principal da venda, o filtro casa também as
+                // turmas dos ITENS DE COMBO (snapshot dados_contrato.combo_itens):
+                // selecionar "PNL - 22" traz vendas diretas E combos que incluem
+                // essa turma como um dos produtos. O rótulo é resolvido pela
+                // relação (mesma regra das opções) com fallback para o snapshot.
+                const schemaCombo = this.uow.turmasAlunosTreinamentosContratosRP.metadata.schema || 'public';
+                const comboDestinoExistsSql = `EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(contrato.dados_contrato->'combo_itens') = 'array'
+                             THEN contrato.dados_contrato->'combo_itens'
+                             ELSE '[]'::jsonb END
+                    ) AS combo_item
+                    LEFT JOIN ${schemaCombo}.turmas AS turma_combo ON turma_combo.id = NULLIF(combo_item->>'id_turma', '')::int
+                    LEFT JOIN ${schemaCombo}.treinamentos AS treinamento_combo ON treinamento_combo.id = turma_combo.id_treinamento
+                    WHERE LOWER(TRIM(COALESCE(
+                        ${this.sqlRotuloTurmaRelacaoHistorico('turma_combo', 'treinamento_combo')},
+                        CASE WHEN NULLIF(combo_item->>'treinamento', '') IS NOT NULL AND NULLIF(combo_item->>'edicao_turma', '') IS NOT NULL
+                             THEN CONCAT(combo_item->>'treinamento', ' - ', combo_item->>'edicao_turma') END,
+                        NULLIF(combo_item->>'treinamento', ''),
+                        ''
+                    ))) IN (:...turmasDestinoFiltro)
+                )`;
+                baseQb.andWhere(`(${turmaDestinoSql} IN (:...turmasDestinoFiltro) OR ${comboDestinoExistsSql})`, {
                     turmasDestinoFiltro,
                 });
             }
@@ -6289,31 +6507,43 @@ export class DocumentosService {
                             id: true,
                             id_treinamento: true,
                             edicao_turma: true,
+                            data_inicio: true,
+                            data_final: true,
+                            id_turma_mentoria_vinculada: true,
                             turmas_ipr_relacionadas: true,
                             id_treinamento_fk: {
                                 id: true,
                                 treinamento: true,
                                 sigla_treinamento: true,
+                                tipo_mentoria: true,
                             },
                         },
                         id_turma_transferencia_de_fk: {
                             id: true,
                             id_treinamento: true,
                             edicao_turma: true,
+                            data_inicio: true,
+                            data_final: true,
+                            id_turma_mentoria_vinculada: true,
                             id_treinamento_fk: {
                                 id: true,
                                 treinamento: true,
                                 sigla_treinamento: true,
+                                tipo_mentoria: true,
                             },
                         },
                         id_turma_transferencia_para_fk: {
                             id: true,
                             id_treinamento: true,
                             edicao_turma: true,
+                            data_inicio: true,
+                            data_final: true,
+                            id_turma_mentoria_vinculada: true,
                             id_treinamento_fk: {
                                 id: true,
                                 treinamento: true,
                                 sigla_treinamento: true,
+                                tipo_mentoria: true,
                             },
                         },
                     },
@@ -6436,7 +6666,20 @@ export class DocumentosService {
                     }),
                 ),
             );
-            const idsTurmasCacheInicial = Array.from(new Set([...idsTurmaOrigemViaContrato, ...idsTurmaDestinoViaContrato, ...idsTurmasIprRelacionadas]));
+            // Turmas dos itens de COMBO da venda (snapshot dados_contrato.combo_itens):
+            // entram no cache para resolver nome/edição atualizados na listagem.
+            const idsTurmasComboViaContrato = Array.from(
+                new Set(
+                    contratos.flatMap((contrato) => {
+                        const comboItens = contrato?.dados_contrato?.combo_itens;
+                        if (!Array.isArray(comboItens)) return [];
+                        return comboItens.map((item: any) => Number(item?.id_turma)).filter((id: number) => Number.isFinite(id) && id > 0);
+                    }),
+                ),
+            );
+            const idsTurmasCacheInicial = Array.from(
+                new Set([...idsTurmaOrigemViaContrato, ...idsTurmaDestinoViaContrato, ...idsTurmasIprRelacionadas, ...idsTurmasComboViaContrato]),
+            );
 
             if (idsTurmasCacheInicial.length > 0) {
                 const turmasOrigemViaContrato = await this.uow.turmasRP.find({
@@ -6827,21 +7070,21 @@ export class DocumentosService {
                             turmaOrigemEvento = turmaIpr || turmasCandidatasSemDestino[0] || turmasCandidatas[0] || null;
                         }
                     }
+                    // Rótulo unificado: evento Liberty = "Nome - Mês" (competência),
+                    // mentoria = "Nome (Mentoria)", demais = "Nome - Edição".
                     const formatarTurmaEvento = (
                         turma:
                             | {
                                   id?: number;
                                   edicao_turma?: string | null;
-                                  id_treinamento_fk?: { treinamento?: string | null } | null;
+                                  data_inicio?: string | Date | null;
+                                  data_final?: string | Date | null;
+                                  id_turma_mentoria_vinculada?: number | null;
+                                  id_treinamento_fk?: { treinamento?: string | null; tipo_mentoria?: boolean | null } | null;
                               }
                             | null
                             | undefined,
-                    ): string | null => {
-                        if (!turma) return null;
-                        const nomeTreinamento = turma.id_treinamento_fk?.treinamento || 'Treinamento';
-                        const edicao = turma.edicao_turma || null;
-                        return edicao ? `${nomeTreinamento} - ${edicao}` : `${nomeTreinamento} - ${turma.id ?? ''}`.trim();
-                    };
+                    ): string | null => this.rotuloTurmaHistorico(turma, { usarIdSemEdicao: true });
                     const fluxoEventoOrigemTreinamento = turmaOrigemEvento?.id_treinamento_fk?.treinamento || null;
                     const fluxoEventoDestinoTreinamento = turmaDestinoEvento?.id_treinamento_fk?.treinamento || treinamento?.treinamento || null;
                     const fluxoEventoOrigemTurma = formatarTurmaEvento(turmaOrigemEvento);
@@ -6896,6 +7139,9 @@ export class DocumentosService {
                         fluxo_evento_destino_id_treinamento: turmaDestinoEvento?.id_treinamento ?? turmaAlunoTreinamento?.id_treinamento ?? null,
                         fluxo_evento_destino_treinamento: fluxoEventoDestinoTreinamento,
                         fluxo_evento_destino_turma: fluxoEventoDestinoTurma,
+                        // Venda em COMBO: todos os produtos vendidos (principal +
+                        // secundários) com turma/edição e quantidade por item.
+                        combo_itens: this.resolverComboItensContrato(dadosContrato, cacheTurmaPorId),
                         bonus_ipr_inscricoes_quantidade: bonusIprResumo?.quantidade ?? 0,
                         bonus_ipr_inscricoes_descricao: bonusIprResumo?.descricao ?? '',
                         status_ass_aluno: contrato.status_ass_aluno,

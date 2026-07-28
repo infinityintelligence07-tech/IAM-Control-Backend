@@ -324,6 +324,8 @@ export class PermissionsMatrixService {
      * v10: novo módulo `disponibilidadePitch` (contagens manhã/tarde/noite e
      *     filas pitch/repitch por turma): libera view/create/edit/delete para
      *     Staff e funções com prioridade ≥ STAFF.
+     * v11: calendário liberado para visualização de TODOS os papéis
+     *     (calendario.view; edição continua como estava).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -451,6 +453,16 @@ export class PermissionsMatrixService {
                         ),
                     };
                 }
+
+                if (fromVersion < 11) {
+                    // Calendário visível para todos; demais ações preservadas.
+                    role.calendario = {
+                        view: true,
+                        create: Boolean(role.calendario?.create),
+                        edit: Boolean(role.calendario?.edit),
+                        delete: Boolean(role.calendario?.delete),
+                    };
+                }
             }
         }
 
@@ -496,6 +508,7 @@ export class PermissionsMatrixService {
                     polos: { view: true },
                     vendas: { view: true },
                     credenciamento: { view: true },
+                    calendario: { view: true },
                 });
             }
         }

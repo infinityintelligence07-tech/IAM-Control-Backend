@@ -206,6 +206,31 @@ export class EmpresaContratanteDto {
     estado?: string;
 }
 
+/**
+ * Item de COMBO da venda (produto principal + produtos secundários): snapshot
+ * estruturado gravado em `dados_contrato.combo_itens` para o Histórico de
+ * Vendas exibir todos os produtos/turmas do combo e filtrar por qualquer
+ * turma de destino que participe do combo.
+ */
+export class ComboItemVendaDto {
+    @IsOptional()
+    @IsNumber()
+    id_treinamento?: number;
+
+    @IsOptional()
+    @IsNumber()
+    id_turma?: number;
+
+    @IsOptional()
+    @IsNumber()
+    quantidade?: number;
+
+    /** true no produto principal da venda (primeiro item do combo). */
+    @IsOptional()
+    @IsBoolean()
+    principal?: boolean;
+}
+
 export class CriarContratoZapSignDto {
     @IsString()
     @IsNotEmpty()
@@ -331,6 +356,16 @@ export class CriarContratoZapSignDto {
 
     @IsOptional()
     quantidade_inscricoes?: number; // Quantidade de inscrições da venda
+
+    /**
+     * Venda em COMBO: todos os produtos vendidos (principal + secundários),
+     * cada um com sua turma de destino e quantidade de inscrições.
+     */
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => ComboItemVendaDto)
+    combo_itens?: ComboItemVendaDto[];
 
     @IsOptional()
     campos_variaveis?: Record<string, string>; // Campos variáveis do contrato

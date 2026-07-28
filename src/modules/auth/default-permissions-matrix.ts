@@ -86,6 +86,7 @@ function buildStaffPermissions(): RolePermissions {
     role = grantModule(role, 'polos', ['view']);
     role = grantModule(role, 'vendas', ['view']);
     role = grantModule(role, 'credenciamento', ['view']);
+    role = grantModule(role, 'calendario', ['view']);
     return role;
 }
 
@@ -100,6 +101,9 @@ function buildAuthenticatedBase(): RolePermissions {
     role = grantModule(role, 'polos', ['view']);
     role = grantModule(role, 'vendas', ['view']);
     role = grantModule(role, 'credenciamento', ['view']);
+    // Calendário de eventos: visualização liberada a todos os autenticados
+    // (edição de status/observações continua restrita por setor/função).
+    role = grantModule(role, 'calendario', ['view']);
     return role;
 }
 

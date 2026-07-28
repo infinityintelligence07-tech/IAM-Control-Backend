@@ -256,6 +256,7 @@ export class DocumentosController {
         @Query('turma_destino') turma_destino?: string,
         @Query('staff_lider_id') staff_lider_id?: string,
         @Query('origem') origem?: string,
+        @Query('ordenacao_data') ordenacao_data?: string,
         @Query('omitir_comprovantes') omitir_comprovantes?: string,
         @Query('incluir_resumo') incluir_resumo?: string,
     ) {
@@ -280,6 +281,7 @@ export class DocumentosController {
             turma_destino,
             staff_lider_id,
             origem,
+            ordenacao_data,
             omitir_comprovantes,
             incluir_resumo,
         };

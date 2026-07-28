@@ -6002,6 +6002,9 @@ export class DocumentosService {
         // separados por "|" (ex.: "Bônus|Transbordo"). Filtra tanto a listagem
         // quanto o resumo consolidado (ambos derivam do mesmo baseQb).
         origem?: string;
+        // Ordenação da listagem pela data da venda (criado_em).
+        // mais_novo = DESC (padrão); mais_antigo = ASC.
+        ordenacao_data?: 'mais_novo' | 'mais_antigo' | string;
         // Listagem leve por padrão: omite comprovantes base64 (passe false para incluir).
         omitir_comprovantes?: boolean | string;
         // Quando false, a listagem não calcula cards/ranking (use /resumo).
@@ -6079,6 +6082,10 @@ export class DocumentosService {
                 turma_destino: filtros?.turma_destino || null,
                 staff_lider_id: staffLiderId || null,
                 origem: filtros?.origem || null,
+                ordenacao_data:
+                    String(filtros?.ordenacao_data || '').toLowerCase() === 'mais_antigo'
+                        ? 'mais_antigo'
+                        : 'mais_novo',
             };
             const chaveCacheResumo = JSON.stringify(chaveFiltrosResumo);
             const chaveCache = JSON.stringify({
@@ -6485,6 +6492,11 @@ export class DocumentosService {
             // Staff líder agora filtra no SQL via hist_staff_lider_id (sem full-scan em Node).
             this.aplicarFiltroStaffLiderNoQb(baseQb, staffLiderId);
 
+            const ordemCriadoEm: 'ASC' | 'DESC' =
+                String(filtros?.ordenacao_data || '').toLowerCase() === 'mais_antigo'
+                    ? 'ASC'
+                    : 'DESC';
+
             {
                 const paginacaoPromise = (async () => {
                     const totalRow = await baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>();
@@ -6495,7 +6507,7 @@ export class DocumentosService {
                         .select('contrato.id', 'id')
                         .addSelect('MAX(contrato.criado_em)', 'ordem_criado_em')
                         .groupBy('contrato.id')
-                        .orderBy('MAX(contrato.criado_em)', 'DESC')
+                        .orderBy('MAX(contrato.criado_em)', ordemCriadoEm)
                         .offset(offset)
                         .limit(limit)
                         .getRawMany<{ id: string }>();

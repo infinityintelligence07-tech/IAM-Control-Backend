@@ -6106,15 +6106,20 @@ export class DocumentosService {
                 .split('|')
                 .map((valor) => this.normalizarTexto(valor))
                 .filter(Boolean);
-            const idTurmaOrigemFiltro = Number(filtros?.id_turma_origem);
-            const idTurmaOrigemFiltroAtivo = Number.isFinite(idTurmaOrigemFiltro) && idTurmaOrigemFiltro > 0;
+            // Aceita um id ou vários separados por "|" (checklist de masterclass).
+            const idsTurmaOrigemFiltro = String(filtros?.id_turma_origem ?? '')
+                .split('|')
+                .map((valor) => Number(String(valor).trim()))
+                .filter((id) => Number.isFinite(id) && id > 0);
+            const idTurmaOrigemFiltroAtivo = idsTurmaOrigemFiltro.length > 0;
             // Aplica filtro de turma no modo legado ("turma"/"treinamento") OU
             // quando origem/destino foram enviados (período + turma juntos).
             const filtroTurmaAtivo =
                 this.ehModoFiltroTurma(filtros?.tipo_filtro_busca) ||
                 Boolean(treinamentoOrigemFiltro) ||
                 turmasOrigemFiltro.length > 0 ||
-                turmasDestinoFiltro.length > 0;
+                turmasDestinoFiltro.length > 0 ||
+                idTurmaOrigemFiltroAtivo;
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
             const somenteSemAssinaturaAtivo =
@@ -6398,8 +6403,8 @@ export class DocumentosService {
             // naquela cidade e naquele dia).
             if (idTurmaOrigemFiltroAtivo) {
                 baseQb.andWhere(
-                    `COALESCE(${idTurmaOrigemDadosContratoSql}, ta.id_turma) = :idTurmaOrigemFiltro`,
-                    { idTurmaOrigemFiltro },
+                    `COALESCE(${idTurmaOrigemDadosContratoSql}, ta.id_turma) IN (:...idsTurmaOrigemFiltro)`,
+                    { idsTurmaOrigemFiltro },
                 );
             }
 

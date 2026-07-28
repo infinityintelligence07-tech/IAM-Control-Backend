@@ -1968,8 +1968,10 @@ export class TurmasService {
      *
      * Idempotente e seguro para rodar várias vezes: alunos que já têm matrícula na turma
      * (inclusive removida/cancelada) são ignorados, para não desfazer remoções manuais.
-     * Mentorados entram como venda em evento (COMPROU_INGRESSO): a participação já está
-     * paga pela mentoria. Retorna quantos alunos foram inseridos.
+     * Mentorados entram por padrão como CORTESIA da turma de mentoria vinculada
+     * (Liberty ou Liberty Begin, conforme o evento): a participação é um benefício
+     * já coberto pela mentoria, não uma venda de ingresso. Retorna quantos alunos
+     * foram inseridos.
      */
     async sincronizarMentoradosEventoVinculado(id_turma_evento: number, userId?: number): Promise<number> {
         if (this.mentoradosEventoEmSincronizacao.has(id_turma_evento)) {
@@ -2033,7 +2035,7 @@ export class TurmasService {
                     id_aluno: idAluno,
                     numero_cracha: numerosCracha[indice],
                     vaga_bonus: false,
-                    origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                    origem_aluno: EOrigemAlunos.CORTESIA,
                     status_aluno_turma: statusInicial,
                     ...this.buildConfirmacaoCheckinFlags(statusInicial, null),
                 }),
@@ -2051,7 +2053,7 @@ export class TurmasService {
                     titulo: 'Aluno inscrito na turma',
                     descricao: 'Matrícula criada automaticamente: mentorado da mentoria vinculada ao evento.',
                     detalhes: {
-                        origem_aluno: EOrigemAlunos.COMPROU_INGRESSO,
+                        origem_aluno: EOrigemAlunos.CORTESIA,
                         id_turma_mentoria_vinculada: idTurmaMentoria,
                     },
                     data_acao: agora,

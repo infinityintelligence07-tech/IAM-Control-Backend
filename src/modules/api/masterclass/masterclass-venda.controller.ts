@@ -16,14 +16,21 @@ export class MasterclassVendaController {
     constructor(private readonly masterclassService: MasterclassService) {}
 
     /**
-     * Busca em TODOS os pré-cadastros de masterclass (por nome, e-mail ou
-     * telefone) para a seleção do aluno na venda com origem em Masterclass.
+     * Busca de pré-cadastros de masterclass (por nome, e-mail ou telefone)
+     * para a seleção do aluno na venda com origem em Masterclass. Quando
+     * `id_turma` é informado, lista SOMENTE os leads daquela masterclass
+     * (termo opcional — vazio retorna todos os leads da turma).
      */
     @Get('pre-cadastros/busca')
     async buscarPreCadastrosParaVenda(
         @Query('termo') termo?: string,
         @Query('limit') limit?: string,
+        @Query('id_turma') idTurma?: string,
     ): Promise<MasterclassPreCadastroBuscaVendaDto[]> {
-        return this.masterclassService.buscarPreCadastrosParaVenda(termo || '', limit ? parseInt(limit, 10) : undefined);
+        return this.masterclassService.buscarPreCadastrosParaVenda(
+            termo || '',
+            limit ? parseInt(limit, 10) : undefined,
+            idTurma ? parseInt(idTurma, 10) : undefined,
+        );
     }
 }

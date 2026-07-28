@@ -1077,22 +1077,35 @@ export class MasterclassService {
      * por nome, e-mail ou telefone. Retorna apenas os campos necessários para
      * o vendedor selecionar a pessoa e o frontend resolver/criar o aluno.
      */
-    async buscarPreCadastrosParaVenda(termo: string, limit = 30): Promise<MasterclassPreCadastroBuscaVendaDto[]> {
+    async buscarPreCadastrosParaVenda(termo: string, limit?: number, idTurma?: number): Promise<MasterclassPreCadastroBuscaVendaDto[]> {
         const busca = (termo || '').trim();
-        if (busca.length < 2) {
+        const turmaId = Number(idTurma);
+        const filtraPorTurma = Number.isFinite(turmaId) && turmaId > 0;
+        // Sem turma definida, a busca é livre (todos os pré-cadastros) e exige
+        // ao menos 2 caracteres; com a turma da masterclass definida, o termo é
+        // opcional (termo vazio lista todos os leads daquela masterclass).
+        if (!filtraPorTurma && busca.length < 2) {
             return [];
         }
-        const take = Math.min(Math.max(Number(limit) || 30, 1), 50);
-        // Busca desconsiderando acentos e caracteres especiais (dos dois lados).
-        const like = `%${normalizarTermoBusca(busca)}%`;
+        const take = Math.min(
+            Math.max(Number(limit) || (filtraPorTurma ? 200 : 30), 1),
+            filtraPorTurma ? 500 : 50,
+        );
 
         // O soft delete (deletado_em) é aplicado automaticamente pelo TypeORM.
-        const preCadastros = await this.uow.masterclassPreCadastrosRP
-            .createQueryBuilder('pc')
-            .where(
+        const qb = this.uow.masterclassPreCadastrosRP.createQueryBuilder('pc');
+        if (filtraPorTurma) {
+            qb.andWhere('pc.id_turma = :turmaId', { turmaId });
+        }
+        if (busca.length >= 2) {
+            // Busca desconsiderando acentos e caracteres especiais (dos dois lados).
+            const like = `%${normalizarTermoBusca(busca)}%`;
+            qb.andWhere(
                 `(${sqlBuscaNormalizada('pc.nome_aluno')} LIKE :like OR ${sqlBuscaNormalizada('pc.email')} LIKE :like OR ${sqlBuscaNormalizada('pc.telefone')} LIKE :like)`,
                 { like },
-            )
+            );
+        }
+        const preCadastros = await qb
             .orderBy('pc.nome_aluno', 'ASC')
             .addOrderBy('pc.data_evento', 'DESC')
             .take(take)

@@ -27,6 +27,8 @@ const LACUNA_MARKER = '[[LACUNA]]';
 const MAX_CONTEXT_CHARS = 24000;
 const TOP_K_ARTIGOS = 8;
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { PDFParse } = require('pdf-parse') as { PDFParse: new (opts: { data: Buffer }) => { getText: () => Promise<{ text?: string; total?: number }>; destroy?: () => Promise<void> } };
 
 @Injectable()
 export class DuvidasService {
@@ -141,6 +143,7 @@ export class DuvidasService {
         let importados = 0;
         let atualizados = 0;
         let imagens = 0;
+        let pdfs = 0;
         let ignorados = 0;
         const erros: string[] = [];
 
@@ -174,7 +177,6 @@ export class DuvidasService {
                 continue;
             }
             if (!rawPath.toLowerCase().endsWith('.md')) {
-                if (!this.isImagePath(rawPath)) ignorados++;
                 continue;
             }
 
@@ -218,14 +220,87 @@ export class DuvidasService {
             }
         }
 
+        // 3) Importa PDFs (extrai texto → artigo)
+        for (const entry of entries) {
+            if (entry.isDirectory) continue;
+            const rawPath = entry.entryName.replace(/\\/g, '/');
+            if (this.shouldSkipObsidianPath(rawPath)) continue;
+            if (!rawPath.toLowerCase().endsWith('.pdf')) {
+                if (!this.isImagePath(rawPath) && !rawPath.toLowerCase().endsWith('.md')) {
+                    ignorados++;
+                }
+                continue;
+            }
+
+            try {
+                const caminho = this.normalizeVaultPath(rawPath);
+                const { text, pages } = await this.extrairTextoPdf(entry.getData());
+                if (!text || text.length < 40) {
+                    erros.push(`${rawPath}: texto insuficiente (${pages} págs)`);
+                    continue;
+                }
+                const titulo = path.basename(caminho).replace(/\.pdf$/i, '');
+                const conteudo = `# ${titulo}\n\n> Fonte: PDF importado (${path.basename(caminho)})\n\n${text}\n`;
+                const slugBase = this.slugify(caminho.replace(/\.pdf$/i, ''));
+
+                const existente = await this.uow.duvidasArtigosRP.findOne({
+                    where: { caminho_origem: caminho, deletado_em: IsNull() },
+                });
+
+                if (existente) {
+                    existente.titulo = titulo;
+                    existente.conteudo_md = conteudo;
+                    existente.status = 'publicado';
+                    existente.atualizado_por = userId;
+                    await this.uow.duvidasArtigosRP.save(existente);
+                    atualizados++;
+                } else {
+                    const slug = await this.gerarSlugUnico(slugBase || titulo);
+                    const artigo = this.uow.duvidasArtigosRP.create({
+                        titulo,
+                        slug,
+                        conteudo_md: conteudo,
+                        caminho_origem: caminho,
+                        status: 'publicado',
+                        tags: ['manual', 'pdf'],
+                        criado_por: userId,
+                        atualizado_por: userId,
+                    });
+                    await this.uow.duvidasArtigosRP.save(artigo);
+                    importados++;
+                }
+                pdfs++;
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : 'erro desconhecido';
+                erros.push(`${rawPath}: ${msg}`);
+                this.logger.warn(`Falha ao importar PDF ${rawPath}: ${msg}`);
+            }
+        }
+
         return {
             importados,
             atualizados,
             imagens,
+            pdfs,
             ignorados,
             erros,
             total_md: importados + atualizados,
         };
+    }
+
+    private async extrairTextoPdf(buffer: Buffer): Promise<{ text: string; pages: number }> {
+        const parser = new PDFParse({ data: buffer });
+        try {
+            const result = await parser.getText();
+            const text = String(result?.text || '')
+                .replace(/\r/g, '')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            return { text, pages: Number(result?.total || 0) };
+        } finally {
+            await parser.destroy?.();
+        }
     }
 
     private isImagePath(filePath: string): boolean {
@@ -407,12 +482,17 @@ export class DuvidasService {
         const synonyms: Record<string, string[]> = {
             cadastrar: ['registrar', 'criar', 'incluir', 'lancar', 'lançar'],
             registrar: ['cadastrar', 'criar', 'incluir', 'lancar', 'lançar'],
-            venda: ['vendas', 'comercial'],
-            vendas: ['venda', 'comercial'],
+            venda: ['vendas', 'comercial', 'masterclass'],
+            vendas: ['venda', 'comercial', 'masterclass'],
             aluno: ['alunos'],
             alunos: ['aluno'],
-            turma: ['turmas'],
-            turmas: ['turma'],
+            turma: ['turmas', 'palestra', 'palestras'],
+            turmas: ['turma', 'palestra', 'palestras'],
+            masterclass: ['vendas', 'palestra', 'palestras'],
+            credenciamento: ['credenciar', 'checkin', 'check-in', 'inscritos'],
+            credenciar: ['credenciamento', 'checkin'],
+            plataforma: ['sistema', 'login', 'acesso', 'cadastro'],
+            login: ['acesso', 'entrar', 'plataforma'],
         };
 
         const base = query

@@ -736,6 +736,52 @@ export class AlunosService {
         }
     }
 
+    /**
+     * Listagem leve para "Alunos não listados" no fluxo de venda:
+     * - uma única query (sem paginação no cliente);
+     * - só id/nome/email/cpf/telefone;
+     * - exclui nomes que contenham "bônus"/"bonus" (ex.: réplicas de inscrição).
+     */
+    async listarOpcoesParaVenda(): Promise<{
+        data: Array<{
+            id: number;
+            nome: string;
+            email: string;
+            cpf: string | null;
+            telefone_um: string | null;
+        }>;
+        total: number;
+    }> {
+        const nomeNorm = sqlBuscaNormalizada('aluno.nome');
+        const rows = await this.uow.alunosRP
+            .createQueryBuilder('aluno')
+            .select('aluno.id', 'id')
+            .addSelect('aluno.nome', 'nome')
+            .addSelect('aluno.email', 'email')
+            .addSelect('aluno.cpf', 'cpf')
+            .addSelect('aluno.telefone_um', 'telefone_um')
+            .where('aluno.deletado_em IS NULL')
+            .andWhere(`${nomeNorm} NOT LIKE :bonus`, { bonus: '%bonus%' })
+            .orderBy('aluno.nome', 'ASC')
+            .getRawMany<{
+                id: string | number;
+                nome: string | null;
+                email: string | null;
+                cpf: string | null;
+                telefone_um: string | null;
+            }>();
+
+        const data = rows.map((row) => ({
+            id: Number(row.id),
+            nome: String(row.nome || '').trim(),
+            email: String(row.email || '').trim(),
+            cpf: row.cpf ? String(row.cpf) : null,
+            telefone_um: row.telefone_um ? String(row.telefone_um) : null,
+        }));
+
+        return { data, total: data.length };
+    }
+
     async findById(id: number): Promise<AlunoResponseDto | null> {
         try {
             const aluno = await this.uow.alunosRP.findOne({

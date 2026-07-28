@@ -4,6 +4,7 @@ import {
     GetAlunosDto,
     AlunosListResponseDto,
     AlunoResponseDto,
+    AlunosOpcoesVendaResponseDto,
     CreateAlunoDto,
     UpdateAlunoDto,
     SoftDeleteAlunoDto,
@@ -33,6 +34,16 @@ export class AlunosController {
     async findAll(@Query() filters: GetAlunosDto): Promise<AlunosListResponseDto> {
         console.log('Buscando alunos com filtros:', filters);
         return this.alunosService.findAll(filters);
+    }
+
+    /**
+     * Listagem leve (sem paginação) para o checkbox "Alunos não listados"
+     * no fluxo de venda. Exclui nomes com "Bônus".
+     * Deve ficar antes de :id.
+     */
+    @Get('para-venda')
+    async listarOpcoesParaVenda(): Promise<AlunosOpcoesVendaResponseDto> {
+        return this.alunosService.listarOpcoesParaVenda();
     }
 
     /** Demografia agregada — somente Admin ou Líder. Deve ficar antes de :id. */

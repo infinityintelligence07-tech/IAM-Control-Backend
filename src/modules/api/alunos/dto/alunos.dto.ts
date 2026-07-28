@@ -88,6 +88,20 @@ export class AlunosListResponseDto {
     totalPages: number;
 }
 
+/** Resposta leve para a seleção de "alunos não listados" na venda. */
+export class AlunoOpcaoVendaDto {
+    id: number;
+    nome: string;
+    email: string;
+    cpf?: string | null;
+    telefone_um?: string | null;
+}
+
+export class AlunosOpcoesVendaResponseDto {
+    data: AlunoOpcaoVendaDto[];
+    total: number;
+}
+
 export class CreateAlunoDto {
     @IsOptional()
     @IsNumber()

@@ -4642,9 +4642,13 @@ export class DocumentosService {
         }
     }
 
-    // Persiste/edita somente a observação interna (uso do sistema) da venda na
-    // coluna dados_contrato, sem tocar nas observações do contrato.
-    async atualizarObservacoesSistemaContratoHistorico(contratoId: string, observacoes: string): Promise<{ atualizado: boolean }> {
+    // Persiste/edita as observações da venda: texto do contrato (lançado na
+    // finalização) e/ou observação interna (uso do sistema).
+    async atualizarObservacoesSistemaContratoHistorico(
+        contratoId: string,
+        observacoes: string,
+        observacoesContrato?: string | null,
+    ): Promise<{ atualizado: boolean }> {
         const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
             where: { id: contratoId, deletado_em: IsNull() },
         });
@@ -4655,12 +4659,24 @@ export class DocumentosService {
 
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const camposVariaveis = { ...(dadosContrato.campos_variaveis || {}) };
-        const texto = (observacoes || '').trim();
+        const textoInterno = (observacoes || '').trim();
+        const editarContrato = observacoesContrato !== undefined && observacoesContrato !== null;
+        const textoContrato = editarContrato ? String(observacoesContrato || '').trim() : null;
 
-        if (texto) {
-            camposVariaveis['Observações Internas (uso do sistema)'] = texto;
+        if (textoInterno) {
+            camposVariaveis['Observações Internas (uso do sistema)'] = textoInterno;
         } else {
             delete camposVariaveis['Observações Internas (uso do sistema)'];
+        }
+
+        if (editarContrato) {
+            if (textoContrato) {
+                dadosContrato.observacoes = textoContrato;
+                camposVariaveis['Observações'] = textoContrato;
+            } else {
+                dadosContrato.observacoes = '';
+                delete camposVariaveis['Observações'];
+            }
         }
 
         dadosContrato.campos_variaveis = camposVariaveis;

@@ -5560,6 +5560,7 @@ export class TurmasService {
                 .withDeleted()
                 .select('ta.id', 'id_turma_aluno')
                 .addSelect('ta.id_turma', 'id_turma')
+                .addSelect('ta.id_turma_transferencia_para', 'id_turma_transferencia_para')
                 .addSelect('ta.criado_em', 'criado_em')
                 .addSelect('ta.deletado_em', 'deletado_em')
                 .addSelect(`to_char(ta.criado_em, 'YYYY-MM-DD')`, 'dia_criado')
@@ -5570,6 +5571,7 @@ export class TurmasService {
                 .getRawMany<{
                     id_turma_aluno: string;
                     id_turma: number;
+                    id_turma_transferencia_para: number | string | null;
                     criado_em: Date | string;
                     deletado_em: Date | string | null;
                     dia_criado: string;
@@ -5686,12 +5688,24 @@ export class TurmasService {
                     });
                 }
                 if (isSaida) {
-                    // Prioriza log (cancelamento/remoção) sobre transferência, para não
-                    // rotular cancelamento posterior a réplica como "Transferência".
-                    let categoria: string = logSaidaPorMatricula.get(idTurmaAluno) ?? 'Cancelamento';
-                    if (!logSaidaPorMatricula.has(idTurmaAluno) && deletado) {
+                    // Saída por transferência (destino real):
+                    // 1) histórico alinhado ao soft delete (≤24h);
+                    // 2) flag id_turma_transferencia_para sem log de cancel/remoção
+                    //    (ex.: matrícula duplicada com flag, hist apontando outro ta).
+                    // Cancelamento posterior a réplica em turma congelada continua como
+                    // cancel/remoção: a flag pode existir, mas há log de saída.
+                    const logCat = logSaidaPorMatricula.get(idTurmaAluno);
+                    const flagPara =
+                        row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== ''
+                            ? Number(row.id_turma_transferencia_para)
+                            : null;
+                    const flagTransferenciaReal = flagPara != null && Number.isFinite(flagPara) && !specialSet.has(flagPara);
+                    let categoria: string = logCat ?? 'Cancelamento';
+                    if (deletado) {
                         const transferCriado = transferenciaSaidaCriadoEm.get(idTurmaAluno);
-                        if (transferCriado && Math.abs(deletado.getTime() - transferCriado.getTime()) <= UM_DIA_MS) {
+                        const histAlinhado =
+                            !!transferCriado && Math.abs(deletado.getTime() - transferCriado.getTime()) <= UM_DIA_MS;
+                        if (histAlinhado || (flagTransferenciaReal && !logCat)) {
                             categoria = 'Transferência';
                         }
                     }
@@ -5957,6 +5971,7 @@ export class TurmasService {
                 .withDeleted()
                 .select('ta.id', 'id_turma_aluno')
                 .addSelect('ta.id_aluno', 'id_aluno')
+                .addSelect('ta.id_turma_transferencia_para', 'id_turma_transferencia_para')
                 .addSelect('ta.criado_em', 'criado_em')
                 .addSelect('ta.deletado_em', 'deletado_em')
                 .addSelect(`to_char(ta.criado_em, 'YYYY-MM-DD')`, 'dia_criado')
@@ -5967,6 +5982,7 @@ export class TurmasService {
                 .getRawMany<{
                     id_turma_aluno: string;
                     id_aluno: string;
+                    id_turma_transferencia_para: number | string | null;
                     criado_em: Date | string;
                     deletado_em: Date | string | null;
                     dia_criado: string;
@@ -6071,11 +6087,20 @@ export class TurmasService {
                 }
                 if (isSaida) {
                     const logCat = logSaidaPorMatricula.get(idTurmaAluno);
+                    const flagPara =
+                        row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== ''
+                            ? Number(row.id_turma_transferencia_para)
+                            : null;
+                    const flagTransferenciaReal = flagPara != null && Number.isFinite(flagPara) && !specialSet.has(flagPara);
                     let transf: { id_turma_de: number; id_turma_para: number } | undefined;
-                    if (!logCat && deletado) {
+                    if (deletado) {
                         const meta = transferenciaSaidaMeta.get(idTurmaAluno);
-                        if (meta && Math.abs(deletado.getTime() - meta.criado_em.getTime()) <= UM_DIA_MS) {
+                        const histAlinhado =
+                            !!meta && Math.abs(deletado.getTime() - meta.criado_em.getTime()) <= UM_DIA_MS;
+                        if (histAlinhado && meta) {
                             transf = { id_turma_de: meta.id_turma_de, id_turma_para: meta.id_turma_para };
+                        } else if (flagTransferenciaReal && !logCat) {
+                            transf = { id_turma_de: id_turma, id_turma_para: flagPara };
                         }
                     }
                     itens.push({
@@ -6083,7 +6108,7 @@ export class TurmasService {
                         id_turma_aluno: idTurmaAluno,
                         dia: row.dia_deletado || dataFinalStr,
                         tipo: 'SAIDA',
-                        categoria: logCat ?? (transf ? 'Transferência' : 'Cancelamento'),
+                        categoria: transf ? 'Transferência' : logCat ?? 'Cancelamento',
                         id_turma_de: transf?.id_turma_de ?? null,
                         id_turma_para: transf?.id_turma_para ?? null,
                     });

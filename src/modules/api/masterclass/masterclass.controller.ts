@@ -225,6 +225,21 @@ export class MasterclassController {
     }
 
     /**
+     * Remove pré-cadastros duplicados por e-mail na mesma turma (mantém o mais antigo / presente).
+     */
+    @Post('eventos/:id_turma/deduplicar-pre-cadastros')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
+    async deduplicarPreCadastros(
+        @Param('id_turma', ParseIntPipe) id_turma: number,
+    ): Promise<{ message: string; total_antes: number; mantidos: number; removidos: number }> {
+        const resultado = await this.masterclassService.deduplicarPreCadastrosPorEmail(id_turma);
+        return {
+            message: `${resultado.removidos} duplicata(s) removida(s); ${resultado.mantidos} lead(s) mantido(s).`,
+            ...resultado,
+        };
+    }
+
+    /**
      * Excluir pré-cadastro
      */
     @Delete('pre-cadastro/:id')

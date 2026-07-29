@@ -273,10 +273,21 @@ export class MasterclassService {
 
             console.log(`Encontrados ${preCadastrosExistentes.length} pré-cadastros existentes para a turma ${id_turma}`);
 
-            // Criar conjunto de emails, telefones e nomes existentes para verificação rápida
-            const emailsExistentes = new Set(preCadastrosExistentes.map((pc) => pc.email.toLowerCase()));
-            const telefonesExistentes = new Set(preCadastrosExistentes.map((pc) => pc.telefone));
-            const nomesExistentes = new Set(preCadastrosExistentes.map((pc) => pc.nome_aluno.toLowerCase().trim()));
+            // Chaves normalizadas: evita falso negativo quando o telefone no banco
+            // está mascarado "(11) 99999-9999" e o CSV vem só com dígitos.
+            const emailsExistentes = new Set(
+                preCadastrosExistentes.map((pc) => String(pc.email || '').trim().toLowerCase()).filter(Boolean),
+            );
+            const telefonesExistentes = new Set(
+                preCadastrosExistentes
+                    .map((pc) => this.normalizarTelefoneDigitos(pc.telefone))
+                    .filter(Boolean),
+            );
+            const nomesExistentes = new Set(
+                preCadastrosExistentes
+                    .map((pc) => String(pc.nome_aluno || '').trim().toLowerCase())
+                    .filter(Boolean),
+            );
 
             const preCadastros: MasterclassPreCadastroDto[] = [];
             let duplicadosEncontrados = 0;
@@ -304,11 +315,13 @@ export class MasterclassService {
                     // Limpar e formatar dados
                     const nomeLimpo = row.nome?.toString().trim().toLowerCase();
                     const emailLimpo = row.email?.toString().trim().toLowerCase();
-                    const telefoneLimpo = row.telefone?.toString().trim().replace(/\D/g, '');
+                    const telefoneLimpo = this.normalizarTelefoneDigitos(row.telefone);
 
                     // Verificar se já existe um pré-cadastro com este email, telefone ou nome+email nesta turma
+                    // (inclui linhas já aceitas neste mesmo arquivo — antes o Set não era atualizado
+                    // e o CSV podia inserir o mesmo e-mail várias vezes no mesmo upload).
                     const emailExiste = emailsExistentes.has(emailLimpo);
-                    const telefoneExiste = telefonesExistentes.has(telefoneLimpo);
+                    const telefoneExiste = Boolean(telefoneLimpo) && telefonesExistentes.has(telefoneLimpo);
                     const nomeEmailExiste = nomesExistentes.has(nomeLimpo) && emailsExistentes.has(emailLimpo);
 
                     if (emailExiste || telefoneExiste || nomeEmailExiste) {
@@ -337,6 +350,9 @@ export class MasterclassService {
 
                     preCadastros.push(preCadastro);
                     total_processados++;
+                    emailsExistentes.add(emailLimpo);
+                    if (telefoneLimpo) telefonesExistentes.add(telefoneLimpo);
+                    if (nomeLimpo) nomesExistentes.add(nomeLimpo);
                 } catch (error: unknown) {
                     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
                     erros.push(`Erro ao processar linha: ${JSON.stringify(row)} - ${errorMessage}`);
@@ -946,6 +962,19 @@ export class MasterclassService {
     }
 
     /**
+     * Digitos do telefone normalizados para comparação de duplicidade.
+     * Remove máscara e o DDI 55 quando presente (evita 5511... ≠ 11...).
+     */
+    private normalizarTelefoneDigitos(telefone?: string | null): string {
+        const digitos = String(telefone || '').replace(/\D/g, '');
+        if (!digitos) return '';
+        if (digitos.startsWith('55') && digitos.length >= 12) {
+            return digitos.slice(2);
+        }
+        return digitos;
+    }
+
+    /**
      * Formatar telefone com máscara
      */
     private formatarTelefone(telefone: string): string {
@@ -974,6 +1003,59 @@ export class MasterclassService {
     }
 
     /**
+     * Soft-delete de pré-cadastros duplicados por e-mail na mesma turma.
+     * Mantém o registro com presença (se houver) ou o mais antigo.
+     */
+    async deduplicarPreCadastrosPorEmail(id_turma: number): Promise<{
+        total_antes: number;
+        mantidos: number;
+        removidos: number;
+    }> {
+        const ativos = await this.uow.masterclassPreCadastrosRP.find({
+            where: { id_turma, deletado_em: null },
+            order: { criado_em: 'ASC', id: 'ASC' },
+        });
+
+        const porEmail = new Map<string, typeof ativos>();
+        for (const pc of ativos) {
+            const email = String(pc.email || '').trim().toLowerCase();
+            if (!email) continue;
+            const lista = porEmail.get(email) || [];
+            lista.push(pc);
+            porEmail.set(email, lista);
+        }
+
+        const agora = new Date();
+        const paraRemover: typeof ativos = [];
+        for (const grupo of porEmail.values()) {
+            if (grupo.length <= 1) continue;
+            const ordenado = [...grupo].sort((a, b) => {
+                if (Boolean(a.presente) !== Boolean(b.presente)) {
+                    return a.presente ? -1 : 1;
+                }
+                const ta = a.criado_em ? new Date(a.criado_em).getTime() : 0;
+                const tb = b.criado_em ? new Date(b.criado_em).getTime() : 0;
+                if (ta !== tb) return ta - tb;
+                return Number(a.id) - Number(b.id);
+            });
+            paraRemover.push(...ordenado.slice(1));
+        }
+
+        for (const pc of paraRemover) {
+            pc.deletado_em = agora;
+        }
+        if (paraRemover.length > 0) {
+            await this.uow.masterclassPreCadastrosRP.save(paraRemover);
+        }
+
+        return {
+            total_antes: ativos.length,
+            mantidos: ativos.length - paraRemover.length,
+            removidos: paraRemover.length,
+        };
+    }
+
+    /**
      * Inserir novo pré-cadastro manualmente
      */
     async inserirPreCadastro(data: CreateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
@@ -988,11 +1070,33 @@ export class MasterclassService {
                 throw new NotFoundException(`Turma com ID ${data.id_turma} não encontrada`);
             }
 
+            const emailLimpo = String(data.email || '').trim().toLowerCase();
+            const telefoneLimpo = this.normalizarTelefoneDigitos(data.telefone);
+            const existentes = await this.uow.masterclassPreCadastrosRP.find({
+                where: { id_turma: data.id_turma, deletado_em: null },
+                select: ['id', 'email', 'telefone'],
+            });
+            const emailDuplicado = existentes.some(
+                (pc) => String(pc.email || '').trim().toLowerCase() === emailLimpo,
+            );
+            const telefoneDuplicado =
+                Boolean(telefoneLimpo) &&
+                existentes.some(
+                    (pc) => this.normalizarTelefoneDigitos(pc.telefone) === telefoneLimpo,
+                );
+            if (emailDuplicado || telefoneDuplicado) {
+                throw new BadRequestException(
+                    emailDuplicado
+                        ? 'Já existe um lead com este e-mail nesta masterclass.'
+                        : 'Já existe um lead com este telefone nesta masterclass.',
+                );
+            }
+
             // Criar novo pré-cadastro
             const novoPreCadastro = this.uow.masterclassPreCadastrosRP.create({
                 nome_aluno: data.nome_aluno,
-                email: data.email,
-                telefone: this.formatarTelefone(data.telefone),
+                email: emailLimpo,
+                telefone: this.formatarTelefone(telefoneLimpo || data.telefone),
                 evento_nome: `Masterclass - ${turma.cidade}`,
                 data_evento: new Date(turma.data_inicio),
                 id_turma: data.id_turma,
@@ -1005,6 +1109,9 @@ export class MasterclassService {
             return await this.uow.masterclassPreCadastrosRP.save(novoPreCadastro);
         } catch (error) {
             console.error('Erro ao inserir pré-cadastro:', error);
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
             throw new Error('Erro interno do servidor ao inserir pré-cadastro');
         }
     }

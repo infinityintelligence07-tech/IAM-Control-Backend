@@ -618,6 +618,22 @@ export class AddAlunoTurmaDto {
     @IsOptional()
     @IsBoolean()
     via_fluxo_venda?: boolean;
+
+    // Turma de origem da venda (ex.: Masterclass/palestra). Usado pela
+    // estratificação para classificar o canal como Masterclass via
+    // id_turma_transferencia_de apontando para turma palestra/MC_*.
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) && n > 0 ? n : null;
+    })
+    id_turma_transferencia_de?: number | null;
+
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+    codigo_turma_origem_planilha?: string | null;
 }
 
 export class UpdateAlunoTurmaDto {

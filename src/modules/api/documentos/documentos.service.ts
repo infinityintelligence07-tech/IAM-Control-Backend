@@ -1248,6 +1248,11 @@ export class DocumentosService {
             let matriculaDestino: { criada: boolean; ja_matriculado?: boolean; erro?: string } | undefined;
             if (criarContratoDto.id_turma_destino) {
                 const idTurmaDestinoMatricula = Number(criarContratoDto.id_turma_destino);
+                // Origem explícita da venda (Masterclass/evento). Não usar o fallback
+                // padrão (60/192): isso poluiria a estratificação. Sem isso, vendas MC
+                // caem em "Vendas em Eventos" em vez de "Masterclass".
+                const idTurmaOrigemMatricula =
+                    idTurmaReferencia && idTurmaReferencia !== idTurmaDestinoMatricula ? idTurmaReferencia : undefined;
                 try {
                     await this.turmasService.addAlunoTurma(
                         idTurmaDestinoMatricula,
@@ -1258,6 +1263,7 @@ export class DocumentosService {
                             quantidade_inscricoes:
                                 criarContratoDto.quantidade_inscricoes && criarContratoDto.quantidade_inscricoes > 0 ? criarContratoDto.quantidade_inscricoes : 1,
                             comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda) ?? undefined,
+                            ...(idTurmaOrigemMatricula ? { id_turma_transferencia_de: idTurmaOrigemMatricula } : {}),
                         },
                         userId,
                     );
@@ -1265,6 +1271,29 @@ export class DocumentosService {
                 } catch (error) {
                     const mensagem = error instanceof Error ? error.message : 'Erro desconhecido';
                     if (mensagem.toLowerCase().includes('já está matriculado')) {
+                        // Backfill de origem MC em matrículas já existentes (renovação /
+                        // aluno já na turma) para a estratificação classificar corretamente.
+                        if (idTurmaOrigemMatricula) {
+                            try {
+                                const matriculaExistente = await this.uow.turmasAlunosRP.findOne({
+                                    where: {
+                                        id_turma: idTurmaDestinoMatricula,
+                                        id_aluno: parseInt(criarContratoDto.id_aluno) as any,
+                                        deletado_em: null,
+                                    },
+                                });
+                                if (matriculaExistente && matriculaExistente.id_turma_transferencia_de == null) {
+                                    matriculaExistente.id_turma_transferencia_de = idTurmaOrigemMatricula;
+                                    await this.uow.turmasAlunosRP.save(matriculaExistente);
+                                }
+                            } catch (backfillError) {
+                                this.logger.warn(
+                                    `zapsign.create.contract | Falha ao backfill origem da matrícula existente turma=${idTurmaDestinoMatricula} aluno=${criarContratoDto.id_aluno}: ${
+                                        backfillError instanceof Error ? backfillError.message : 'Erro desconhecido'
+                                    }`,
+                                );
+                            }
+                        }
                         matriculaDestino = { criada: false, ja_matriculado: true };
                     } else {
                         this.logger.error(
@@ -3654,9 +3683,18 @@ export class DocumentosService {
             camposVariaveis['Observações'],
         ]
             .join(' ')
-            .toLowerCase();
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
 
-        if (texto.includes('masterclass')) return 'MASTERCLASS';
+        // "Masterclass", "Master Class", "MC - Cidade", "MC_TRINDADE", etc.
+        if (
+            texto.includes('masterclass') ||
+            texto.includes('master class') ||
+            /(^|[^a-z0-9])mc([\s_\-]|$)/.test(texto)
+        ) {
+            return 'MASTERCLASS';
+        }
         if (texto.includes('time de vendas') || texto.includes('vendas iam')) {
             return 'TIME_VENDAS';
         }
@@ -6193,6 +6231,28 @@ export class DocumentosService {
                       AND h.deletado_em IS NULL
                 )
             )`;
+            // A própria turma de ORIGEM da venda é Masterclass/palestra (caso típico
+            // do histórico: venda feita na MC → IPR). Antes só olhávamos se o aluno
+            // *veio de* outra MC para a origem — isso marcava vendas MC como Eventos.
+            const origemTurmaEhMcSql = `(
+                EXISTS (
+                    SELECT 1
+                    FROM turmas t_origem_mc
+                    INNER JOIN treinamentos tr_origem_mc ON tr_origem_mc.id = t_origem_mc.id_treinamento
+                    WHERE t_origem_mc.id = ${idTurmaOrigemClassificacaoSql}
+                      AND t_origem_mc.deletado_em IS NULL
+                      AND (
+                          tr_origem_mc.tipo_palestra = true
+                          OR tr_origem_mc.tipo_treinamento = false
+                          OR (
+                              t_origem_mc.edicao_turma IS NOT NULL
+                              AND LEFT(UPPER(TRIM(t_origem_mc.edicao_turma)), 3) = 'MC_'
+                          )
+                          OR UPPER(COALESCE(tr_origem_mc.treinamento, '')) LIKE '%MASTERCLASS%'
+                          OR UPPER(COALESCE(tr_origem_mc.treinamento, '')) LIKE '%MASTER CLASS%'
+                      )
+                )
+            )`;
             const origemEhMcOrigemSql = `(
                 COALESCE((
                     SELECT (
@@ -6237,7 +6297,7 @@ export class DocumentosService {
                 WHEN ${histTimeVendasOrigemSql} THEN 'Time de Vendas'
                 WHEN ${codigoOrigemPlanilhaOrigemSql} = 'TRANSBORDO' THEN 'Transbordo'
                 WHEN ${codigoOrigemPlanilhaOrigemSql} = 'LIBERTY' THEN 'Vendas em Eventos'
-                WHEN ${origemEhMcOrigemSql} THEN 'Masterclass'
+                WHEN ${origemTurmaEhMcSql} OR ${origemEhMcOrigemSql} THEN 'Masterclass'
                 WHEN ${origemAlunoOrigemSql} = 'TRANSFERENCIA' THEN 'Transferência'
                 ELSE 'Vendas em Eventos'
             END`;

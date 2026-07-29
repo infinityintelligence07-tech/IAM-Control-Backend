@@ -4976,6 +4976,13 @@ export class TurmasService {
                 ...(addAlunoDto.comprovante_pagamento_base64 !== undefined && {
                     comprovante_pagamento_base64: addAlunoDto.comprovante_pagamento_base64,
                 }),
+                ...(addAlunoDto.id_turma_transferencia_de != null && {
+                    id_turma_transferencia_de: addAlunoDto.id_turma_transferencia_de,
+                }),
+                ...(addAlunoDto.codigo_turma_origem_planilha != null &&
+                    String(addAlunoDto.codigo_turma_origem_planilha).trim() !== '' && {
+                        codigo_turma_origem_planilha: String(addAlunoDto.codigo_turma_origem_planilha).trim(),
+                    }),
             };
 
             const turmaAluno = this.uow.turmasAlunosRP.create(dadosParaSalvar);

@@ -326,6 +326,8 @@ export class PermissionsMatrixService {
      *     Staff e funções com prioridade ≥ STAFF.
      * v11: calendário liberado para visualização de TODOS os papéis
      *     (calendario.view; edição continua como estava).
+     * v12: Marketing colaborador+ ganha credenciamento.edit (marcar presença
+     *     e adicionar/editar leads nas palestras masterclass).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -461,6 +463,19 @@ export class PermissionsMatrixService {
                         create: Boolean(role.calendario?.create),
                         edit: Boolean(role.calendario?.edit),
                         delete: Boolean(role.calendario?.delete),
+                    };
+                }
+
+                if (fromVersion < 12 && defaultRole.credenciamento?.edit) {
+                    role.credenciamento = {
+                        view: true,
+                        create: Boolean(
+                            role.credenciamento?.create || defaultRole.credenciamento.create,
+                        ),
+                        edit: true,
+                        delete: Boolean(
+                            role.credenciamento?.delete || defaultRole.credenciamento.delete,
+                        ),
                     };
                 }
             }

@@ -197,6 +197,7 @@ export class MasterclassController {
      * Inserir novo pré-cadastro manualmente
      */
     @Post('pre-cadastro')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async inserirPreCadastro(@Body() data: CreateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
         console.log('Inserindo novo pré-cadastro:', data);
         return this.masterclassService.inserirPreCadastro(data);
@@ -206,6 +207,7 @@ export class MasterclassController {
      * Editar pré-cadastro existente
      */
     @Put('pre-cadastro/:id')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async editarPreCadastro(@Param('id') id: string, @Body() data: UpdateMasterclassPreCadastroDto): Promise<MasterclassPreCadastros> {
         console.log('Editando pré-cadastro:', id, data);
         return this.masterclassService.editarPreCadastro(id, data);
@@ -215,6 +217,7 @@ export class MasterclassController {
      * Soft delete pré-cadastro
      */
     @Put('pre-cadastro/:id/soft-delete')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async softDeletePreCadastro(@Param('id') id: string, @Body() softDeleteDto: SoftDeleteMasterclassPreCadastroDto): Promise<{ message: string }> {
         console.log('Soft delete do pré-cadastro:', id, 'Dados:', softDeleteDto);
         await this.masterclassService.softDeletePreCadastro(id, softDeleteDto);
@@ -225,6 +228,7 @@ export class MasterclassController {
      * Excluir pré-cadastro
      */
     @Delete('pre-cadastro/:id')
+    @RequirePermission({ module: 'credenciamento', action: 'edit' })
     async excluirPreCadastro(@Param('id') id: string): Promise<{ message: string }> {
         console.log('Excluindo pré-cadastro (hard delete):', id);
         await this.masterclassService.excluirPreCadastro(id);

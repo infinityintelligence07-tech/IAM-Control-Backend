@@ -5596,15 +5596,17 @@ export class TurmasService {
                 }
             }
 
+            // Não faz JOIN em turmas_alunos aqui: o TypeORM injeta `deletado_em IS NULL` no ON
+            // e a matrícula de origem (soft-deleted na transferência) some do join — o extrato
+            // rotulava saída real de transferência como "Cancelamento". O `deletado_em` da
+            // origem vem de `matRows` (já carregado com withDeleted).
             const transferRows = await this.uow.historicoTransferenciasRP
                 .createQueryBuilder('h')
-                .leftJoin('turmas_alunos', 'ta_de', 'ta_de.id = h.id_turma_aluno_de')
                 .select('h.id_turma_de', 'id_turma_de')
                 .addSelect('h.id_turma_para', 'id_turma_para')
                 .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
                 .addSelect('h.id_turma_aluno_para', 'id_turma_aluno_para')
                 .addSelect('h.criado_em', 'criado_em')
-                .addSelect('ta_de.deletado_em', 'origem_deletado_em')
                 .where('(h.id_turma_de IN (:...ids) OR h.id_turma_para IN (:...ids))', { ids })
                 .andWhere('h.id_turma_de <> h.id_turma_para')
                 .andWhere('h.deletado_em IS NULL')
@@ -5614,21 +5616,20 @@ export class TurmasService {
                     id_turma_aluno_de: string | null;
                     id_turma_aluno_para: string | null;
                     criado_em: Date | string;
-                    origem_deletado_em: Date | string | null;
                 }>();
             const transferenciaEntradaIds = new Set<string>();
-            const transferenciaSaidaIds = new Set<string>();
+            /** id_turma_aluno_de → data da transferência (para cruzar com soft delete em matRows). */
+            const transferenciaSaidaCriadoEm = new Map<string, Date>();
             const UM_DIA_MS = 24 * 60 * 60 * 1000;
             for (const row of transferRows) {
                 if (row.id_turma_aluno_para != null) transferenciaEntradaIds.add(String(row.id_turma_aluno_para));
-                // Réplica (origem sem soft delete) não é saída. Soft delete muito depois da
-                // transferência (ex.: cancelamento posterior) também não conta como "Transferência".
+                // Destino especial (CANCELADA etc.) não é saída por transferência.
+                // Soft delete muito depois da transferência (ex.: cancelamento posterior a réplica)
+                // é filtrado ao montar a saída, usando deletado_em de matRows.
                 if (row.id_turma_aluno_de == null || specialSet.has(Number(row.id_turma_para))) continue;
-                const origemDel = toDate(row.origem_deletado_em);
                 const transferCriado = toDate(row.criado_em);
-                if (!origemDel || !transferCriado) continue;
-                if (Math.abs(origemDel.getTime() - transferCriado.getTime()) > UM_DIA_MS) continue;
-                transferenciaSaidaIds.add(String(row.id_turma_aluno_de));
+                if (!transferCriado) continue;
+                transferenciaSaidaCriadoEm.set(String(row.id_turma_aluno_de), transferCriado);
             }
 
             type Mov = { dia: string; tipo: 'ENTRADA' | 'SAIDA'; categoria: string; id_turma_aluno: string };
@@ -5681,8 +5682,11 @@ export class TurmasService {
                     // Prioriza log (cancelamento/remoção) sobre transferência, para não
                     // rotular cancelamento posterior a réplica como "Transferência".
                     let categoria: string = logSaidaPorMatricula.get(idTurmaAluno) ?? 'Cancelamento';
-                    if (!logSaidaPorMatricula.has(idTurmaAluno) && transferenciaSaidaIds.has(idTurmaAluno)) {
-                        categoria = 'Transferência';
+                    if (!logSaidaPorMatricula.has(idTurmaAluno) && deletado) {
+                        const transferCriado = transferenciaSaidaCriadoEm.get(idTurmaAluno);
+                        if (transferCriado && Math.abs(deletado.getTime() - transferCriado.getTime()) <= UM_DIA_MS) {
+                            categoria = 'Transferência';
+                        }
                     }
                     pushMov(idTurma, {
                         dia: row.dia_deletado || dataFinalStr,
@@ -5982,16 +5986,16 @@ export class TurmasService {
                 }
             }
 
+            // Mesmo cuidado do extrato: sem JOIN em turmas_alunos (soft-delete do TypeORM
+            // escondia a origem transferida). Cruza com deletado_em de matRows abaixo.
             const transferRows = await this.uow.historicoTransferenciasRP
                 .createQueryBuilder('h')
-                .leftJoin('turmas_alunos', 'ta_de', 'ta_de.id = h.id_turma_aluno_de')
                 .select('h.id_aluno', 'id_aluno')
                 .addSelect('h.id_turma_de', 'id_turma_de')
                 .addSelect('h.id_turma_para', 'id_turma_para')
                 .addSelect('h.id_turma_aluno_de', 'id_turma_aluno_de')
                 .addSelect('h.id_turma_aluno_para', 'id_turma_aluno_para')
                 .addSelect('h.criado_em', 'criado_em')
-                .addSelect('ta_de.deletado_em', 'origem_deletado_em')
                 .where('(h.id_turma_de = :id_turma OR h.id_turma_para = :id_turma)', { id_turma })
                 .andWhere('h.id_turma_de <> h.id_turma_para')
                 .andWhere('h.deletado_em IS NULL')
@@ -6002,11 +6006,10 @@ export class TurmasService {
                     id_turma_aluno_de: string | null;
                     id_turma_aluno_para: string | null;
                     criado_em: Date | string;
-                    origem_deletado_em: Date | string | null;
                 }>();
 
             const transferenciaEntrada = new Map<string, { id_turma_de: number; id_turma_para: number }>();
-            const transferenciaSaida = new Map<string, { id_turma_de: number; id_turma_para: number }>();
+            const transferenciaSaidaMeta = new Map<string, { id_turma_de: number; id_turma_para: number; criado_em: Date }>();
             const UM_DIA_MS = 24 * 60 * 60 * 1000;
             for (const row of transferRows) {
                 if (row.id_turma_aluno_para != null && Number(row.id_turma_para) === id_turma) {
@@ -6017,13 +6020,12 @@ export class TurmasService {
                 }
                 if (row.id_turma_aluno_de == null || Number(row.id_turma_de) !== id_turma) continue;
                 if (specialSet.has(Number(row.id_turma_para))) continue;
-                const origemDel = toDate(row.origem_deletado_em);
                 const transferCriado = toDate(row.criado_em);
-                if (!origemDel || !transferCriado) continue;
-                if (Math.abs(origemDel.getTime() - transferCriado.getTime()) > UM_DIA_MS) continue;
-                transferenciaSaida.set(String(row.id_turma_aluno_de), {
+                if (!transferCriado) continue;
+                transferenciaSaidaMeta.set(String(row.id_turma_aluno_de), {
                     id_turma_de: Number(row.id_turma_de),
                     id_turma_para: Number(row.id_turma_para),
+                    criado_em: transferCriado,
                 });
             }
 
@@ -6062,7 +6064,13 @@ export class TurmasService {
                 }
                 if (isSaida) {
                     const logCat = logSaidaPorMatricula.get(idTurmaAluno);
-                    const transf = !logCat ? transferenciaSaida.get(idTurmaAluno) : undefined;
+                    let transf: { id_turma_de: number; id_turma_para: number } | undefined;
+                    if (!logCat && deletado) {
+                        const meta = transferenciaSaidaMeta.get(idTurmaAluno);
+                        if (meta && Math.abs(deletado.getTime() - meta.criado_em.getTime()) <= UM_DIA_MS) {
+                            transf = { id_turma_de: meta.id_turma_de, id_turma_para: meta.id_turma_para };
+                        }
+                    }
                     itens.push({
                         id_aluno: idAluno,
                         id_turma_aluno: idTurmaAluno,

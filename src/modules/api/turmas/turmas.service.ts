@@ -837,9 +837,7 @@ export class TurmasService {
     async updateTurmasImersaoOfertadas(id: number, turmasImersaoOfertadas: number[], userId?: number): Promise<TurmaResponseDto> {
         await this.validarPermissaoGerenciarIprMasterclass(userId);
 
-        const ids = (Array.isArray(turmasImersaoOfertadas) ? turmasImersaoOfertadas : [])
-            .map((n) => Number(n))
-            .filter((n) => Number.isFinite(n) && n > 0);
+        const ids = (Array.isArray(turmasImersaoOfertadas) ? turmasImersaoOfertadas : []).map((n) => Number(n)).filter((n) => Number.isFinite(n) && n > 0);
 
         return this.update(id, {
             turmas_imersao_ofertadas: ids,
@@ -5123,6 +5121,30 @@ export class TurmasService {
                 userId,
             );
 
+            // Time de Vendas: histórico de→para na MESMA turma (marcador usado
+            // pela estratificação do dashboard / planilha / listagem).
+            if (addAlunoDto.marcar_time_vendas === true) {
+                try {
+                    const historicoTimeVendas = this.uow.historicoTransferenciasRP.create({
+                        id_aluno: Number(turmaAlunoSalva.id_aluno),
+                        id_turma_de: id_turma,
+                        id_turma_para: id_turma,
+                        id_turma_aluno_de: null,
+                        id_turma_aluno_para: turmaAlunoSalva.id,
+                    });
+                    if (userId) {
+                        historicoTimeVendas.criado_por = userId;
+                    }
+                    await this.uow.historicoTransferenciasRP.save(historicoTimeVendas);
+                } catch (error) {
+                    this.logger.warn(
+                        `turma.aluno.add | Falha ao marcar Time de Vendas turma=${id_turma} aluno=${turmaAlunoSalva.id_aluno}: ${
+                            error instanceof Error ? error.message : 'Erro desconhecido'
+                        }`,
+                    );
+                }
+            }
+
             // Verificar e atualizar status da turma após adicionar aluno
             const turmaAtualizada = await this.uow.turmasRP.findOne({
                 where: { id: id_turma },
@@ -5812,15 +5834,12 @@ export class TurmasService {
                     // cancel/remoção: a flag pode existir, mas há log de saída.
                     const logCat = logSaidaPorMatricula.get(idTurmaAluno);
                     const flagPara =
-                        row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== ''
-                            ? Number(row.id_turma_transferencia_para)
-                            : null;
+                        row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== '' ? Number(row.id_turma_transferencia_para) : null;
                     const flagTransferenciaReal = flagPara != null && Number.isFinite(flagPara) && !specialSet.has(flagPara);
                     let categoria: string = logCat ?? 'Cancelamento';
                     if (deletado) {
                         const transferCriado = transferenciaSaidaCriadoEm.get(idTurmaAluno);
-                        const histAlinhado =
-                            !!transferCriado && Math.abs(deletado.getTime() - transferCriado.getTime()) <= UM_DIA_MS;
+                        const histAlinhado = !!transferCriado && Math.abs(deletado.getTime() - transferCriado.getTime()) <= UM_DIA_MS;
                         if (histAlinhado || (flagTransferenciaReal && !logCat)) {
                             categoria = 'Transferência';
                         }
@@ -6204,15 +6223,12 @@ export class TurmasService {
                 if (isSaida) {
                     const logCat = logSaidaPorMatricula.get(idTurmaAluno);
                     const flagPara =
-                        row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== ''
-                            ? Number(row.id_turma_transferencia_para)
-                            : null;
+                        row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== '' ? Number(row.id_turma_transferencia_para) : null;
                     const flagTransferenciaReal = flagPara != null && Number.isFinite(flagPara) && !specialSet.has(flagPara);
                     let transf: { id_turma_de: number; id_turma_para: number } | undefined;
                     if (deletado) {
                         const meta = transferenciaSaidaMeta.get(idTurmaAluno);
-                        const histAlinhado =
-                            !!meta && Math.abs(deletado.getTime() - meta.criado_em.getTime()) <= UM_DIA_MS;
+                        const histAlinhado = !!meta && Math.abs(deletado.getTime() - meta.criado_em.getTime()) <= UM_DIA_MS;
                         if (histAlinhado && meta) {
                             transf = { id_turma_de: meta.id_turma_de, id_turma_para: meta.id_turma_para };
                         } else if (flagTransferenciaReal && !logCat) {
@@ -6224,7 +6240,7 @@ export class TurmasService {
                         id_turma_aluno: idTurmaAluno,
                         dia: row.dia_deletado || dataFinalStr,
                         tipo: 'SAIDA',
-                        categoria: transf ? 'Transferência' : logCat ?? 'Cancelamento',
+                        categoria: transf ? 'Transferência' : (logCat ?? 'Cancelamento'),
                         id_turma_de: transf?.id_turma_de ?? null,
                         id_turma_para: transf?.id_turma_para ?? null,
                     });

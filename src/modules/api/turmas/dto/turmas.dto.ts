@@ -643,6 +643,15 @@ export class AddAlunoTurmaDto {
     })
     id_turma_transferencia_de?: number | null;
 
+    /**
+     * Marca a matrícula como venda do Time de Vendas (histórico de↔para na
+     * mesma turma). Usado pela estratificação do dashboard (canal "Time de
+     * Vendas") — inclusive vendas com origem em mentoria pura.
+     */
+    @IsOptional()
+    @IsBoolean()
+    marcar_time_vendas?: boolean;
+
     @IsOptional()
     @IsString()
     @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))

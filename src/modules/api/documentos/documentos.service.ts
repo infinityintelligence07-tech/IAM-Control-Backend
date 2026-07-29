@@ -57,6 +57,8 @@ const parsePositiveIntEnv = (value: string | undefined, fallback: number): numbe
 };
 
 type ResumoHistoricoVendas = {
+    /** Nº de vendas (contratos) no mesmo conjunto filtrado dos demais cards. */
+    total_vendas: number;
     total_inscricoes_vendidas: number;
     total_inscricoes_bonus: number;
     total_com_pendencia: number;
@@ -1253,6 +1255,24 @@ export class DocumentosService {
                 // caem em "Vendas em Eventos" em vez de "Masterclass".
                 const idTurmaOrigemMatricula =
                     idTurmaReferencia && idTurmaReferencia !== idTurmaDestinoMatricula ? idTurmaReferencia : undefined;
+                // Canal Time de Vendas (COMERCIAL + mentoria pura): marca a matrícula
+                // com histórico de↔para na mesma turma para a estratificação.
+                const camposVariaveisCanal = (criarContratoDto.campos_variaveis || {}) as Record<string, string>;
+                const textoCanalMatricula = [
+                    camposVariaveisCanal['Canal da Venda'],
+                    camposVariaveisCanal['Canal de Vendas'],
+                    camposVariaveisCanal['Origem da Venda'],
+                    camposVariaveisCanal['Origem'],
+                ]
+                    .join(' ')
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '');
+                const marcarTimeVendasMatricula =
+                    textoCanalMatricula.includes('comercial') ||
+                    textoCanalMatricula.includes('time de vendas') ||
+                    textoCanalMatricula.includes('time_vendas') ||
+                    textoCanalMatricula.includes('evento - mentoria');
                 try {
                     await this.turmasService.addAlunoTurma(
                         idTurmaDestinoMatricula,
@@ -1263,7 +1283,11 @@ export class DocumentosService {
                             quantidade_inscricoes:
                                 criarContratoDto.quantidade_inscricoes && criarContratoDto.quantidade_inscricoes > 0 ? criarContratoDto.quantidade_inscricoes : 1,
                             comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda) ?? undefined,
-                            ...(idTurmaOrigemMatricula ? { id_turma_transferencia_de: idTurmaOrigemMatricula } : {}),
+                            ...(marcarTimeVendasMatricula
+                                ? { marcar_time_vendas: true }
+                                : idTurmaOrigemMatricula
+                                  ? { id_turma_transferencia_de: idTurmaOrigemMatricula }
+                                  : {}),
                         },
                         userId,
                     );
@@ -1271,28 +1295,52 @@ export class DocumentosService {
                 } catch (error) {
                     const mensagem = error instanceof Error ? error.message : 'Erro desconhecido';
                     if (mensagem.toLowerCase().includes('já está matriculado')) {
-                        // Backfill de origem MC em matrículas já existentes (renovação /
-                        // aluno já na turma) para a estratificação classificar corretamente.
-                        if (idTurmaOrigemMatricula) {
-                            try {
-                                const matriculaExistente = await this.uow.turmasAlunosRP.findOne({
-                                    where: {
-                                        id_turma: idTurmaDestinoMatricula,
-                                        id_aluno: parseInt(criarContratoDto.id_aluno) as any,
-                                        deletado_em: null,
-                                    },
-                                });
-                                if (matriculaExistente && matriculaExistente.id_turma_transferencia_de == null) {
+                        // Backfill de origem MC / Time de Vendas em matrículas já
+                        // existentes (renovação / aluno já na turma).
+                        try {
+                            const matriculaExistente = await this.uow.turmasAlunosRP.findOne({
+                                where: {
+                                    id_turma: idTurmaDestinoMatricula,
+                                    id_aluno: parseInt(criarContratoDto.id_aluno) as any,
+                                    deletado_em: null,
+                                },
+                            });
+                            if (matriculaExistente) {
+                                if (
+                                    !marcarTimeVendasMatricula &&
+                                    idTurmaOrigemMatricula &&
+                                    matriculaExistente.id_turma_transferencia_de == null
+                                ) {
                                     matriculaExistente.id_turma_transferencia_de = idTurmaOrigemMatricula;
                                     await this.uow.turmasAlunosRP.save(matriculaExistente);
                                 }
-                            } catch (backfillError) {
-                                this.logger.warn(
-                                    `zapsign.create.contract | Falha ao backfill origem da matrícula existente turma=${idTurmaDestinoMatricula} aluno=${criarContratoDto.id_aluno}: ${
-                                        backfillError instanceof Error ? backfillError.message : 'Erro desconhecido'
-                                    }`,
-                                );
+                                if (marcarTimeVendasMatricula) {
+                                    const jaTemMarcador = await this.uow.historicoTransferenciasRP.findOne({
+                                        where: {
+                                            id_turma_aluno_para: matriculaExistente.id,
+                                            id_turma_de: idTurmaDestinoMatricula,
+                                            id_turma_para: idTurmaDestinoMatricula,
+                                        },
+                                    });
+                                    if (!jaTemMarcador) {
+                                        const historicoTimeVendas = this.uow.historicoTransferenciasRP.create({
+                                            id_aluno: Number(matriculaExistente.id_aluno),
+                                            id_turma_de: idTurmaDestinoMatricula,
+                                            id_turma_para: idTurmaDestinoMatricula,
+                                            id_turma_aluno_de: null,
+                                            id_turma_aluno_para: matriculaExistente.id,
+                                        });
+                                        if (userId) historicoTimeVendas.criado_por = userId;
+                                        await this.uow.historicoTransferenciasRP.save(historicoTimeVendas);
+                                    }
+                                }
                             }
+                        } catch (backfillError) {
+                            this.logger.warn(
+                                `zapsign.create.contract | Falha ao backfill origem da matrícula existente turma=${idTurmaDestinoMatricula} aluno=${criarContratoDto.id_aluno}: ${
+                                    backfillError instanceof Error ? backfillError.message : 'Erro desconhecido'
+                                }`,
+                            );
                         }
                         matriculaDestino = { criada: false, ja_matriculado: true };
                     } else {
@@ -3695,7 +3743,17 @@ export class DocumentosService {
         ) {
             return 'MASTERCLASS';
         }
-        if (texto.includes('time de vendas') || texto.includes('vendas iam')) {
+        // Time de Vendas (inclui vendas com origem em mentoria pura).
+        if (
+            texto.includes('time de vendas') ||
+            texto.includes('vendas iam') ||
+            texto.includes('comercial') ||
+            texto.includes('evento - mentoria') ||
+            // Rótulo de turma única de mentoria (ex.: "Liberty (Mentoria)").
+            texto.includes('(mentoria)') ||
+            // Rótulo novo: "Time de Vendas - Mentoria (Liberty)"
+            (texto.includes('mentoria') && texto.includes('time de vendas'))
+        ) {
             return 'TIME_VENDAS';
         }
         return 'EVENTOS';
@@ -4074,6 +4132,21 @@ export class DocumentosService {
             ta.id_turma::text,
             ''
         ), '')::int`;
+    }
+
+    /**
+     * Origem = turma ÚNICA de mentoria (ex.: Liberty id 193), NÃO o evento
+     * vinculado (`id_turma_mentoria_vinculada`, ex.: 2435). Essas vendas
+     * pertencem ao canal Time de Vendas — inclusive registros antigos com
+     * `hist_canal_venda = EVENTOS`. Requer joins turma_origem_evento /
+     * treinamento_origem_evento.
+     */
+    private get sqlOrigemEhMentoriaPuraHistorico(): string {
+        return `(
+            turma_origem_evento.id IS NOT NULL
+            AND turma_origem_evento.id_turma_mentoria_vinculada IS NULL
+            AND treinamento_origem_evento.tipo_mentoria = true
+        )`;
     }
 
     /** Treinamento de origem: resolve pela relação antes dos textos crus. */
@@ -5194,8 +5267,21 @@ export class DocumentosService {
                 .addSelect(`contrato.dados_contrato->'aluno'->>'email'`, 'aluno_email_snapshot');
         }
 
-        if (canalVendaFiltro) {
+        if (canalVendaFiltro === 'MASTERCLASS') {
             opcoesQb.andWhere('contrato.hist_canal_venda = :canalVendaFiltro', { canalVendaFiltro });
+        } else if (canalVendaFiltro === 'TIME_VENDAS') {
+            // Mentoria pura (turma única) conta como Time de Vendas mesmo quando
+            // o hist materializado antigo ficou como EVENTOS.
+            opcoesQb.andWhere(
+                `(contrato.hist_canal_venda = :canalVendaFiltro OR ${this.sqlOrigemEhMentoriaPuraHistorico})`,
+                { canalVendaFiltro },
+            );
+        } else if (canalVendaFiltro === 'EVENTOS') {
+            // Eventos = treinamentos/eventos do dia; exclui turma única de mentoria.
+            opcoesQb.andWhere(
+                `contrato.hist_canal_venda = :canalVendaFiltro AND NOT (${this.sqlOrigemEhMentoriaPuraHistorico})`,
+                { canalVendaFiltro },
+            );
         }
         if (somentePendenciaAtivo) {
             opcoesQb.andWhere('contrato.hist_pendencia_pagamento = true');
@@ -5356,11 +5442,23 @@ export class DocumentosService {
     }): number {
         const dadosContrato = contratoMapeado?.dados_contrato || {};
         const camposVariaveis = dadosContrato?.campos_variaveis || {};
-        const turmaAluno = contratoMapeado?.turma_aluno || dadosContrato?.turma_aluno || {};
-        const quantidadeViaTurmaAluno = Number(turmaAluno?.quantidade_inscricoes ?? 0);
+        // Snapshot da venda tem prioridade sobre a matrícula vinculada (origem
+        // compartilhada entre vendas — quantidade de OUTRA venda não pode vazar).
+        const turmaAlunoSnapshot = dadosContrato?.turma_aluno || {};
+        const turmaAlunoVinculada = contratoMapeado?.turma_aluno || {};
+        const quantidadeViaSnapshot = Number(turmaAlunoSnapshot?.quantidade_inscricoes ?? 0);
+        const quantidadeViaVinculo = Number(turmaAlunoVinculada?.quantidade_inscricoes ?? 0);
+        const quantidadeViaTurmaAluno =
+            Number.isFinite(quantidadeViaSnapshot) && quantidadeViaSnapshot > 0
+                ? quantidadeViaSnapshot
+                : quantidadeViaVinculo;
         const quantidadeViaCampos = Number.parseInt(String(camposVariaveis['Quantidade de Inscrições'] || camposVariaveis['Quantidade de Inscricoes'] || ''), 10);
-        const outrosClientes = Array.isArray(turmaAluno?.outros_clientes) ? turmaAluno.outros_clientes : [];
-        const quantidadeViaOutrosClientes = outrosClientes.length + 1;
+        const outrosClientesRaw = Array.isArray(turmaAlunoSnapshot?.outros_clientes)
+            ? turmaAlunoSnapshot.outros_clientes
+            : Array.isArray(turmaAlunoVinculada?.outros_clientes)
+              ? turmaAlunoVinculada.outros_clientes
+              : [];
+        const quantidadeViaOutrosClientes = outrosClientesRaw.length + 1;
 
         return Math.max(
             1,
@@ -5739,6 +5837,7 @@ export class DocumentosService {
         const [totaisRow] = await manager.query(
             `
             SELECT
+                COUNT(*)::int AS total_vendas,
                 COALESCE(SUM(q.hist_qtd_inscricoes), 0)::float AS total_inscricoes_vendidas,
                 COALESCE(SUM(q.hist_qtd_bonus), 0)::float AS total_inscricoes_bonus,
                 COALESCE(SUM(CASE WHEN q.hist_pendencia_pagamento THEN 1 ELSE 0 END), 0)::int AS total_com_pendencia,
@@ -5864,6 +5963,7 @@ export class DocumentosService {
             .sort((a, b) => b.total_inscricoes - a.total_inscricoes || b.total_vendas - a.total_vendas || a.vendedor_nome.localeCompare(b.vendedor_nome, 'pt-BR'));
 
         return {
+            total_vendas: Number(totaisRow?.total_vendas || 0),
             total_inscricoes_vendidas: Number(totaisRow?.total_inscricoes_vendidas || 0),
             total_inscricoes_bonus: Number(totaisRow?.total_inscricoes_bonus || 0),
             total_com_pendencia: Number(totaisRow?.total_com_pendencia || 0),
@@ -5900,6 +6000,7 @@ export class DocumentosService {
                 return acc;
             },
             {
+                total_vendas: 0,
                 total_inscricoes_vendidas: 0,
                 total_inscricoes_bonus: 0,
                 total_com_pendencia: 0,
@@ -5909,6 +6010,7 @@ export class DocumentosService {
             },
         );
         // Fallback legado: sem colunas de assinatura/conciliação nas linhas raw.
+        resumoBase.total_vendas = linhasAtivas.length;
         resumoBase.total_sem_assinatura = 0;
         resumoBase.total_sem_conciliacao = 0;
 
@@ -6065,6 +6167,12 @@ export class DocumentosService {
          */
         id_turma_origem?: string | number;
         turma_destino?: string;
+        /**
+         * Filtro EXATO pelo id da turma de DESTINO (checklist Masterclass de
+         * edições IPR). Mais confiável que o rótulo textual quando há várias
+         * turmas com o mesmo nome/edição ou rótulos legados divergentes.
+         */
+        id_turma_destino?: string | number;
         staff_lider_id?: string;
         // Origem do aluno (canal do dashboard/planilha). Aceita múltiplos valores
         // separados por "|" (ex.: "Bônus|Transbordo"). Filtra tanto a listagem
@@ -6131,6 +6239,9 @@ export class DocumentosService {
             const incluirResumo = apenasResumo || !omitirResumoExplicit;
             const marcadorAtualizacao = this.obterMarcadorAtualizacaoHistorico();
             const chaveFiltrosResumo = {
+                // v2: total_vendas no resumo + id_turma_destino; invalida cache antigo
+                // que podia divergir dos filtros de turma origem/destino.
+                resumo_v: 3,
                 marcadorAtualizacao,
                 id_aluno: filtros?.id_aluno || null,
                 id_treinamento: filtros?.id_treinamento || null,
@@ -6148,6 +6259,7 @@ export class DocumentosService {
                 turma_origem: filtros?.turma_origem || null,
                 id_turma_origem: filtros?.id_turma_origem || null,
                 turma_destino: filtros?.turma_destino || null,
+                id_turma_destino: filtros?.id_turma_destino || null,
                 staff_lider_id: staffLiderId || null,
                 origem: filtros?.origem || null,
                 ordenacao_data:
@@ -6181,12 +6293,22 @@ export class DocumentosService {
                 .split('|')
                 .map((valor) => this.normalizarTexto(valor))
                 .filter(Boolean);
-            // Aceita um id ou vários separados por "|" (checklist de masterclass).
-            const idsTurmaOrigemFiltro = String(filtros?.id_turma_origem ?? '')
-                .split('|')
+            // Aceita um id ou vários separados por "|" (checklist de destino MC).
+            // Também aceita array quando o Nest parseia query params repetidos.
+            const idsTurmaOrigemFiltro = (Array.isArray(filtros?.id_turma_origem)
+                ? (filtros?.id_turma_origem as Array<string | number>)
+                : String(filtros?.id_turma_origem ?? '').split('|')
+            )
                 .map((valor) => Number(String(valor).trim()))
                 .filter((id) => Number.isFinite(id) && id > 0);
             const idTurmaOrigemFiltroAtivo = idsTurmaOrigemFiltro.length > 0;
+            const idsTurmaDestinoFiltro = (Array.isArray(filtros?.id_turma_destino)
+                ? (filtros?.id_turma_destino as Array<string | number>)
+                : String(filtros?.id_turma_destino ?? '').split('|')
+            )
+                .map((valor) => Number(String(valor).trim()))
+                .filter((id) => Number.isFinite(id) && id > 0);
+            const idTurmaDestinoFiltroAtivo = idsTurmaDestinoFiltro.length > 0;
             // Aplica filtro de turma no modo legado ("turma"/"treinamento") OU
             // quando origem/destino foram enviados (período + turma juntos).
             const filtroTurmaAtivo =
@@ -6194,7 +6316,8 @@ export class DocumentosService {
                 Boolean(treinamentoOrigemFiltro) ||
                 turmasOrigemFiltro.length > 0 ||
                 turmasDestinoFiltro.length > 0 ||
-                idTurmaOrigemFiltroAtivo;
+                idTurmaOrigemFiltroAtivo ||
+                idTurmaDestinoFiltroAtivo;
             const somentePendenciaAtivo =
                 filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
             const somenteSemAssinaturaAtivo =
@@ -6534,18 +6657,39 @@ export class DocumentosService {
                 });
             }
 
+            // Filtro EXATO por id da turma de destino (checklist Masterclass).
+            if (idTurmaDestinoFiltroAtivo) {
+                const comboDestinoIdExistsSql = `EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(contrato.dados_contrato->'combo_itens') = 'array'
+                             THEN contrato.dados_contrato->'combo_itens'
+                             ELSE '[]'::jsonb END
+                    ) AS combo_item
+                    WHERE NULLIF(combo_item->>'id_turma', '')::int IN (:...idsTurmaDestinoFiltro)
+                )`;
+                baseQb.andWhere(
+                    `(${idTurmaDestinoDadosContratoSql} IN (:...idsTurmaDestinoFiltro) OR tat.id_turma_destino IN (:...idsTurmaDestinoFiltro) OR ${comboDestinoIdExistsSql})`,
+                    { idsTurmaDestinoFiltro },
+                );
+            }
+
             if (filtros?.canal_venda === 'MASTERCLASS') {
                 baseQb.andWhere(`contrato.hist_canal_venda = :canalMasterclass`, {
                     canalMasterclass: 'MASTERCLASS',
                 });
             } else if (filtros?.canal_venda === 'TIME_VENDAS') {
-                baseQb.andWhere(`contrato.hist_canal_venda = :canalTimeVendas`, {
-                    canalTimeVendas: 'TIME_VENDAS',
-                });
+                // Mentoria pura (ex. id 193) → Time de Vendas; evento vinculado
+                // (ex. 2435, com id_turma_mentoria_vinculada) permanece em Eventos.
+                baseQb.andWhere(
+                    `(contrato.hist_canal_venda = :canalTimeVendas OR ${this.sqlOrigemEhMentoriaPuraHistorico})`,
+                    { canalTimeVendas: 'TIME_VENDAS' },
+                );
             } else if (filtros?.canal_venda === 'EVENTOS') {
-                baseQb.andWhere(`contrato.hist_canal_venda = :canalEventos`, {
-                    canalEventos: 'EVENTOS',
-                });
+                baseQb.andWhere(
+                    `contrato.hist_canal_venda = :canalEventos AND NOT (${this.sqlOrigemEhMentoriaPuraHistorico})`,
+                    { canalEventos: 'EVENTOS' },
+                );
             }
 
             // Filtro por origem do aluno (multi-seleção). Aplicado ao baseQb, portanto
@@ -6557,13 +6701,13 @@ export class DocumentosService {
             }
 
             if (apenasResumo) {
-                const [resumoIsolado, totalRow] = await Promise.all([
-                    this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
-                        staff_lider_id: staffLiderId,
-                    }),
-                    baseQb.clone().select('COUNT(DISTINCT contrato.id)', 'total').getRawOne<{ total: string | number }>(),
-                ]);
-                const totalResumo = Number(totalRow?.total ?? 0);
+                // Fonte ÚNICA: total_vendas e demais cards saem da mesma agregação
+                // filtrada (evita Nº Vendas da listagem divergir de Sem conciliação /
+                // Inscrições / Receita quando o cache ou o COUNT paralelo dessincronizam).
+                const resumoIsolado = await this.obterResumoHistoricoCacheado(baseQb, chaveCacheResumo, {
+                    staff_lider_id: staffLiderId,
+                });
+                const totalResumo = Number(resumoIsolado.total_vendas ?? 0);
                 return {
                     data: [],
                     total: totalResumo,

@@ -255,6 +255,7 @@ export class DocumentosController {
         @Query('id_turma_origem') id_turma_origem?: string,
         @Query('turma_destino') turma_destino?: string,
         @Query('id_turma_destino') id_turma_destino?: string,
+        @Query('id_empresa') id_empresa?: string,
         @Query('staff_lider_id') staff_lider_id?: string,
         @Query('origem') origem?: string,
         @Query('ordenacao_data') ordenacao_data?: string,
@@ -281,6 +282,7 @@ export class DocumentosController {
             id_turma_origem,
             turma_destino,
             id_turma_destino,
+            id_empresa,
             staff_lider_id,
             origem,
             ordenacao_data,
@@ -342,6 +344,7 @@ export class DocumentosController {
         @Query('id_turma_origem') id_turma_origem?: string,
         @Query('turma_destino') turma_destino?: string,
         @Query('id_turma_destino') id_turma_destino?: string,
+        @Query('id_empresa') id_empresa?: string,
         @Query('staff_lider_id') staff_lider_id?: string,
         @Query('origem') origem?: string,
     ) {
@@ -363,6 +366,7 @@ export class DocumentosController {
             id_turma_origem,
             turma_destino,
             id_turma_destino,
+            id_empresa,
             staff_lider_id,
             origem,
             apenas_resumo: true,
@@ -387,6 +391,7 @@ export class DocumentosController {
         @Query('status') status?: string,
         @Query('treinamento_origem') treinamento_origem?: string,
         @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma',
+        @Query('id_empresa') id_empresa?: string,
     ) {
         return this.documentosService.listarOpcoesFiltrosOrigem({
             data_inicio,
@@ -397,6 +402,7 @@ export class DocumentosController {
             status,
             treinamento_origem,
             tipo_filtro_busca,
+            id_empresa,
         });
     }
 

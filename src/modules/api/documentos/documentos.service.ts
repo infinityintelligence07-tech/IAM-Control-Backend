@@ -4135,6 +4135,20 @@ export class DocumentosService {
     }
 
     /**
+     * Empresa (IAM, Liberty, ...) do treinamento de DESTINO da venda: resolve na
+     * mesma ordem do rótulo de destino (turma do snapshot, turma do
+     * `turmas_alunos_treinamentos`, matrícula). NULL = produto sem empresa
+     * vinculada. Requer os mesmos joins do rótulo de destino.
+     */
+    private get sqlIdEmpresaDestinoHistorico(): string {
+        return `COALESCE(
+            treinamento_destino_evento.id_empresa,
+            treinamento_destino_tat.id_empresa,
+            treinamento_destino.id_empresa
+        )`;
+    }
+
+    /**
      * Origem = turma ÚNICA de mentoria (ex.: Liberty id 193), NÃO o evento
      * vinculado (`id_turma_mentoria_vinculada`, ex.: 2435). Essas vendas
      * pertencem ao canal Time de Vendas — inclusive registros antigos com
@@ -4547,6 +4561,7 @@ export class DocumentosService {
         status?: string;
         treinamento_origem?: string;
         tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
+        id_empresa?: string | number;
     }): string {
         return JSON.stringify({
             data_inicio: filtros?.data_inicio || '',
@@ -4557,6 +4572,7 @@ export class DocumentosService {
             status: this.normalizarTexto(filtros?.status),
             treinamento_origem: this.normalizarTexto(filtros?.treinamento_origem),
             tipo_filtro_busca: filtros?.tipo_filtro_busca || 'periodo',
+            id_empresa: String(filtros?.id_empresa ?? ''),
         });
     }
 
@@ -5177,6 +5193,11 @@ export class DocumentosService {
         status?: string;
         treinamento_origem?: string;
         tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
+        /**
+         * Empresa do produto de DESTINO: restringe as opções de turma de destino
+         * (o filtro de empresa do histórico vem antes da turma de destino).
+         */
+        id_empresa?: string | number;
     }): Promise<{
         treinamentos_origem: string[];
         turmas_origem: string[];
@@ -5208,6 +5229,16 @@ export class DocumentosService {
 
         const termoBusca = this.normalizarTexto(filtros?.search);
         const treinamentoOrigemSelecionado = this.normalizarTexto(filtros?.treinamento_origem);
+        // Empresa do produto de destino: filtra SÓ as opções de destino (a
+        // origem pode ser de outra empresa — venda cruzada é permitida).
+        const idsEmpresaDestinoFiltro = (Array.isArray(filtros?.id_empresa)
+            ? (filtros?.id_empresa as Array<string | number>)
+            : String(filtros?.id_empresa ?? '').split('|')
+        )
+            .map((valor) => Number(String(valor).trim()))
+            .filter((id) => Number.isFinite(id) && id > 0);
+        const empresaDestinoPermitida = (idEmpresa?: number | null): boolean =>
+            idsEmpresaDestinoFiltro.length === 0 || (Boolean(idEmpresa) && idsEmpresaDestinoFiltro.includes(Number(idEmpresa)));
         const canalVendaFiltro = filtros?.canal_venda || '';
         const somentePendenciaAtivo = filtros?.somente_com_pendencia === true || filtros?.somente_com_pendencia === 'true' || filtros?.somente_com_pendencia === '1';
         const statusFiltro = this.normalizarTexto(filtros?.status);
@@ -5244,6 +5275,7 @@ export class DocumentosService {
             .addSelect(this.sqlTurmaOrigemHistoricoDisplay, 'turma_origem')
             .addSelect(this.sqlTurmaDestinoHistoricoDisplay, 'turma_destino')
             .addSelect(this.sqlIdTurmaOrigemHistorico, 'id_turma_origem')
+            .addSelect(this.sqlIdEmpresaDestinoHistorico, 'id_empresa_destino')
             // Itens de COMBO da venda: as turmas dos produtos secundários também
             // entram nas opções de turma de destino (o filtro casa combos).
             .addSelect(`contrato.dados_contrato->'combo_itens'`, 'combo_itens')
@@ -5292,6 +5324,7 @@ export class DocumentosService {
             turma_origem?: string | null;
             turma_destino?: string | null;
             id_turma_origem?: string | number | null;
+            id_empresa_destino?: string | number | null;
             combo_itens?: unknown;
             canal_venda?: string | null;
             status_documento?: string | null;
@@ -5372,7 +5405,8 @@ export class DocumentosService {
                 turmasOrigem.add(turmaOrigem);
             }
 
-            if (turmaDestino && !turmaEhInvalida(turmaDestino)) {
+            const empresaDestinoLinha = Number(linha.id_empresa_destino) || null;
+            if (turmaDestino && !turmaEhInvalida(turmaDestino) && empresaDestinoPermitida(empresaDestinoLinha)) {
                 turmasDestino.add(turmaDestino);
                 if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
                     const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
@@ -5394,6 +5428,7 @@ export class DocumentosService {
                 const labelSnapshot = treinamentoSnapshot && edicaoSnapshot ? `${treinamentoSnapshot} - ${edicaoSnapshot}` : treinamentoSnapshot;
                 const labelCombo = (labelRelacao || labelSnapshot).trim();
                 if (!labelCombo || turmaEhInvalida(labelCombo)) return;
+                if (!empresaDestinoPermitida(turmaCombo?.id_treinamento_fk?.id_empresa ?? null)) return;
                 turmasDestino.add(labelCombo);
                 if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
                     const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
@@ -6173,6 +6208,12 @@ export class DocumentosService {
          * turmas com o mesmo nome/edição ou rótulos legados divergentes.
          */
         id_turma_destino?: string | number;
+        /**
+         * Filtro por EMPRESA (IAM, Liberty, ...) do produto de DESTINO da venda.
+         * Aceita um id ou vários separados por "|". Casa também as turmas dos
+         * itens de combo.
+         */
+        id_empresa?: string | number;
         staff_lider_id?: string;
         // Origem do aluno (canal do dashboard/planilha). Aceita múltiplos valores
         // separados por "|" (ex.: "Bônus|Transbordo"). Filtra tanto a listagem
@@ -6241,7 +6282,8 @@ export class DocumentosService {
             const chaveFiltrosResumo = {
                 // v2: total_vendas no resumo + id_turma_destino; invalida cache antigo
                 // que podia divergir dos filtros de turma origem/destino.
-                resumo_v: 3,
+                // v4: filtro por empresa do produto de destino.
+                resumo_v: 4,
                 marcadorAtualizacao,
                 id_aluno: filtros?.id_aluno || null,
                 id_treinamento: filtros?.id_treinamento || null,
@@ -6260,6 +6302,7 @@ export class DocumentosService {
                 id_turma_origem: filtros?.id_turma_origem || null,
                 turma_destino: filtros?.turma_destino || null,
                 id_turma_destino: filtros?.id_turma_destino || null,
+                id_empresa: filtros?.id_empresa || null,
                 staff_lider_id: staffLiderId || null,
                 origem: filtros?.origem || null,
                 ordenacao_data:
@@ -6309,6 +6352,14 @@ export class DocumentosService {
                 .map((valor) => Number(String(valor).trim()))
                 .filter((id) => Number.isFinite(id) && id > 0);
             const idTurmaDestinoFiltroAtivo = idsTurmaDestinoFiltro.length > 0;
+            // Empresa do produto de destino (aceita um id ou vários com "|").
+            const idsEmpresaFiltro = (Array.isArray(filtros?.id_empresa)
+                ? (filtros?.id_empresa as Array<string | number>)
+                : String(filtros?.id_empresa ?? '').split('|')
+            )
+                .map((valor) => Number(String(valor).trim()))
+                .filter((id) => Number.isFinite(id) && id > 0);
+            const idEmpresaFiltroAtivo = idsEmpresaFiltro.length > 0;
             // Aplica filtro de turma no modo legado ("turma"/"treinamento") OU
             // quando origem/destino foram enviados (período + turma juntos).
             const filtroTurmaAtivo =
@@ -6671,6 +6722,29 @@ export class DocumentosService {
                 baseQb.andWhere(
                     `(${idTurmaDestinoDadosContratoSql} IN (:...idsTurmaDestinoFiltro) OR tat.id_turma_destino IN (:...idsTurmaDestinoFiltro) OR ${comboDestinoIdExistsSql})`,
                     { idsTurmaDestinoFiltro },
+                );
+            }
+
+            // Filtro por EMPRESA do produto de destino (IAM, Liberty, ...): casa
+            // o destino principal da venda e também as turmas dos itens de combo.
+            if (idEmpresaFiltroAtivo) {
+                const schemaEmpresa = this.uow.turmasAlunosTreinamentosContratosRP.metadata.schema || 'public';
+                const comboEmpresaExistsSql = `EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(
+                        CASE WHEN jsonb_typeof(contrato.dados_contrato->'combo_itens') = 'array'
+                             THEN contrato.dados_contrato->'combo_itens'
+                             ELSE '[]'::jsonb END
+                    ) AS combo_item_empresa
+                    INNER JOIN ${schemaEmpresa}.turmas AS turma_combo_empresa
+                        ON turma_combo_empresa.id = NULLIF(combo_item_empresa->>'id_turma', '')::int
+                    INNER JOIN ${schemaEmpresa}.treinamentos AS treinamento_combo_empresa
+                        ON treinamento_combo_empresa.id = turma_combo_empresa.id_treinamento
+                    WHERE treinamento_combo_empresa.id_empresa IN (:...idsEmpresaFiltro)
+                )`;
+                baseQb.andWhere(
+                    `(${this.sqlIdEmpresaDestinoHistorico} IN (:...idsEmpresaFiltro) OR ${comboEmpresaExistsSql})`,
+                    { idsEmpresaFiltro },
                 );
             }
 

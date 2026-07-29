@@ -27,6 +27,11 @@ export const CONFIG_KEYS = {
     // Valor padrão (R$) da taxa de inscrição do IPR vendido com origem em
     // masterclass; cada palestra pode sobrescrever nas informações da turma.
     TAXA_INSCRICAO_IPR_MASTERCLASS: 'taxa_inscricao_ipr_masterclass',
+    // Exportação Kamino (Histórico de Vendas).
+    KAMINO_UNIDADES_NEGOCIO: 'kamino_unidades_negocio',
+    KAMINO_CONTAS_DESTINO: 'kamino_contas_destino',
+    KAMINO_TIPOS_RECEBIMENTO: 'kamino_tipos_recebimento',
+    KAMINO_CODIGOS_CLASSIFICACAO: 'kamino_codigos_classificacao',
 } as const;
 
 /** Chaves cujo valor é monetário em reais (>= 0, aceita decimais). */
@@ -41,8 +46,24 @@ export const CONFIG_KEYS_PERCENTUAIS: string[] = [
     CONFIG_KEYS.COMISSAO_PERCENTUAL,
 ];
 
+/** Chaves cujo valor é JSON de códigos Kamino (listas). */
+export const CONFIG_KEYS_KAMINO_JSON: string[] = [
+    CONFIG_KEYS.KAMINO_UNIDADES_NEGOCIO,
+    CONFIG_KEYS.KAMINO_CONTAS_DESTINO,
+    CONFIG_KEYS.KAMINO_TIPOS_RECEBIMENTO,
+    CONFIG_KEYS.KAMINO_CODIGOS_CLASSIFICACAO,
+];
+
 /** Defaults dos acessores financeiros (Peterson, Luana, Elaine). */
 export const DEFAULT_ASSESSORES_FINANCEIROS_IDS = [334, 171, 84];
+
+export const DEFAULT_KAMINO_UNIDADES_NEGOCIO = [{ codigo: '1', nome: '' }];
+export const DEFAULT_KAMINO_CONTAS_DESTINO = [{ codigo: '10201', nome: '' }];
+export const DEFAULT_KAMINO_TIPOS_RECEBIMENTO = [{ codigo: '5' }];
+export const DEFAULT_KAMINO_CODIGOS_CLASSIFICACAO = [
+    { codigo: '20102', descricao: 'Confronto', eh_return: false },
+    { codigo: '20122', descricao: 'Confronto Return', eh_return: true },
+];
 
 export const CONFIG_DEFAULTS: Record<string, string> = {
     [CONFIG_KEYS.TESTEMUNHA_EMAIL_PADRAO]: 'contato@iamtreinamentos.com.br',
@@ -60,6 +81,10 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
     [CONFIG_KEYS.COMISSAO_PERCENTUAL]: '0',
     // Taxa de inscrição padrão (R$) do IPR vendido nas masterclasses.
     [CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS]: '250',
+    [CONFIG_KEYS.KAMINO_UNIDADES_NEGOCIO]: JSON.stringify(DEFAULT_KAMINO_UNIDADES_NEGOCIO),
+    [CONFIG_KEYS.KAMINO_CONTAS_DESTINO]: JSON.stringify(DEFAULT_KAMINO_CONTAS_DESTINO),
+    [CONFIG_KEYS.KAMINO_TIPOS_RECEBIMENTO]: JSON.stringify(DEFAULT_KAMINO_TIPOS_RECEBIMENTO),
+    [CONFIG_KEYS.KAMINO_CODIGOS_CLASSIFICACAO]: JSON.stringify(DEFAULT_KAMINO_CODIGOS_CLASSIFICACAO),
 };
 
 @Injectable()
@@ -199,6 +224,10 @@ export class ConfiguracoesService {
                 }
             }
 
+            if (CONFIG_KEYS_KAMINO_JSON.includes(chave)) {
+                valor = this.normalizarValorKamino(chave, valor);
+            }
+
             const existente = await this.uow.configuracoesSistemaRP.findOne({ where: { chave } });
             if (existente) {
                 existente.valor = valor;
@@ -217,6 +246,82 @@ export class ConfiguracoesService {
         }
 
         return this.findAll();
+    }
+
+    /** Valida e normaliza o JSON das listas Kamino antes de persistir. */
+    private normalizarValorKamino(chave: string, valor: string | null): string {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(String(valor ?? '[]'));
+        } catch {
+            throw new BadRequestException(`Valor inválido para "${chave}": JSON malformado.`);
+        }
+        if (!Array.isArray(parsed)) {
+            throw new BadRequestException(`Valor inválido para "${chave}": esperado um array.`);
+        }
+
+        if (chave === CONFIG_KEYS.KAMINO_CODIGOS_CLASSIFICACAO) {
+            const lista = parsed
+                .map((item) => {
+                    if (!item || typeof item !== 'object') return null;
+                    const obj = item as Record<string, unknown>;
+                    const codigo = String(obj.codigo ?? '').trim();
+                    if (!codigo) return null;
+                    const descricao = String(obj.descricao ?? '').trim();
+                    const ehReturnRaw = obj.eh_return ?? obj.is_return ?? obj.return ?? false;
+                    return {
+                        codigo,
+                        descricao,
+                        eh_return: ehReturnRaw === true || ehReturnRaw === 'true' || ehReturnRaw === 1,
+                    };
+                })
+                .filter((item): item is { codigo: string; descricao: string; eh_return: boolean } => item != null);
+            if (lista.length === 0) {
+                throw new BadRequestException('Informe ao menos um código de classificação Kamino.');
+            }
+            return JSON.stringify(lista);
+        }
+
+        if (chave === CONFIG_KEYS.KAMINO_TIPOS_RECEBIMENTO) {
+            const lista = parsed
+                .map((item) => {
+                    if (typeof item === 'string' || typeof item === 'number') {
+                        const codigo = String(item).trim();
+                        return codigo ? { codigo } : null;
+                    }
+                    if (!item || typeof item !== 'object') return null;
+                    const codigo = String((item as Record<string, unknown>).codigo ?? '').trim();
+                    return codigo ? { codigo } : null;
+                })
+                .filter((item): item is { codigo: string } => item != null);
+            if (lista.length === 0) {
+                throw new BadRequestException('Informe ao menos um Código do Tipo de Recebimento.');
+            }
+            return JSON.stringify(lista);
+        }
+
+        // Unidades de negócio e contas de destino: código + nome opcional.
+        const rotulo =
+            chave === CONFIG_KEYS.KAMINO_UNIDADES_NEGOCIO
+                ? 'Unidade de Negócio'
+                : 'Código da Conta de Destino';
+        const lista = parsed
+            .map((item) => {
+                if (typeof item === 'string' || typeof item === 'number') {
+                    const codigo = String(item).trim();
+                    return codigo ? { codigo, nome: '' } : null;
+                }
+                if (!item || typeof item !== 'object') return null;
+                const obj = item as Record<string, unknown>;
+                const codigo = String(obj.codigo ?? '').trim();
+                if (!codigo) return null;
+                return { codigo, nome: String(obj.nome ?? '').trim() };
+            })
+            .filter((item): item is { codigo: string; nome: string } => item != null);
+        if (lista.length === 0) {
+            throw new BadRequestException(`Informe ao menos um valor de ${rotulo}.`);
+        }
+        return JSON.stringify(lista);
     }
 
     private async validarIdsAssessores(ids: number[], exigirCuidadoDeAlunos: boolean): Promise<void> {

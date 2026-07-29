@@ -704,16 +704,27 @@ export class DuvidasService {
     }
 
     /**
-     * Garante que imagens na resposta usem URLs válidas da documentação
-     * (o modelo às vezes altera/quebra o path).
+     * Garante URLs válidas e, se o modelo omitir imagens em tutorial,
+     * injeta as imagens do manual mais relevante do contexto.
      */
     private normalizarImagensNaResposta(texto: string, artigos: DuvidasArtigos[]): string {
-        const doc = artigos.map((a) => this.reescreverUrlsAntigasParaMedia(a.conteudo_md)).join('\n');
-        const docUrls = [...doc.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1].trim());
-        if (docUrls.length === 0) return this.reescreverUrlsAntigasParaMedia(texto);
+        const docs = artigos.map((a) => ({
+            artigo: a,
+            md: this.reescreverUrlsAntigasParaMedia(a.conteudo_md),
+        }));
+        const docUrls = docs.flatMap((d) =>
+            [...d.md.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)].map((m) => ({
+                alt: m[1],
+                url: m[2].trim(),
+                titulo: d.artigo.titulo,
+            })),
+        );
+
+        let out = this.reescreverUrlsAntigasParaMedia(texto);
+        if (docUrls.length === 0) return out;
 
         let seq = 0;
-        return texto.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, (_full, alt: string, src: string) => {
+        out = out.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, (_full, alt: string, src: string) => {
             const raw = (src || '').trim();
             const asMedia = this.toMediaUrl(raw);
             if (asMedia) return `![${alt}](${asMedia})`;
@@ -722,21 +733,56 @@ export class DuvidasService {
             if (base) {
                 const byBase = docUrls.find((u) => {
                     try {
-                        const q = new URL(u, 'http://local').searchParams.get('path');
-                        if (q) return path.basename(decodeURIComponent(q)).toLowerCase() === decodeURIComponent(base).toLowerCase();
+                        const q = new URL(u.url, 'http://local').searchParams.get('path');
+                        if (q) {
+                            return (
+                                path.basename(decodeURIComponent(q)).toLowerCase() ===
+                                decodeURIComponent(base).toLowerCase()
+                            );
+                        }
                     } catch {
                         /* ignore */
                     }
-                    return path.basename(decodeURIComponent(u.split('?')[0])).toLowerCase() === decodeURIComponent(base).toLowerCase();
+                    return (
+                        path.basename(decodeURIComponent(u.url.split('?')[0])).toLowerCase() ===
+                        decodeURIComponent(base).toLowerCase()
+                    );
                 });
-                if (byBase) return `![${alt}](${byBase})`;
+                if (byBase) return `![${alt || byBase.alt}](${byBase.url})`;
             }
 
             if (seq < docUrls.length) {
-                return `![${alt}](${docUrls[seq++]})`;
+                const pick = docUrls[seq++];
+                return `![${alt || pick.alt}](${pick.url})`;
             }
             return alt ? `*(imagem: ${alt})*` : '';
         });
+
+        const responseHasImages = /!\[[^\]]*\]\([^)]+\)/.test(out);
+        if (!responseHasImages) {
+            // Prefer manuals / PDF articles with images
+            const preferred =
+                docs.find((d) => {
+                    const caminho = (d.artigo.caminho_origem || '').toLowerCase();
+                    return (
+                        /manual|pdf|masterclass|credenciamento|venda/.test(
+                            `${d.artigo.titulo} ${caminho}`.toLowerCase(),
+                        ) && /!\[[^\]]*\]\([^)]+\)/.test(d.md)
+                    );
+                }) || docs.find((d) => /!\[[^\]]*\]\([^)]+\)/.test(d.md));
+
+            if (preferred) {
+                const imgs = [...preferred.md.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)].slice(0, 8);
+                if (imgs.length > 0) {
+                    out += `\n\n## Ilustrações do manual\n\n`;
+                    for (const m of imgs) {
+                        out += `![${m[1]}](${m[2].trim()})\n\n`;
+                    }
+                }
+            }
+        }
+
+        return out;
     }
 
     private async chamarClaude(
@@ -752,9 +798,11 @@ Quando usar informação da base, cite o título do artigo entre aspas.
 Priorize artigos de Manuais / passo a passo quando existirem no contexto.
 Não invente processos, telas ou regras que não estejam na documentação.
 
-Imagens: a documentação pode conter imagens em Markdown no formato ![descrição](url).
-Quando uma imagem ajudar a explicar (telas, fluxos, exemplos), inclua-a na resposta copiando exatamente a sintaxe ![descrição](url) da documentação, na ordem dos passos.
-Não invente URLs de imagens. Não remova o protocolo/domínio das URLs existentes.
+Imagens (obrigatório em tutoriais):
+- A documentação contém imagens em Markdown no formato ![descrição](url).
+- Em respostas de "como fazer" / passo a passo, VOCÊ DEVE incluir as imagens relevantes depois de cada passo, copiando EXATAMENTE a sintaxe ![descrição](url) da documentação.
+- Não invente URLs. Não remova query string, path ou domínio das URLs.
+- Se o manual tiver imagens por página (ex.: ![...página 1](url)), inclua as páginas correspondentes aos passos explicados.
 
 DOCUMENTAÇÃO:
 ${contexto}`;

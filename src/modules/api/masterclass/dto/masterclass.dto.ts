@@ -1,5 +1,5 @@
 import { IsString, IsEmail, IsOptional, IsBoolean, IsDateString, IsNumber } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateMasterclassEventoDto {
     @IsString()
@@ -191,15 +191,21 @@ export class MasterclassStatsDto {
 
 export class CreateMasterclassPreCadastroDto {
     @IsString()
+    @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
     nome_aluno: string;
 
-    @IsEmail()
+    @IsEmail({}, { message: 'Informe um e-mail válido.' })
+    @Transform(({ value }) =>
+        typeof value === 'string' ? value.trim().toLowerCase() : value,
+    )
     email: string;
 
     @IsString()
+    @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
     telefone: string;
 
-    @IsNumber()
+    @Type(() => Number)
+    @IsNumber({}, { message: 'Turma inválida.' })
     id_turma: number;
 
     @IsOptional()
@@ -217,7 +223,12 @@ export class CreateMasterclassPreCadastroDto {
     observacoes?: string;
 
     @IsOptional()
-    @IsNumber()
+    @Transform(({ value }) => {
+        if (value === null || value === undefined || value === '') return undefined;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : value;
+    })
+    @IsNumber({}, { message: 'criado_por deve ser um número.' })
     criado_por?: number;
 }
 

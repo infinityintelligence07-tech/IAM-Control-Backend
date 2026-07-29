@@ -1072,18 +1072,28 @@ export class MasterclassService {
 
             const emailLimpo = String(data.email || '').trim().toLowerCase();
             const telefoneLimpo = this.normalizarTelefoneDigitos(data.telefone);
-            const existentes = await this.uow.masterclassPreCadastrosRP.find({
-                where: { id_turma: data.id_turma, deletado_em: null },
-                select: ['id', 'email', 'telefone'],
-            });
+            if (!emailLimpo) {
+                throw new BadRequestException('Informe um e-mail válido.');
+            }
+            if (!telefoneLimpo || telefoneLimpo.length < 10) {
+                throw new BadRequestException(
+                    'Informe um telefone válido com DDD (mínimo 10 dígitos).',
+                );
+            }
+
+            // Evita select parcial + soft-delete do TypeORM e não carrega a lista inteira.
+            const existentes = await this.uow.masterclassPreCadastrosRP
+                .createQueryBuilder('pc')
+                .select(['pc.id', 'pc.email', 'pc.telefone'])
+                .where('pc.id_turma = :idTurma', { idTurma: data.id_turma })
+                .andWhere('pc.deletado_em IS NULL')
+                .getMany();
             const emailDuplicado = existentes.some(
                 (pc) => String(pc.email || '').trim().toLowerCase() === emailLimpo,
             );
-            const telefoneDuplicado =
-                Boolean(telefoneLimpo) &&
-                existentes.some(
-                    (pc) => this.normalizarTelefoneDigitos(pc.telefone) === telefoneLimpo,
-                );
+            const telefoneDuplicado = existentes.some(
+                (pc) => this.normalizarTelefoneDigitos(pc.telefone) === telefoneLimpo,
+            );
             if (emailDuplicado || telefoneDuplicado) {
                 throw new BadRequestException(
                     emailDuplicado
@@ -1092,16 +1102,22 @@ export class MasterclassService {
                 );
             }
 
+            if (!turma.data_inicio) {
+                throw new BadRequestException(
+                    'A turma desta masterclass não possui data de início cadastrada.',
+                );
+            }
+
             // Criar novo pré-cadastro
             const novoPreCadastro = this.uow.masterclassPreCadastrosRP.create({
-                nome_aluno: data.nome_aluno,
+                nome_aluno: String(data.nome_aluno || '').trim(),
                 email: emailLimpo,
-                telefone: this.formatarTelefone(telefoneLimpo || data.telefone),
-                evento_nome: `Masterclass - ${turma.cidade}`,
+                telefone: this.formatarTelefone(telefoneLimpo),
+                evento_nome: `Masterclass - ${turma.cidade || turma.id}`,
                 data_evento: new Date(turma.data_inicio),
                 id_turma: data.id_turma,
-                presente: data.presente || false,
-                teve_interesse: data.teve_interesse || false,
+                presente: Boolean(data.presente),
+                teve_interesse: Boolean(data.teve_interesse),
                 observacoes: data.observacoes,
                 criado_por: data.criado_por,
             });
@@ -1112,7 +1128,9 @@ export class MasterclassService {
             if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
-            throw new Error('Erro interno do servidor ao inserir pré-cadastro');
+            throw new BadRequestException(
+                'Não foi possível inserir o lead. Verifique e-mail, telefone e tente novamente.',
+            );
         }
     }
 

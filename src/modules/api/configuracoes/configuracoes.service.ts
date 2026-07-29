@@ -178,6 +178,8 @@ export class ConfiguracoesService {
     }
 
     async upsertMany(dto: UpdateConfiguracoesDto): Promise<ConfiguracoesResponseDto> {
+        let sincronizarTaxaIpr: { anterior: number; novo: number } | null = null;
+
         for (const item of dto.itens) {
             const chave = (item.chave || '').trim();
             if (!chave) continue;
@@ -229,6 +231,21 @@ export class ConfiguracoesService {
             }
 
             const existente = await this.uow.configuracoesSistemaRP.findOne({ where: { chave } });
+
+            // Ao alterar o padrão global da taxa IPR/masterclass, limpa nas
+            // palestras os valores que ainda eram só cópia do padrão (anterior,
+            // default de código ou o próprio valor novo), para a venda herdar
+            // a config. Overrides individuais (outros valores) são preservados.
+            if (chave === CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS) {
+                const anteriorRaw =
+                    existente?.valor ?? CONFIG_DEFAULTS[CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS];
+                const anterior = Number(String(anteriorRaw).replace(',', '.'));
+                const novo = Number(String(valor ?? '0').replace(',', '.'));
+                if (Number.isFinite(anterior) && Number.isFinite(novo)) {
+                    sincronizarTaxaIpr = { anterior, novo };
+                }
+            }
+
             if (existente) {
                 existente.valor = valor;
                 if (item.descricao !== undefined) {
@@ -245,7 +262,48 @@ export class ConfiguracoesService {
             }
         }
 
+        if (sincronizarTaxaIpr) {
+            await this.sincronizarTaxaInscricaoIprNasPalestras(
+                sincronizarTaxaIpr.anterior,
+                sincronizarTaxaIpr.novo,
+            );
+        }
+
         return this.findAll();
+    }
+
+    /**
+     * Remove da turma o valor “só padrão” da taxa IPR, para a venda masterclass
+     * passar a usar o valor atual de /configuracoes. Valores personalizados
+     * (diferentes do padrão antigo/novo/default) permanecem.
+     */
+    private async sincronizarTaxaInscricaoIprNasPalestras(
+        valorAnterior: number,
+        valorNovo: number,
+    ): Promise<void> {
+        const legados = new Set<number>();
+        if (Number.isFinite(valorAnterior)) legados.add(Number(valorAnterior));
+        if (Number.isFinite(valorNovo)) legados.add(Number(valorNovo));
+        const padraoCodigo = Number(
+            CONFIG_DEFAULTS[CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS],
+        );
+        if (Number.isFinite(padraoCodigo)) legados.add(padraoCodigo);
+
+        const lista = [...legados];
+        if (lista.length === 0) return;
+
+        await this.uow.turmasRP.query(
+            `
+            UPDATE turmas AS t
+            SET taxa_inscricao_masterclass = NULL
+            FROM treinamentos AS tr
+            WHERE t.id_treinamento = tr.id
+              AND tr.tipo_palestra = true
+              AND t.taxa_inscricao_masterclass IS NOT NULL
+              AND t.taxa_inscricao_masterclass = ANY($1::numeric[])
+            `,
+            [lista],
+        );
     }
 
     /** Valida e normaliza o JSON das listas Kamino antes de persistir. */

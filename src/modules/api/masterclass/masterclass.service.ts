@@ -1180,9 +1180,9 @@ export class MasterclassService {
 
     /**
      * Busca de pré-cadastros para o fluxo de VENDA com origem em Masterclass:
-     * pesquisa em TODOS os pré-cadastros (qualquer masterclass, qualquer data)
-     * por nome, e-mail ou telefone. Retorna apenas os campos necessários para
-     * o vendedor selecionar a pessoa e o frontend resolver/criar o aluno.
+     * pesquisa por nome, e-mail ou telefone. Quando `idTurma` é informado, lista
+     * SOMENTE os leads daquela masterclass. Em todos os casos retorna apenas
+     * leads marcados como presentes (ausentes não entram na venda).
      */
     async buscarPreCadastrosParaVenda(termo: string, limit?: number, idTurma?: number): Promise<MasterclassPreCadastroBuscaVendaDto[]> {
         const busca = (termo || '').trim();
@@ -1190,7 +1190,7 @@ export class MasterclassService {
         const filtraPorTurma = Number.isFinite(turmaId) && turmaId > 0;
         // Sem turma definida, a busca é livre (todos os pré-cadastros) e exige
         // ao menos 2 caracteres; com a turma da masterclass definida, o termo é
-        // opcional (termo vazio lista todos os leads daquela masterclass).
+        // opcional (termo vazio lista todos os presentes daquela masterclass).
         if (!filtraPorTurma && busca.length < 2) {
             return [];
         }
@@ -1201,6 +1201,8 @@ export class MasterclassService {
 
         // O soft delete (deletado_em) é aplicado automaticamente pelo TypeORM.
         const qb = this.uow.masterclassPreCadastrosRP.createQueryBuilder('pc');
+        // Venda Masterclass: somente quem confirmou presença no evento.
+        qb.andWhere('pc.presente = :presente', { presente: true });
         if (filtraPorTurma) {
             qb.andWhere('pc.id_turma = :turmaId', { turmaId });
         }

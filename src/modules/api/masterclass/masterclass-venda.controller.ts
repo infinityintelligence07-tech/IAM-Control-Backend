@@ -18,8 +18,8 @@ export class MasterclassVendaController {
     /**
      * Busca de pré-cadastros de masterclass (por nome, e-mail ou telefone)
      * para a seleção do aluno na venda com origem em Masterclass. Quando
-     * `id_turma` é informado, lista SOMENTE os leads daquela masterclass
-     * (termo opcional — vazio retorna todos os leads da turma).
+     * `id_turma` é informado, lista SOMENTE os leads presentes daquela
+     * masterclass (termo opcional — vazio retorna os presentes da turma).
      */
     @Get('pre-cadastros/busca')
     async buscarPreCadastrosParaVenda(

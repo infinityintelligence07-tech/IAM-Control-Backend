@@ -85,6 +85,17 @@ export interface HistoricoSorteadoPayload {
     sorteado_em?: string;
 }
 
+export interface ParticipacaoTreinamentoPar {
+    id_aluno: number;
+    id_treinamento: number;
+}
+
+export interface ParticipacaoTreinamentoItem {
+    id_aluno: number;
+    id_treinamento: number;
+    turmas: Array<{ id_turma: number; primeira_matricula: string }>;
+}
+
 export interface HistoricoSorteadosFilters {
     id_turma?: number;
     id_presente_sorteio?: number;
@@ -3117,6 +3128,64 @@ export class TurmasService {
             console.error('Erro ao buscar aluno da turma:', error);
             throw new BadRequestException('Erro ao buscar aluno da turma');
         }
+    }
+
+    /**
+     * Participações do aluno por treinamento: para cada par (aluno, treinamento) informado,
+     * devolve as turmas daquele treinamento em que o aluno já teve matrícula, ordenadas pela
+     * data da primeira matrícula. Usado na exportação Kamino para saber se a venda é a
+     * primeira vez do aluno naquele treinamento (código sem return) ou uma repetição (return).
+     */
+    async getParticipacoesTreinamento(pares: ParticipacaoTreinamentoPar[]): Promise<ParticipacaoTreinamentoItem[]> {
+        const paresValidos = new Map<string, ParticipacaoTreinamentoPar>();
+        (pares || []).forEach((par) => {
+            const idAluno = Number(par?.id_aluno);
+            const idTreinamento = Number(par?.id_treinamento);
+            if (!Number.isInteger(idAluno) || idAluno <= 0) return;
+            if (!Number.isInteger(idTreinamento) || idTreinamento <= 0) return;
+            paresValidos.set(`${idAluno}::${idTreinamento}`, { id_aluno: idAluno, id_treinamento: idTreinamento });
+        });
+
+        if (paresValidos.size === 0) return [];
+
+        const idsAlunos = Array.from(new Set(Array.from(paresValidos.values()).map((par) => par.id_aluno)));
+        const idsTreinamentos = Array.from(new Set(Array.from(paresValidos.values()).map((par) => par.id_treinamento)));
+
+        const linhas: Array<{ id_aluno: string; id_treinamento: number; id_turma: number; primeira_matricula: Date }> = await this.uow.turmasAlunosRP.query(
+            `
+            SELECT
+                ta.id_aluno::text AS id_aluno,
+                t.id_treinamento AS id_treinamento,
+                ta.id_turma AS id_turma,
+                MIN(ta.criado_em) AS primeira_matricula
+            FROM turmas_alunos ta
+            INNER JOIN turmas t ON t.id = ta.id_turma AND t.deletado_em IS NULL
+            WHERE ta.id_aluno = ANY($1::bigint[])
+              AND t.id_treinamento = ANY($2::int[])
+              AND ta.deletado_em IS NULL
+              AND COALESCE(ta.status_aluno_turma::text, '') <> 'CANCELADO'
+            GROUP BY ta.id_aluno, t.id_treinamento, ta.id_turma
+            ORDER BY 1, 2, 4
+        `,
+            [idsAlunos, idsTreinamentos],
+        );
+
+        const resultado = new Map<string, ParticipacaoTreinamentoItem>();
+        (linhas || []).forEach((linha) => {
+            const idAluno = Number(linha.id_aluno);
+            const idTreinamento = Number(linha.id_treinamento);
+            const chave = `${idAluno}::${idTreinamento}`;
+            if (!paresValidos.has(chave)) return;
+
+            const item = resultado.get(chave) || { id_aluno: idAluno, id_treinamento: idTreinamento, turmas: [] };
+            item.turmas.push({
+                id_turma: Number(linha.id_turma),
+                primeira_matricula: new Date(linha.primeira_matricula).toISOString(),
+            });
+            resultado.set(chave, item);
+        });
+
+        return Array.from(resultado.values());
     }
 
     /**

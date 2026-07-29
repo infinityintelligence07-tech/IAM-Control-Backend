@@ -40,7 +40,14 @@ import {
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
 import { RequirePermission } from '@/modules/auth/decorators/require-permission.decorator';
-import { HistoricoSorteadoPayload, HistoricoSorteadosFilters, PresenteSorteioPayload, RemoverHistoricoSorteadoPayload } from './turmas.service';
+import {
+    HistoricoSorteadoPayload,
+    HistoricoSorteadosFilters,
+    ParticipacaoTreinamentoItem,
+    ParticipacaoTreinamentoPar,
+    PresenteSorteioPayload,
+    RemoverHistoricoSorteadoPayload,
+} from './turmas.service';
 
 @UseInterceptors(ClassSerializerInterceptor)
 @Controller('turmas')
@@ -248,6 +255,14 @@ export class TurmasController {
     @RequirePermission({ module: 'turmas', action: 'view' })
     async getHistoricoTransferencias(@Param('id_aluno', ParseIntPipe) id_aluno: number): Promise<HistoricoTransferenciasResponseDto> {
         return this.turmasService.getHistoricoTransferencias(id_aluno);
+    }
+
+    // Usado pela exportação Kamino do Histórico de Vendas: liberado a qualquer autenticado,
+    // como todo o fluxo de vendas.
+    @Post('participacoes-treinamento')
+    @UseGuards(JwtAuthGuard)
+    async getParticipacoesTreinamento(@Body() body: { pares?: ParticipacaoTreinamentoPar[] }): Promise<ParticipacaoTreinamentoItem[]> {
+        return this.turmasService.getParticipacoesTreinamento(body?.pares || []);
     }
 
     @Get('aluno-trilha/:id_aluno')

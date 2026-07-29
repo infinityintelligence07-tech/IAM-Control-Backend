@@ -800,6 +800,53 @@ export class TurmasService {
 
     private static readonly FUNCOES_LIDERANCA = [EFuncoes.LIDER, EFuncoes.LIDER_DE_EVENTOS, EFuncoes.LIDER_DE_MASTERCLASS, EFuncoes.LIDER_DE_CONFRONTO];
 
+    /** E-mails liberados para gerenciar IPR oferecido na masterclass (além de Admin/Líder). */
+    private static readonly EMAILS_GERENCIAR_IPR_MASTERCLASS = ['yasmin.iamcomercial@gmail.com'];
+
+    private async validarPermissaoGerenciarIprMasterclass(userId?: number): Promise<void> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado a gerenciar as turmas de IPR desta masterclass');
+        }
+
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'email', 'setor', 'funcao'] as any,
+        });
+        if (!usuario) {
+            throw new ForbiddenException('Não autorizado a gerenciar as turmas de IPR desta masterclass');
+        }
+
+        if (this.isUsuarioAdministrador(usuario)) return;
+
+        const funcoes = Array.isArray(usuario.funcao) ? usuario.funcao : [];
+        const isLider = TurmasService.FUNCOES_LIDERANCA.some((funcao) => funcoes.includes(funcao));
+        if (isLider) return;
+
+        const email = String(usuario.email || '')
+            .trim()
+            .toLowerCase();
+        if (TurmasService.EMAILS_GERENCIAR_IPR_MASTERCLASS.includes(email)) return;
+
+        throw new ForbiddenException('Você não tem permissão para gerenciar as turmas de IPR desta masterclass');
+    }
+
+    /**
+     * Atualiza somente `turmas_imersao_ofertadas` (IPR oferecido na venda da masterclass).
+     * Usado por Admin/Líder e por usuários liberados por e-mail (sem exigir turmas.edit).
+     */
+    async updateTurmasImersaoOfertadas(id: number, turmasImersaoOfertadas: number[], userId?: number): Promise<TurmaResponseDto> {
+        await this.validarPermissaoGerenciarIprMasterclass(userId);
+
+        const ids = (Array.isArray(turmasImersaoOfertadas) ? turmasImersaoOfertadas : [])
+            .map((n) => Number(n))
+            .filter((n) => Number.isFinite(n) && n > 0);
+
+        return this.update(id, {
+            turmas_imersao_ofertadas: ids,
+            ...(userId ? { atualizado_por: userId } : {}),
+        } as UpdateTurmaDto);
+    }
+
     /**
      * Regra de exclusão/cancelamento de alunos da turma (a adição é liberada
      * para qualquer usuário autenticado):

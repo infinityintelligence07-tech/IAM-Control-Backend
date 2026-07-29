@@ -22,6 +22,7 @@ import {
     UpdateTurmaTimesDto,
     TurmaTimesResponseDto,
     UpdateStatusEventoDto,
+    UpdateTurmasImersaoOfertadasDto,
     TurmaHistoricoResponseDto,
     CreateTurmaHistoricoDto,
     AlunoTurmaHistoricoResponseDto,
@@ -435,6 +436,22 @@ export class TurmasController {
     ): Promise<{ id: number; status_evento: string }> {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.updateStatusEvento(id, dto.status_evento, userId);
+    }
+
+    /**
+     * Atualiza só as turmas de IPR oferecidas na venda da masterclass.
+     * Liberado para Admin/Líder e e-mails específicos (não exige turmas.edit).
+     */
+    @Put(':id/turmas-imersao-ofertadas')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
+    async updateTurmasImersaoOfertadas(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: UpdateTurmasImersaoOfertadasDto,
+        @Req() req: any,
+    ): Promise<TurmaResponseDto> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.updateTurmasImersaoOfertadas(id, dto.turmas_imersao_ofertadas || [], userId);
     }
 
     @Put(':id')

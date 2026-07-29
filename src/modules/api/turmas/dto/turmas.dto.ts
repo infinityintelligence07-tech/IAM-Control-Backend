@@ -532,6 +532,19 @@ export class UpdateTurmaDto {
     atualizado_em?: string;
 }
 
+/** Atualização restrita das turmas de IPR oferecidas na venda da masterclass. */
+export class UpdateTurmasImersaoOfertadasDto {
+    @IsArray()
+    @IsNumber({}, { each: true })
+    @Transform(({ value }) => {
+        if (!Array.isArray(value)) return [];
+        return value
+            .map((v: any) => (typeof v === 'string' ? parseInt(v, 10) : v))
+            .filter((n: number) => Number.isFinite(n));
+    })
+    turmas_imersao_ofertadas: number[];
+}
+
 export class OutroClienteTurmaAlunoDto {
     @IsOptional()
     @IsString()

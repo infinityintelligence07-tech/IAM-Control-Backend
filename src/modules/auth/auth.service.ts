@@ -196,24 +196,15 @@ export class AuthService {
     }
 
     async login(email: string, senha: string, provider: 'google' | 'credentials' = 'credentials', providerId?: string) {
-<<<<<<< HEAD
-        const emailNormalizado = String(email || '')
-            .trim()
-            .toLowerCase();
+        const emailNormalizado = this.normalizeEmail(email || '');
         if (!emailNormalizado) {
             throw new UnauthorizedException('Credenciais inválidas');
         }
 
         // Busca case-insensitive: evita falha quando o e-mail foi salvo com
         // capitalização diferente da digitada no login.
-        const user = await this.uow.usuariosRP
-            .createQueryBuilder('usuario')
-            .where('LOWER(TRIM(usuario.email)) = :email', { email: emailNormalizado })
-            .andWhere('usuario.deletado_em IS NULL')
-            .getOne();
-=======
-        const user = await this.findUsuarioAtivoPorEmail(email);
->>>>>>> 7a2f0136c1a90a48308949cc5e9a402b01c46f5a
+        const user = await this.findUsuarioAtivoPorEmail(emailNormalizado);
+
         if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
         const providedSecret = provider === 'google' ? providerId || senha : senha;
@@ -225,7 +216,6 @@ export class AuthService {
         this.ensureUserApproved(user.aprovado);
 
         // Corrige e-mails legados com caixa mista após autenticação bem-sucedida.
-        const emailNormalizado = this.normalizeEmail(email);
         if (user.email !== emailNormalizado) {
             await this.liberarEmailSoftDeletados(emailNormalizado, user.id);
             user.email = emailNormalizado;

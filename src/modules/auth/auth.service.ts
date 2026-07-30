@@ -152,7 +152,20 @@ export class AuthService {
     }
 
     async login(email: string, senha: string, provider: 'google' | 'credentials' = 'credentials', providerId?: string) {
-        const user = await this.uow.usuariosRP.findOne({ where: { email } });
+        const emailNormalizado = String(email || '')
+            .trim()
+            .toLowerCase();
+        if (!emailNormalizado) {
+            throw new UnauthorizedException('Credenciais inválidas');
+        }
+
+        // Busca case-insensitive: evita falha quando o e-mail foi salvo com
+        // capitalização diferente da digitada no login.
+        const user = await this.uow.usuariosRP
+            .createQueryBuilder('usuario')
+            .where('LOWER(TRIM(usuario.email)) = :email', { email: emailNormalizado })
+            .andWhere('usuario.deletado_em IS NULL')
+            .getOne();
         if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
         const providedSecret = provider === 'google' ? providerId || senha : senha;

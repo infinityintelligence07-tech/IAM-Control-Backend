@@ -10,6 +10,7 @@ import {
     ETipoDocumento,
     EFormasPagamento,
     ECategoriaExclusaoContrato,
+    EStatusConciliacaoVenda,
     ESetores,
     EFuncoes,
 } from '@/modules/config/entities/enum';
@@ -90,6 +91,18 @@ type ResumoHistoricoVendas = {
     };
 };
 
+type OpcoesFiltrosOrigemHistorico = {
+    treinamentos_origem: string[];
+    turmas_origem: string[];
+    turmas_destino: string[];
+    turmas_destino_por_origem: Record<string, string[]>;
+    ids_turma_origem: number[];
+    /** Ids das turmas de destino com venda no recorte de filtros. */
+    ids_turma_destino: number[];
+    /** Ids de destino agrupados pelo id da turma de origem da venda. */
+    ids_turma_destino_por_origem: Record<string, number[]>;
+};
+
 type LinhaHistoricoVendasResumo = {
     id: string;
     criado_em?: string | Date | null;
@@ -145,13 +158,7 @@ export class DocumentosService {
         string,
         {
             expiresAt: number;
-            value: {
-                treinamentos_origem: string[];
-                turmas_origem: string[];
-                turmas_destino: string[];
-                turmas_destino_por_origem: Record<string, string[]>;
-                ids_turma_origem: number[];
-            };
+            value: OpcoesFiltrosOrigemHistorico;
         }
     >();
     private readonly contratosBancoCache = new Map<
@@ -4597,13 +4604,7 @@ export class DocumentosService {
         });
     }
 
-    private lerCacheOpcoesOrigem(chave: string): {
-        treinamentos_origem: string[];
-        turmas_origem: string[];
-        turmas_destino: string[];
-        turmas_destino_por_origem: Record<string, string[]>;
-        ids_turma_origem: number[];
-    } | null {
+    private lerCacheOpcoesOrigem(chave: string): OpcoesFiltrosOrigemHistorico | null {
         const registro = this.opcoesOrigemCache.get(chave);
         if (!registro) return null;
 
@@ -4615,16 +4616,7 @@ export class DocumentosService {
         return registro.value;
     }
 
-    private salvarCacheOpcoesOrigem(
-        chave: string,
-        valor: {
-            treinamentos_origem: string[];
-            turmas_origem: string[];
-            turmas_destino: string[];
-            turmas_destino_por_origem: Record<string, string[]>;
-            ids_turma_origem: number[];
-        },
-    ): void {
+    private salvarCacheOpcoesOrigem(chave: string, valor: OpcoesFiltrosOrigemHistorico): void {
         const agora = Date.now();
         this.opcoesOrigemCache.set(chave, {
             expiresAt: agora + this.opcoesOrigemCacheTtlMs,
@@ -4825,6 +4817,32 @@ export class DocumentosService {
         this.invalidarCachesHistoricoVendas();
 
         return { atualizado: true, total: comprovantesArray.length };
+    }
+
+    /**
+     * Etiqueta de conciliação das vendas (Novo / Conciliado / Pendente),
+     * alterada uma a uma ou em massa pela seleção do Histórico de Vendas.
+     * Grava a coluna materializada, que tem prioridade sobre o snapshot
+     * `dados_contrato.status_conciliacao` em toda leitura.
+     */
+    async atualizarStatusConciliacaoContratos(ids: string[], status: EStatusConciliacaoVenda): Promise<{ atualizados: number }> {
+        const idsUnicos = Array.from(new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean)));
+        if (idsUnicos.length === 0) {
+            throw new BadRequestException('Informe ao menos uma venda para alterar o status.');
+        }
+
+        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+            where: { id: In(idsUnicos), deletado_em: IsNull() },
+            select: { id: true },
+        });
+        if (contratos.length === 0) {
+            throw new NotFoundException('Nenhuma venda encontrada para alterar o status.');
+        }
+
+        await this.uow.turmasAlunosTreinamentosContratosRP.update({ id: In(contratos.map((contrato) => contrato.id)) }, { status_conciliacao: status });
+        this.invalidarCachesHistoricoVendas();
+
+        return { atualizados: contratos.length };
     }
 
     /**
@@ -5219,13 +5237,7 @@ export class DocumentosService {
          * (o filtro de empresa do histórico vem antes da turma de destino).
          */
         id_empresa?: string | number;
-    }): Promise<{
-        treinamentos_origem: string[];
-        turmas_origem: string[];
-        turmas_destino: string[];
-        turmas_destino_por_origem: Record<string, string[]>;
-        ids_turma_origem: number[];
-    }> {
+    }): Promise<OpcoesFiltrosOrigemHistorico> {
         const cacheKey = this.montarChaveCacheOpcoesOrigem(filtros);
         const cacheHit = this.lerCacheOpcoesOrigem(cacheKey);
         if (cacheHit) {
@@ -5296,6 +5308,7 @@ export class DocumentosService {
             .addSelect(this.sqlTurmaOrigemHistoricoDisplay, 'turma_origem')
             .addSelect(this.sqlTurmaDestinoHistoricoDisplay, 'turma_destino')
             .addSelect(this.sqlIdTurmaOrigemHistorico, 'id_turma_origem')
+            .addSelect(this.sqlIdTurmaDestinoHistorico, 'id_turma_destino')
             .addSelect(this.sqlIdEmpresaDestinoHistorico, 'id_empresa_destino')
             // Itens de COMBO da venda: as turmas dos produtos secundários também
             // entram nas opções de turma de destino (o filtro casa combos).
@@ -5345,6 +5358,7 @@ export class DocumentosService {
             turma_origem?: string | null;
             turma_destino?: string | null;
             id_turma_origem?: string | number | null;
+            id_turma_destino?: string | number | null;
             id_empresa_destino?: string | number | null;
             combo_itens?: unknown;
             canal_venda?: string | null;
@@ -5385,6 +5399,10 @@ export class DocumentosService {
         const turmasDestino = new Set<string>();
         const turmasDestinoPorOrigem = new Map<string, Set<string>>();
         const idsTurmaOrigem = new Set<number>();
+        // Ids das turmas de DESTINO que tiveram venda (checklist do canal
+        // Masterclass filtra por id, não pelo rótulo textual).
+        const idsTurmaDestino = new Set<number>();
+        const idsTurmaDestinoPorOrigem = new Map<number, Set<number>>();
 
         linhasOpcoes.forEach((linha) => {
             const treinamentoOrigem = String(linha.treinamento_origem || '').trim();
@@ -5427,8 +5445,19 @@ export class DocumentosService {
             }
 
             const empresaDestinoLinha = Number(linha.id_empresa_destino) || null;
+            const registrarIdDestino = (idDestino: number) => {
+                if (!Number.isFinite(idDestino) || idDestino <= 0) return;
+                idsTurmaDestino.add(idDestino);
+                if (Number.isFinite(idTurmaOrigemNum) && idTurmaOrigemNum > 0) {
+                    const idsDaOrigem = idsTurmaDestinoPorOrigem.get(idTurmaOrigemNum) ?? new Set<number>();
+                    idsDaOrigem.add(idDestino);
+                    idsTurmaDestinoPorOrigem.set(idTurmaOrigemNum, idsDaOrigem);
+                }
+            };
+
             if (turmaDestino && !turmaEhInvalida(turmaDestino) && empresaDestinoPermitida(empresaDestinoLinha)) {
                 turmasDestino.add(turmaDestino);
+                registrarIdDestino(Number(linha.id_turma_destino));
                 if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
                     const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
                     destinosDaOrigem.add(turmaDestino);
@@ -5451,6 +5480,7 @@ export class DocumentosService {
                 if (!labelCombo || turmaEhInvalida(labelCombo)) return;
                 if (!empresaDestinoPermitida(turmaCombo?.id_treinamento_fk?.id_empresa ?? null)) return;
                 turmasDestino.add(labelCombo);
+                registrarIdDestino(idTurmaCombo);
                 if (turmaOrigem && !turmaEhInvalida(turmaOrigem)) {
                     const destinosDaOrigem = turmasDestinoPorOrigem.get(turmaOrigem) ?? new Set<string>();
                     destinosDaOrigem.add(labelCombo);
@@ -5467,6 +5497,11 @@ export class DocumentosService {
             turmasDestinoPorOrigemOrdenadas[origem] = this.ordenarListaTurmasHistorico(destinos);
         });
         const idsTurmaOrigemOrdenados = Array.from(idsTurmaOrigem).sort((a, b) => a - b);
+        const idsTurmaDestinoOrdenados = Array.from(idsTurmaDestino).sort((a, b) => a - b);
+        const idsTurmaDestinoPorOrigemOrdenados: Record<string, number[]> = {};
+        idsTurmaDestinoPorOrigem.forEach((ids, idOrigem) => {
+            idsTurmaDestinoPorOrigemOrdenados[String(idOrigem)] = Array.from(ids).sort((a, b) => a - b);
+        });
 
         const resultado = {
             treinamentos_origem: treinamentosOrdenados,
@@ -5474,6 +5509,8 @@ export class DocumentosService {
             turmas_destino: turmasDestinoOrdenadas,
             turmas_destino_por_origem: turmasDestinoPorOrigemOrdenadas,
             ids_turma_origem: idsTurmaOrigemOrdenados,
+            ids_turma_destino: idsTurmaDestinoOrdenados,
+            ids_turma_destino_por_origem: idsTurmaDestinoPorOrigemOrdenados,
         };
         this.salvarCacheOpcoesOrigem(cacheKey, resultado);
 

@@ -1,13 +1,23 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
-import { ILike, IsNull, Not, ArrayContains, Raw } from 'typeorm';
+import { IsNull, ArrayContains, Raw } from 'typeorm';
 
 @Injectable()
 export class UsuariosService {
     constructor(private readonly uow: UnitOfWorkService) {}
     private readonly sourceAccents = 'áàâãäéèêëíìîïóòôõöúùûüçñýÿ';
     private readonly targetAccents = 'aaaaaeeeeiiiiooooouuuucnyy';
+
+    private normalizeEmail(value: string): string {
+        return value.trim().toLowerCase();
+    }
+
+    /** Libera o e-mail do UNIQUE ao soft-deletar, permitindo re-cadastro / normalização de case. */
+    private emailLiberadoAposDelete(email: string, id: number): string {
+        const base = this.normalizeEmail(email).replace(/#deleted-.*$/i, '');
+        return `${base}#deleted-${id}-${Date.now()}`;
+    }
 
     private normalizeTextForSearch(value: string): string {
         return value
@@ -187,22 +197,39 @@ export class UsuariosService {
                 throw new NotFoundException('Usuário não encontrado');
             }
 
-            // Verificar se o email já existe em outro usuário (se estiver sendo alterado)
-            if (updateUsuarioDto.email) {
-                const emailNormalizado = updateUsuarioDto.email.toLowerCase().trim();
-                const emailAtualNormalizado = usuario.email?.toLowerCase().trim();
+            // Verificar se o email já existe em outro usuário (se estiver sendo alterado).
+            // Comparação case-insensitive: "Taina@..." e "taina@..." são o mesmo e-mail.
+            // Soft-deletados com o mesmo e-mail ainda ocupam o UNIQUE — liberamos o e-mail deles.
+            if (updateUsuarioDto.email !== undefined) {
+                const emailNormalizado = this.normalizeEmail(updateUsuarioDto.email);
+                const emailAtualNormalizado = this.normalizeEmail(usuario.email || '');
 
-                if (emailNormalizado !== emailAtualNormalizado) {
-                    const existingUser = await this.uow.usuariosRP.findOne({
-                        where: {
-                            email: ILike(emailNormalizado),
-                            deletado_em: IsNull(),
-                            id: Not(id),
-                        },
-                    });
+                if (emailNormalizado !== emailAtualNormalizado || usuario.email !== emailNormalizado) {
+                    const conflitoAtivo = await this.uow.usuariosRP
+                        .createQueryBuilder('u')
+                        .where('LOWER(TRIM(u.email)) = :email', { email: emailNormalizado })
+                        .andWhere('u.id != :id', { id })
+                        .andWhere('u.deletado_em IS NULL')
+                        .getOne();
 
-                    if (existingUser) {
+                    if (conflitoAtivo) {
                         throw new BadRequestException('Email já está em uso por outro usuário');
+                    }
+
+                    // Soft-deletados com o mesmo e-mail (qualquer case) bloqueiam o UNIQUE do Postgres.
+                    const softDeletados = await this.uow.usuariosRP
+                        .createQueryBuilder('u')
+                        .withDeleted()
+                        .where(`LOWER(TRIM(SPLIT_PART(u.email, '#deleted-', 1))) = :email`, {
+                            email: emailNormalizado,
+                        })
+                        .andWhere('u.id != :id', { id })
+                        .andWhere('u.deletado_em IS NOT NULL')
+                        .getMany();
+
+                    for (const antigo of softDeletados) {
+                        antigo.email = this.emailLiberadoAposDelete(antigo.email, antigo.id);
+                        await this.uow.usuariosRP.save(antigo);
                     }
                 }
             }
@@ -221,7 +248,8 @@ export class UsuariosService {
             }
 
             if (updateUsuarioDto.email !== undefined) {
-                usuario.email = updateUsuarioDto.email.toLowerCase().trim();
+                // Sempre persiste em minúsculas (mesmo se só a caixa mudou).
+                usuario.email = this.normalizeEmail(updateUsuarioDto.email);
             }
 
             if (updateUsuarioDto.telefone !== undefined) {
@@ -274,7 +302,13 @@ export class UsuariosService {
             if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
-            throw new Error('Erro interno do servidor ao atualizar usuário');
+            const driverError = (error as { driverError?: { code?: string } })?.driverError;
+            if (driverError?.code === '23505') {
+                throw new BadRequestException('Email já está em uso por outro usuário');
+            }
+            throw new BadRequestException(
+                error instanceof Error ? error.message : 'Erro interno do servidor ao atualizar usuário',
+            );
         }
     }
 
@@ -291,6 +325,9 @@ export class UsuariosService {
                 throw new NotFoundException(`Usuário com ID ${id} não encontrado`);
             }
 
+            // Libera o UNIQUE de e-mail: senão o cadastro/normalização para o mesmo
+            // endereço (ex.: só mudar caixa) falha mesmo com o usuário "excluído".
+            usuario.email = this.emailLiberadoAposDelete(usuario.email, id);
             usuario.deletado_em = new Date(softDeleteDto.deletado_em);
             if (softDeleteDto.atualizado_por) {
                 usuario.atualizado_por = softDeleteDto.atualizado_por;
@@ -300,10 +337,12 @@ export class UsuariosService {
             console.log('Usuário marcado como deletado:', id);
         } catch (error) {
             console.error('Erro ao fazer soft delete do usuário:', error);
-            if (error instanceof NotFoundException) {
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
                 throw error;
             }
-            throw new Error('Erro interno do servidor ao fazer soft delete do usuário');
+            throw new BadRequestException(
+                error instanceof Error ? error.message : 'Erro interno do servidor ao fazer soft delete do usuário',
+            );
         }
     }
 

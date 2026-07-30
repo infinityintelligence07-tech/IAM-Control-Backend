@@ -14,6 +14,7 @@ import {
     CriarTermoZapSignDto,
     RespostaTermoZapSignDto,
     ExcluirContratoDto,
+    AtualizarStatusConciliacaoDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
@@ -417,6 +418,14 @@ export class DocumentosController {
             data,
             termo,
         });
+    }
+
+    // Etiqueta de conciliação da venda (Novo / Conciliado / Pendente), alterada
+    // pelo botão de status do card/linha ou em massa pela seleção da listagem.
+    @Post('public/contratos-banco/status-conciliacao')
+    @UseGuards(JwtAuthGuard)
+    atualizarStatusConciliacaoContratos(@Body() body: AtualizarStatusConciliacaoDto) {
+        return this.documentosService.atualizarStatusConciliacaoContratos(body.ids, body.status);
     }
 
     @Post('public/contratos-banco/:id/sincronizar-bonus-ipr')

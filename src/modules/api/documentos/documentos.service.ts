@@ -1391,6 +1391,8 @@ export class DocumentosService {
                 // numérico do registro para que a anexação subsequente das fotos/PDF
                 // (salvarAssinatura) consiga localizar o contrato.
                 id: zapSignResponse?.token ?? String(savedContrato.id),
+                // Id interno do contrato no IAM (usar para retomar envio / histórico).
+                contrato_id: String(savedContrato.id),
                 nome_documento: `Contrato ${treinamento.treinamento} - ${aluno.nome}`,
                 status: zapSignResponse?.status ?? 'manual',
                 url_assinatura: zapSignResponse?.signers[0]?.sign_url || '',
@@ -3364,51 +3366,70 @@ export class DocumentosService {
 
     async buscarContratoCompleto(contratoId: string, incluirExcluidos = false): Promise<any> {
         try {
-            // Primeiro, vamos buscar o contrato básico. Quando `incluirExcluidos`
-            // é true (aba "Contratos excluídos"), o soft delete é ignorado para
-            // permitir consultar os detalhes da venda apagada.
-            const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-                where: incluirExcluidos ? { id: contratoId } : { id: contratoId, deletado_em: null },
-                withDeleted: incluirExcluidos,
-                relations: [
-                    'id_turma_aluno_treinamento_fk',
-                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
-                    'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
-                    'id_turma_aluno_treinamento_fk.id_treinamento_fk',
-                    'id_documento_fk',
-                ],
-                select: {
-                    id: true,
-                    id_turma_aluno_treinamento: true,
-                    id_documento: true,
-                    status_ass_aluno: true,
-                    data_ass_aluno: true,
-                    testemunha_um: true,
-                    status_ass_test_um: true,
-                    data_ass_test_um: true,
-                    testemunha_dois: true,
-                    status_ass_test_dois: true,
-                    data_ass_test_dois: true,
-                    status_conciliacao: true,
-                    dados_contrato: true, // Garantir que o campo JSON seja carregado
-                    comprovantes_pagamento: true, // Comprovante(s) vinculados ao contrato
-                    zapsign_document_id: true, // ✅ Campo ZapSign adicionado
-                    zapsign_signers_data: true, // ✅ Campo ZapSign adicionado
-                    zapsign_document_status: true, // ✅ Campo ZapSign adicionado
-                    assinatura_aluno_base64: true,
-                    tipo_assinatura_aluno: true,
-                    foto_documento_aluno_base64: true,
-                    assinatura_testemunha_um_base64: true,
-                    tipo_assinatura_testemunha_um: true,
-                    assinatura_testemunha_dois_base64: true,
-                    tipo_assinatura_testemunha_dois: true,
-                    criado_em: true,
-                    atualizado_em: true,
-                    criado_por: true,
-                    atualizado_por: true,
-                    deletado_em: true,
-                },
-            });
+            // O frontend de vendas pode enviar o token ZapSign (retorno de
+            // criar-contrato) OU o id numérico do registro (histórico). Aceita
+            // os dois, como em salvarAssinatura.
+            const relations = [
+                'id_turma_aluno_treinamento_fk',
+                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk',
+                'id_turma_aluno_treinamento_fk.id_turma_aluno_fk.id_aluno_fk',
+                'id_turma_aluno_treinamento_fk.id_treinamento_fk',
+                'id_documento_fk',
+            ] as const;
+            const select = {
+                id: true,
+                id_turma_aluno_treinamento: true,
+                id_documento: true,
+                status_ass_aluno: true,
+                data_ass_aluno: true,
+                testemunha_um: true,
+                status_ass_test_um: true,
+                data_ass_test_um: true,
+                testemunha_dois: true,
+                status_ass_test_dois: true,
+                data_ass_test_dois: true,
+                status_conciliacao: true,
+                dados_contrato: true,
+                comprovantes_pagamento: true,
+                zapsign_document_id: true,
+                zapsign_signers_data: true,
+                zapsign_document_status: true,
+                assinatura_aluno_base64: true,
+                tipo_assinatura_aluno: true,
+                foto_documento_aluno_base64: true,
+                assinatura_testemunha_um_base64: true,
+                tipo_assinatura_testemunha_um: true,
+                assinatura_testemunha_dois_base64: true,
+                tipo_assinatura_testemunha_dois: true,
+                criado_em: true,
+                atualizado_em: true,
+                criado_por: true,
+                atualizado_por: true,
+                deletado_em: true,
+            } as const;
+
+            let contratoBasico: TurmasAlunosTreinamentosContratos | null = null;
+            const idStr = String(contratoId || '').trim();
+
+            if (/^\d+$/.test(idStr)) {
+                contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                    where: incluirExcluidos ? { id: idStr } : { id: idStr, deletado_em: null },
+                    withDeleted: incluirExcluidos,
+                    relations: [...relations],
+                    select: { ...select },
+                });
+            }
+
+            if (!contratoBasico) {
+                contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                    where: incluirExcluidos
+                        ? { zapsign_document_id: idStr }
+                        : { zapsign_document_id: idStr, deletado_em: null },
+                    withDeleted: incluirExcluidos,
+                    relations: [...relations],
+                    select: { ...select },
+                });
+            }
 
             const contrato = contratoBasico;
 
@@ -8231,13 +8252,26 @@ export class DocumentosService {
         totalAssinaturas: number;
     }> {
         try {
-            // Buscar o contrato
-            const contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-                where: {
-                    id: contratoId,
-                    deletado_em: null,
-                },
-            });
+            // Buscar o contrato pelo id numérico OU pelo token ZapSign
+            // (a Nova Área de Vendas persiste o token no "Continuar envio").
+            let contrato: TurmasAlunosTreinamentosContratos | null = null;
+            const idStr = String(contratoId || '').trim();
+            if (/^\d+$/.test(idStr)) {
+                contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                    where: {
+                        id: idStr,
+                        deletado_em: null,
+                    },
+                });
+            }
+            if (!contrato) {
+                contrato = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
+                    where: {
+                        zapsign_document_id: idStr,
+                        deletado_em: null,
+                    },
+                });
+            }
 
             if (!contrato) {
                 throw new NotFoundException('Contrato não encontrado');

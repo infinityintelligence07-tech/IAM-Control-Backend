@@ -498,6 +498,8 @@ export class ComprovanteVinculoCompraDto {
 
 export class RespostaContratoZapSignDto {
     id: string;
+    /** Id numérico do contrato na base IAM (preferir para retomar envio). */
+    contrato_id?: string;
     nome_documento: string;
     status: string;
     url_assinatura?: string;

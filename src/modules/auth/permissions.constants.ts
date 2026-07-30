@@ -55,6 +55,7 @@ export type PermissionKey =
     | 'vendasDashboard'
     | 'usuarios'
     | 'aprovarUsuarios'
+    | 'excluirUsuarios'
     | 'relatorios'
     | 'gerenciarAlunosTurma'
     | 'definirAcessoraTurma'
@@ -78,6 +79,7 @@ export const PERMISSION_KEY_MAP: Record<PermissionKey, { module: ModuleKey; acti
     vendasDashboard: { module: 'vendasDashboard', action: 'view' },
     usuarios: { module: 'usuarios', action: 'view' },
     aprovarUsuarios: { module: 'usuarios', action: 'edit' },
+    excluirUsuarios: { module: 'usuarios', action: 'delete' },
     relatorios: { module: 'relatorios', action: 'view' },
     gerenciarAlunosTurma: { module: 'alunosNaTurma', action: 'delete' },
     definirAcessoraTurma: { module: 'acessoraTurma', action: 'edit' },
@@ -119,7 +121,7 @@ export const FUNCTION_PRIORITY: Record<string, number> = {
 };
 
 export const PERMISSIONS_MATRIX_CONFIG_KEY = 'permissions_matrix';
-export const PERMISSIONS_MATRIX_VERSION = 13;
+export const PERMISSIONS_MATRIX_VERSION = 14;
 export const PERMISSION_METADATA_KEY = 'required_permission';
 
 export function getFunctionPriority(funcao: string): number {

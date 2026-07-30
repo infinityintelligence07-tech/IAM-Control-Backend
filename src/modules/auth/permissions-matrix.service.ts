@@ -198,9 +198,8 @@ export class PermissionsMatrixService {
     }
 
     private async getResolvedMatrix(): Promise<PermissionsMatrix> {
-        if (this.cacheLoaded && this.cachedMatrix) {
-            return this.cachedMatrix;
-        }
+        // Sempre relê do banco: cache em memória fica stale com vários
+        // processos PM2 ou quando a matriz é atualizada por outro worker/admin.
         const payload = await this.getMatrix();
         return payload.matrix ?? this.getDefaultMatrix();
     }
@@ -330,6 +329,8 @@ export class PermissionsMatrixService {
      *     e adicionar/editar leads nas palestras masterclass).
      * v13: líderes passam a ter usuarios.delete (soft delete na tela Usuários);
      *     o botão aparecia, mas o PUT /usuarios/:id/soft-delete retornava 403.
+     * v14: reaplica usuarios.delete (edit → delete) para corrigir matrizes já em v13
+     *     sem delete e caches PM2 dessincronizados após update no banco.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -481,9 +482,10 @@ export class PermissionsMatrixService {
                     };
                 }
 
-                if (fromVersion < 13 && (defaultRole.usuarios?.delete || role.usuarios?.edit)) {
+                if (fromVersion < 14 && (defaultRole.usuarios?.delete || role.usuarios?.edit)) {
                     // Quem já gerencia usuários (edit) passa a poder soft-deletar;
                     // cobre líderes (padrão) e papéis com matriz customizada (ex.: Jurídico).
+                    // v13 introduziu a regra; v14 reaplica se a matriz já estava em 13 sem delete.
                     role.usuarios = {
                         view: true,
                         create: Boolean(role.usuarios?.create || defaultRole.usuarios?.create),

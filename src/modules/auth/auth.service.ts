@@ -1,7 +1,6 @@
 import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { Not } from 'typeorm';
 import { UnitOfWorkService } from '../config/unit_of_work/uow.service';
 import { v4 as uuidv4 } from 'uuid';
 import { MailService } from '../mail/mail.service';
@@ -14,6 +13,42 @@ import { normalizeSetores } from '../../common/utils/setor.util';
 export class AuthService {
     private readonly pendingApprovalMessage = 'Seu cadastro está aguardando aprovação de um administrador.';
     private readonly invalidGoogleAuthFlowMessage = 'Fluxo de autenticação Google inválido.';
+
+    private normalizeEmail(value: string): string {
+        return value.trim().toLowerCase();
+    }
+
+    /** Busca usuário ativo pelo e-mail ignorando maiúsculas/minúsculas. */
+    private async findUsuarioAtivoPorEmail(email: string) {
+        const emailNormalizado = this.normalizeEmail(email);
+        return this.uow.usuariosRP
+            .createQueryBuilder('u')
+            .where('LOWER(TRIM(u.email)) = :email', { email: emailNormalizado })
+            .andWhere('u.deletado_em IS NULL')
+            .getOne();
+    }
+
+    /** Soft-deletados ainda ocupam UNIQUE(email); libera antes de gravar o e-mail normalizado. */
+    private async liberarEmailSoftDeletados(emailNormalizado: string, exceptUserId?: number) {
+        const qb = this.uow.usuariosRP
+            .createQueryBuilder('u')
+            .withDeleted()
+            .where(`LOWER(TRIM(SPLIT_PART(u.email, '#deleted-', 1))) = :email`, {
+                email: emailNormalizado,
+            })
+            .andWhere('u.deletado_em IS NOT NULL');
+
+        if (exceptUserId != null) {
+            qb.andWhere('u.id != :exceptUserId', { exceptUserId });
+        }
+
+        const softDeletados = await qb.getMany();
+        for (const antigo of softDeletados) {
+            const base = this.normalizeEmail(antigo.email).replace(/#deleted-.*$/i, '');
+            antigo.email = `${base}#deleted-${antigo.id}-${Date.now()}`;
+            await this.uow.usuariosRP.save(antigo);
+        }
+    }
 
     constructor(
         private readonly jwtService: JwtService,
@@ -38,7 +73,8 @@ export class AuthService {
         providerId?: string,
         picture?: string,
     ): Promise<never> {
-        const exists = await this.uow.usuariosRP.findOne({ where: { email } });
+        const emailNormalizado = this.normalizeEmail(email);
+        const exists = await this.findUsuarioAtivoPorEmail(emailNormalizado);
 
         if (exists) throw new BadRequestException('E-mail já cadastrado');
 
@@ -63,11 +99,13 @@ export class AuthService {
             throw new BadRequestException('Informe ao menos um setor');
         }
 
+        await this.liberarEmailSoftDeletados(emailNormalizado);
+
         const user = this.uow.usuariosRP.create({
             nome: fullName,
             primeiro_nome,
             sobrenome,
-            email,
+            email: emailNormalizado,
             senha: hash,
             telefone,
             setor: setores,
@@ -101,13 +139,19 @@ export class AuthService {
             provider: string;
         };
     }> {
-        const exists = await this.uow.usuariosRP.findOne({ where: { email } });
+        const exists = await this.findUsuarioAtivoPorEmail(email);
 
         if (exists) {
             // Usuário já existe, apenas autentica via Google sem sobrescrever senha.
             // Isso preserva login por email/senha para contas já existentes.
             if (!exists.provider) {
                 exists.provider = 'google';
+            }
+            // Normaliza e-mail legado com caixa mista (ex.: Google às vezes varia a capitalização).
+            const emailNormalizado = this.normalizeEmail(email);
+            if (exists.email !== emailNormalizado) {
+                await this.liberarEmailSoftDeletados(emailNormalizado, exists.id);
+                exists.email = emailNormalizado;
             }
             // Atualiza a foto se fornecida
             if (picture) {
@@ -152,7 +196,7 @@ export class AuthService {
     }
 
     async login(email: string, senha: string, provider: 'google' | 'credentials' = 'credentials', providerId?: string) {
-        const user = await this.uow.usuariosRP.findOne({ where: { email } });
+        const user = await this.findUsuarioAtivoPorEmail(email);
         if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
         const providedSecret = provider === 'google' ? providerId || senha : senha;
@@ -162,6 +206,14 @@ export class AuthService {
         const match = await bcrypt.compare(providedSecret, user.senha);
         if (!match) throw new UnauthorizedException('Credenciais inválidas');
         this.ensureUserApproved(user.aprovado);
+
+        // Corrige e-mails legados com caixa mista após autenticação bem-sucedida.
+        const emailNormalizado = this.normalizeEmail(email);
+        if (user.email !== emailNormalizado) {
+            await this.liberarEmailSoftDeletados(emailNormalizado, user.id);
+            user.email = emailNormalizado;
+            await this.uow.usuariosRP.save(user);
+        }
 
         const token = await this.signToken(user.id, user.email, user.nome);
         return {
@@ -223,7 +275,7 @@ export class AuthService {
     }
 
     async requestPasswordReset(email: string, frontendUrl: string) {
-        const user = await this.uow.usuariosRP.findOne({ where: { email } });
+        const user = await this.findUsuarioAtivoPorEmail(email);
         if (!user) return; // silently ignore
 
         const token = uuidv4();
@@ -264,7 +316,7 @@ export class AuthService {
 
         let user;
         if (email) {
-            user = await this.uow.usuariosRP.findOne({ where: { email } });
+            user = await this.findUsuarioAtivoPorEmail(email);
             if (!user) {
                 throw new BadRequestException('Usuário não encontrado com este email');
             }
@@ -384,7 +436,7 @@ export class AuthService {
                 userId,
             });
 
-            // Só validar se o email realmente mudou
+            // Só validar se o email realmente mudou (ignorando caixa)
             if (emailNovoNormalizado !== emailAtualNormalizado) {
                 console.log('Email mudou, validando duplicação...');
 
@@ -401,7 +453,7 @@ export class AuthService {
                     throw new BadRequestException('Email já está em uso por outro usuário');
                 }
             } else {
-                console.log('Email não mudou, pulando validação de duplicação');
+                console.log('Email não mudou (ou só a caixa), normalizando se necessário');
             }
 
             const setores = normalizeSetores(setor);
@@ -409,7 +461,6 @@ export class AuthService {
                 throw new BadRequestException('Informe ao menos um setor');
             }
 
-            // Usar updateQueryBuilder para atualizar apenas os campos necessários
             const updateData: any = {
                 primeiro_nome,
                 sobrenome,
@@ -419,6 +470,15 @@ export class AuthService {
                 funcao,
                 atualizado_em: new Date(),
             };
+
+            // Sempre persiste e-mail em minúsculas (inclusive quando só a caixa mudou).
+            if (emailNovoNormalizado && user.email !== emailNovoNormalizado) {
+                await this.liberarEmailSoftDeletados(emailNovoNormalizado, userId);
+                updateData.email = emailNovoNormalizado;
+                console.log('Email será atualizado para:', emailNovoNormalizado);
+            } else {
+                console.log('Email já normalizado, mantendo:', user.email);
+            }
 
             // Adicionar campos de endereço se fornecidos
             if (cep !== undefined) updateData.cep = cep;
@@ -468,14 +528,6 @@ export class AuthService {
             }
 
             const updateQuery = this.uow.usuariosRP.createQueryBuilder().update('Usuarios').set(updateData).where('id = :userId', { userId });
-
-            // Só atualizar email se realmente mudou
-            if (emailNovoNormalizado !== emailAtualNormalizado) {
-                updateQuery.set({ email: emailNovoNormalizado });
-                console.log('Email será atualizado para:', emailNovoNormalizado);
-            } else {
-                console.log('Email não mudou, mantendo:', user.email);
-            }
 
             const updateResult = await updateQuery.execute();
             console.log('Resultado da atualização (updateQueryBuilder):', updateResult);

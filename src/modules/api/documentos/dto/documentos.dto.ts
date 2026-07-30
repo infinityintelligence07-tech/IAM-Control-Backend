@@ -642,6 +642,20 @@ export class RespostaTermoZapSignDto {
     file_url?: string;
 }
 
+/**
+ * Alteração da etiqueta de conciliação das vendas (individual ou em massa,
+ * pela seleção da listagem do Histórico de Vendas).
+ */
+export class AtualizarStatusConciliacaoDto {
+    @IsArray()
+    @IsString({ each: true })
+    @IsNotEmpty({ each: true })
+    ids: string[];
+
+    @IsEnum(EStatusConciliacaoVenda)
+    status: EStatusConciliacaoVenda;
+}
+
 /** Body obrigatório ao excluir venda/contrato no Histórico de Vendas. */
 export class ExcluirContratoDto {
     @IsEnum(ECategoriaExclusaoContrato)

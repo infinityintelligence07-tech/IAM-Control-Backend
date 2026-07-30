@@ -328,6 +328,8 @@ export class PermissionsMatrixService {
      *     (calendario.view; edição continua como estava).
      * v12: Marketing colaborador+ ganha credenciamento.edit (marcar presença
      *     e adicionar/editar leads nas palestras masterclass).
+     * v13: líderes passam a ter usuarios.delete (soft delete na tela Usuários);
+     *     o botão aparecia, mas o PUT /usuarios/:id/soft-delete retornava 403.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -476,6 +478,17 @@ export class PermissionsMatrixService {
                         delete: Boolean(
                             role.credenciamento?.delete || defaultRole.credenciamento.delete,
                         ),
+                    };
+                }
+
+                if (fromVersion < 13 && (defaultRole.usuarios?.delete || role.usuarios?.edit)) {
+                    // Quem já gerencia usuários (edit) passa a poder soft-deletar;
+                    // cobre líderes (padrão) e papéis com matriz customizada (ex.: Jurídico).
+                    role.usuarios = {
+                        view: true,
+                        create: Boolean(role.usuarios?.create || defaultRole.usuarios?.create),
+                        edit: Boolean(role.usuarios?.edit || defaultRole.usuarios?.edit),
+                        delete: true,
                     };
                 }
             }

@@ -77,7 +77,8 @@ function buildLiderPermissions(setor: ESetores): RolePermissions {
     role = grantModule(role, 'vendas', ['view', 'create', 'edit']);
     // Dashboard de vendas: só líderes (prioridade ≥ 80) em todos os setores.
     role = grantModule(role, 'vendasDashboard', ['view']);
-    role = grantModule(role, 'usuarios', ['view', 'edit']);
+    // Soft delete de usuários (PUT /usuarios/:id/soft-delete) exige usuarios.delete.
+    role = grantModule(role, 'usuarios', ['view', 'edit', 'delete']);
     role = grantModule(role, 'relatorios', ['view']);
     role = grantModule(role, 'alunosNaTurma', 'all');
 
@@ -168,6 +169,11 @@ function buildSetorPadrao(setor: ESetores): RolePermissions {
             role = grantModule(role, 'documentos', ['view', 'create', 'edit']);
             return role;
 
+        case ESetores.GH:
+            // Gestão Humana: gerencia cadastro de usuários (inclui soft delete).
+            role = grantModule(role, 'usuarios', ['view', 'edit', 'create', 'delete']);
+            return role;
+
         case ESetores.FINANCEIRO:
             role = grantModule(role, 'relatorios', ['view']);
             role = grantModule(role, 'vendas', ['view']);
@@ -196,7 +202,13 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
             if ((LIDER_FUNCOES as readonly string[]).includes(funcao)) {
                 const lider = buildLiderPermissions(setor);
                 if (funcao === EFuncoes.LIDER) {
-                    sectorRow[funcao] = grantModule(lider, 'usuarios', ['view', 'edit', 'create']);
+                    // Líder de departamento: CRUD completo de usuários (aprovar + excluir).
+                    sectorRow[funcao] = grantModule(lider, 'usuarios', [
+                        'view',
+                        'edit',
+                        'create',
+                        'delete',
+                    ]);
                 } else {
                     sectorRow[funcao] = lider;
                 }

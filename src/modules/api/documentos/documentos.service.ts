@@ -3527,6 +3527,44 @@ export class DocumentosService {
             // (turmas dos itens) com fallback para o snapshot da venda.
             const comboItensDetalhe = await this.resolverComboItensContratoComTurmas(dadosContrato);
 
+            // Destino do aluno (turma IPR/produto vendido): id salvo no snapshot
+            // da venda, com fallback para a matrícula vinculada ao contrato.
+            const idTurmaDestinoResolvido =
+                Number(
+                    dadosContrato?.fluxo_evento_destino_id_turma ||
+                        dadosContrato?.id_turma_destino ||
+                        turmaAlunoTreinamento?.id_turma_destino ||
+                        0,
+                ) || null;
+            let turmaDestinoEvento: {
+                id?: number;
+                edicao_turma?: string | null;
+                data_inicio?: string | Date | null;
+                data_final?: string | Date | null;
+                id_turma_mentoria_vinculada?: number | null;
+                id_treinamento?: number | null;
+                id_treinamento_fk?: {
+                    id?: number;
+                    treinamento?: string | null;
+                    tipo_mentoria?: boolean | null;
+                } | null;
+            } | null = null;
+            if (idTurmaDestinoResolvido && idTurmaDestinoResolvido > 0) {
+                turmaDestinoEvento = await this.uow.turmasRP.findOne({
+                    where: { id: idTurmaDestinoResolvido, deletado_em: null } as any,
+                    relations: ['id_treinamento_fk'],
+                });
+            }
+            const fluxoEventoDestinoTreinamento =
+                turmaDestinoEvento?.id_treinamento_fk?.treinamento ||
+                treinamento?.treinamento ||
+                dadosContrato?.treinamento?.treinamento ||
+                dadosContrato?.treinamento?.nome ||
+                null;
+            const fluxoEventoDestinoTurma = this.rotuloTurmaHistorico(turmaDestinoEvento, {
+                usarIdSemEdicao: true,
+            });
+
             const contratoMapeado = {
                 id: contrato.id,
                 status_conciliacao: contrato.status_conciliacao,
@@ -3549,6 +3587,14 @@ export class DocumentosService {
                 aluno_nome: alunoComprador.nome ?? undefined,
                 treinamento_nome: treinamento?.treinamento,
                 comprovantes_pagamento: comprovantesPagamento,
+                fluxo_evento_destino_id_turma: turmaDestinoEvento?.id ?? idTurmaDestinoResolvido,
+                fluxo_evento_destino_id_treinamento:
+                    turmaDestinoEvento?.id_treinamento_fk?.id ??
+                    turmaDestinoEvento?.id_treinamento ??
+                    treinamento?.id ??
+                    null,
+                fluxo_evento_destino_treinamento: fluxoEventoDestinoTreinamento,
+                fluxo_evento_destino_turma: fluxoEventoDestinoTurma,
                 turma_aluno: {
                     pendencia_pagamento: pendenciaPagamento,
                     quantidade_inscricoes: quantidadeInscricoes,

@@ -15,17 +15,6 @@ import {
 /** Pontuação mínima (ver `identidade-cliente.ts`) para aceitar um candidato. */
 const PONTUACAO_MINIMA = 3;
 
-/**
- * Status do IAM Control que representam uma decisão de negócio já tomada aqui
- * dentro. A inadimplência informada pela Gestão de Contas não os sobrescreve —
- * um aluno cancelado não volta a "ATIVO" só porque quitou.
- */
-const STATUS_PROTEGIDOS: ReadonlySet<EStatusAlunosGeral> = new Set([
-    EStatusAlunosGeral.CANCELADO,
-    EStatusAlunosGeral.INATIVO,
-    EStatusAlunosGeral.SUSPENSO,
-]);
-
 interface CandidatoAluno {
     aluno: Alunos;
     identidade: ChaveIdentidadeCliente;
@@ -270,10 +259,12 @@ export class GestaoContasStatusService {
     }
 
     /**
-     * Decide o status a gravar, respeitando os status protegidos.
+     * Decide o status a gravar.
      *
-     * Um rótulo explícito da Gestão de Contas sempre vale. Sem ele, a única
-     * transição automática permitida é entre ATIVO e INADIMPLENTE.
+     * Um rótulo explícito da Gestão de Contas sempre vale. Quando a decisão vem
+     * apenas do sinal booleano, a única transição automática permitida é
+     * INADIMPLENTE <-> ATIVO: quitar a dívida limpa a inadimplência, mas não
+     * promove um cadastro PENDENTE nem reativa quem foi cancelado/suspenso aqui.
      */
     private resolverNovoStatus(item: StatusClienteGestaoContasDto, aluno: Alunos, inadimplente: boolean | null): EStatusAlunosGeral | null {
         const statusExplicito = this.mapearStatus(item.status);
@@ -282,10 +273,7 @@ export class GestaoContasStatusService {
         if (inadimplente === null) return null;
         if (inadimplente) return EStatusAlunosGeral.INADIMPLENTE;
 
-        const statusAtual = aluno.status_aluno_geral;
-        if (statusAtual && STATUS_PROTEGIDOS.has(statusAtual)) return null;
-
-        return EStatusAlunosGeral.ATIVO;
+        return aluno.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE ? EStatusAlunosGeral.ATIVO : null;
     }
 
     /** Reflete a inadimplência nas matrículas ativas do aluno. Retorna quantas mudaram. */

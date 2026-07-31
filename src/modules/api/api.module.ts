@@ -14,6 +14,7 @@ import { EnderecoEventosModule } from './endereco-eventos/endereco-eventos.modul
 import { RelatoriosFinanceiroModule } from './relatorios/financeiro/relatorios-financeiro.module';
 import { UploadModule } from './upload/upload.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { GestaoContasModule } from './gestao-contas/gestao-contas.module';
 import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
 import { NotificacoesModule } from './notificacoes/notificacoes.module';
 import { VendasModule } from './vendas/vendas.module';
@@ -37,6 +38,7 @@ import { TurmaDisponibilidadeModule } from './turma-disponibilidade/turma-dispon
         RelatoriosFinanceiroModule,
         UploadModule,
         WebhooksModule,
+        GestaoContasModule,
         ConfiguracoesModule,
         NotificacoesModule,
         VendasModule,

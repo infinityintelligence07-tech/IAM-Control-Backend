@@ -210,7 +210,7 @@ export class AuthService {
         const providedSecret = provider === 'google' ? providerId || senha : senha;
         if (!providedSecret) throw new UnauthorizedException('Credenciais inválidas');
 
-        // Compara a senha fornecida com a hash armazenada
+        // Compara a senha fornecida com a hash armazenada.
         const match = await bcrypt.compare(providedSecret, user.senha);
         if (!match) throw new UnauthorizedException('Credenciais inválidas');
         this.ensureUserApproved(user.aprovado);

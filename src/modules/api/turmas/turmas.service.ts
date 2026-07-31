@@ -4793,6 +4793,10 @@ export class TurmasService {
 
         const qb = this.uow.turmasAlunosRP
             .createQueryBuilder('ta')
+            // Movimentações incluem matrículas depois soft-deletadas (ex.: aluno
+            // transferido no mesmo dia). Sem withDeleted + filtro só ativos, o
+            // canal cai no fallback "Vendas em Eventos" (caso Eduardo Fernandes).
+            .withDeleted()
             .select('ta.id', 'id')
             .addSelect('ta.origem_aluno', 'origem_aluno')
             .addSelect('ta.vaga_bonus', 'vaga_bonus')
@@ -4833,11 +4837,13 @@ export class TurmasService {
                 'origem_eh_mc',
             )
             .where('ta.id_turma = :id_turma', { id_turma })
-            .andWhere('ta.deletado_em IS NULL')
             .setParameter('id_turma', id_turma);
 
         if (turmaAlunoIds && turmaAlunoIds.length > 0) {
             qb.andWhere('ta.id IN (:...turmaAlunoIds)', { turmaAlunoIds });
+        } else {
+            // Sem IDs explícitos: só matrículas ativas (métricas / listagens).
+            qb.andWhere('ta.deletado_em IS NULL');
         }
 
         const rows = await qb.getRawMany();

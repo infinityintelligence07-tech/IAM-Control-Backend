@@ -5241,9 +5241,15 @@ export class TurmasService {
         });
         const turmasTreinamento = outrasTurmas.filter((t) => t.id_treinamento_fk?.tipo_palestra !== true && !this.isTurmaBloqueadaParaTransferencia(t));
 
-        const comDataFutura = turmasTreinamento.filter((t) => (t.data_inicio ?? '') >= hoje);
-        const edicaoMaisProximaData = comDataFutura[0] ?? null;
-        const mesmoPolo = turmasTreinamento.filter((t) => t.id_polo === id_polo_origem && (t.data_inicio ?? '') >= hoje);
+        // Elegíveis: futuras e em andamento (data_final/data_inicio >= hoje).
+        // Só turmas cujo evento já terminou ficam de fora das sugestões.
+        const turmaAindaDisponivel = (t: { data_inicio?: string | Date | null; data_final?: string | Date | null }) => {
+            const fim = String(t.data_final ?? t.data_inicio ?? '').slice(0, 10);
+            return !fim || fim >= hoje;
+        };
+        const comDataDisponivel = turmasTreinamento.filter(turmaAindaDisponivel);
+        const edicaoMaisProximaData = comDataDisponivel[0] ?? null;
+        const mesmoPolo = turmasTreinamento.filter((t) => t.id_polo === id_polo_origem && turmaAindaDisponivel(t));
         const proximaEdicaoMesmoPolo = mesmoPolo[0] ?? null;
 
         const toTurmaResponse = (t: any): TurmaResponseDto =>
@@ -5385,22 +5391,24 @@ export class TurmasService {
             throw new BadRequestException('Turma de destino deve ser diferente da turma de origem');
         }
 
-        // Não é permitido transferir para uma turma que já ocorreu ou está ocorrendo
-        // agora (evento já começou). Mentorias (sem data_inicio) e as transferências
-        // automáticas do robô (manterNaOrigem/transferidoPorRobo, que já apontam para
-        // turmas futuras) são isentas.
-        if (!opts?.transferidoPorRobo && !opts?.manterNaOrigem && turmaDestino.data_inicio) {
-            const hojeTransferencia = new Date();
-            hojeTransferencia.setHours(0, 0, 0, 0);
-            // `data_inicio` é uma coluna `date` (string "YYYY-MM-DD"). `new Date(str)` sem
-            // hora é interpretado como meia-noite UTC e, em fusos negativos (BRT, UTC-3),
-            // "volta" um dia — fazendo uma turma que começa amanhã ser tratada como se
-            // começasse hoje e bloqueando a transferência indevidamente. Parsear como
-            // horário LOCAL (append T00:00:00) mantém o dia correto.
-            const inicioDestino = new Date(`${String(turmaDestino.data_inicio).slice(0, 10)}T00:00:00`);
-            inicioDestino.setHours(0, 0, 0, 0);
-            if (inicioDestino <= hojeTransferencia) {
-                throw new BadRequestException('Não é possível transferir para uma turma que já ocorreu ou está ocorrendo. Escolha uma turma futura.');
+        // Não é permitido transferir para uma turma cujo evento já terminou
+        // (hoje > data_final). Turmas futuras e em andamento (ex.: IPR acontecendo
+        // hoje até domingo) podem receber transferência. Mentorias (sem data) e as
+        // transferências automáticas do robô (manterNaOrigem/transferidoPorRobo) são isentas.
+        if (!opts?.transferidoPorRobo && !opts?.manterNaOrigem) {
+            const dataFimRaw = turmaDestino.data_final || turmaDestino.data_inicio;
+            if (dataFimRaw) {
+                const hojeTransferencia = new Date();
+                hojeTransferencia.setHours(0, 0, 0, 0);
+                // Coluna `date` ("YYYY-MM-DD"): parsear em horário LOCAL (T00:00:00)
+                // para não "voltar" um dia em UTC-3.
+                const fimDestino = new Date(`${String(dataFimRaw).slice(0, 10)}T00:00:00`);
+                fimDestino.setHours(0, 0, 0, 0);
+                if (hojeTransferencia > fimDestino) {
+                    throw new BadRequestException(
+                        'Não é possível transferir para uma turma cujo evento já terminou. Escolha uma turma futura ou em andamento.',
+                    );
+                }
             }
         }
 
@@ -8123,6 +8131,10 @@ export class TurmasService {
                 if (updateAlunoDto.origem_aluno !== EOrigemAlunos.TRANSFERENCIA && updateAlunoDto.id_turma_transferencia_de === undefined) {
                     turmaAluno.id_turma_transferencia_de = null;
                 }
+            }
+            // Marcador de canal (MC_* = Masterclass, TRANSBORDO, LIBERTY…). Aceita null para limpar.
+            if (updateAlunoDto.codigo_turma_origem_planilha !== undefined) {
+                turmaAluno.codigo_turma_origem_planilha = updateAlunoDto.codigo_turma_origem_planilha;
             }
             // Turma de onde o aluno veio (origem TRANSFERENCIA editada manualmente).
             if (updateAlunoDto.id_turma_transferencia_de !== undefined) {

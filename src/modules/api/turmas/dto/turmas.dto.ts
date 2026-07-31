@@ -802,6 +802,18 @@ export class UpdateAlunoTurmaDto {
         return typeof value === 'string' ? value.slice(0, 10) : value;
     })
     data_fim_mentoria?: string | null;
+
+    /**
+     * Código de origem da planilha / marcador de canal (ex.: MC_* = Masterclass,
+     * TRANSBORDO, LIBERTY). Aceita null para limpar — usado ao alterar a origem
+     * manualmente na tela da turma (ex.: marcar/desmarcar Masterclass).
+     */
+    @IsOptional()
+    @Transform(({ value }) => {
+        if (value === '' || value === null || value === undefined) return null;
+        return typeof value === 'string' ? value.trim() : value;
+    })
+    codigo_turma_origem_planilha?: string | null;
 }
 
 export class TurmaResponseDto {

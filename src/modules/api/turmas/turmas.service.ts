@@ -67,7 +67,8 @@ import { HistoricoSorteados } from '../../config/entities/historicoSorteados.ent
 import { TurmasAlunosTreinamentos } from '../../config/entities/turmasAlunosTreinamentos.entity';
 import { TurmasAlunos } from '../../config/entities/turmasAlunos.entity';
 import { Usuarios } from '../../config/entities/usuarios.entity';
-import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses } from '@/utils/mentoria-duracao';
+import { resolverDuracaoMentoriaMeses, sqlDuracaoMentoriaMeses, isMentoriaLibertyProduto } from '@/utils/mentoria-duracao';
+import { getFunctionPriority } from '@/modules/auth/permissions.constants';
 import { nomeAlunoCaixaAlta, normalizarTermoBusca, sqlBuscaNormalizada } from '../shared/nome-aluno.helper';
 
 export interface PresenteSorteioPayload {
@@ -848,15 +849,18 @@ export class TurmasService {
     /**
      * Regra de exclusão/cancelamento de alunos da turma (a adição é liberada
      * para qualquer usuário autenticado):
-     * - Somente funcionários do setor Cuidado de Alunos (administradores têm bypass).
+     * - Somente funcionários do setor Cuidado de Alunos / CD (administradores têm bypass).
      * - Se a turma tiver acessora definida, somente ela (além de administradores)
      *   pode remover ou cancelar alunos — vale tanto para DELETE quanto para
      *   status CANCELADO (que também faz soft delete da matrícula).
+     * - Exceção: em mentorias Liberty / Liberty Begin, líderes (e acima) dos
+     *   setores CD, Cuidado de Alunos e Expansão de Negócios também podem
+     *   remover/cancelar (sem exigir ser a acessora).
      * Chamadas internas do sistema (sem userId — ex.: cancelamento de contrato,
      * robô de transferências) não passam por esta validação.
      */
     private async validarPermissaoGerenciarAlunosTurma(
-        turma: { id_acessora?: number | null } | null | undefined,
+        turma: number | { id?: number; id_acessora?: number | null } | null | undefined,
         userId: number | undefined,
         acao: 'adicionar' | 'remover' | 'cancelar',
     ): Promise<void> {
@@ -869,11 +873,58 @@ export class TurmasService {
 
         if (this.isUsuarioAdministrador(usuario)) return;
 
-        if (!userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS)) {
+        const turmaId =
+            typeof turma === 'number'
+                ? turma
+                : turma && typeof turma === 'object'
+                  ? Number(turma.id)
+                  : NaN;
+        const idAcessoraTurma =
+            typeof turma === 'object' && turma ? (turma.id_acessora ?? null) : null;
+
+        const funcoes = (Array.isArray(usuario?.funcao) ? usuario.funcao : []).map(String);
+        const isLiderOuAcima = funcoes.some(
+            (f) => getFunctionPriority(f) >= getFunctionPriority(EFuncoes.LIDER),
+        );
+        // Líder+ de CD, Cuidado de Alunos ou Expansão de Negócios pode remover
+        // em mentorias Liberty / Liberty Begin (sem exigir ser a acessora).
+        const setorLibertyOk =
+            userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS) ||
+            userHasSetor(usuario, ESetores.CD) ||
+            userHasSetor(usuario, ESetores.EXPANSAO_NEGOCIOS);
+
+        if (isLiderOuAcima && setorLibertyOk && Number.isFinite(turmaId) && turmaId > 0) {
+            const turmaFull = await this.uow.turmasRP.findOne({
+                where: { id: turmaId, deletado_em: IsNull() as any },
+                relations: ['id_treinamento_fk'],
+            });
+            const treinamento = turmaFull?.id_treinamento_fk;
+            const mentoriaLiberty =
+                Boolean(treinamento?.tipo_mentoria) &&
+                isMentoriaLibertyProduto({
+                    treinamento: treinamento?.treinamento,
+                    tipo_mentoria: treinamento?.tipo_mentoria,
+                });
+            if (mentoriaLiberty) return;
+        }
+
+        if (
+            !userHasSetor(usuario, ESetores.CUIDADO_DE_ALUNOS) &&
+            !userHasSetor(usuario, ESetores.CD)
+        ) {
             throw new ForbiddenException(`Somente o time do Cuidado de Alunos pode ${acao} alunos da turma.`);
         }
 
-        const idAcessora = turma?.id_acessora ?? null;
+        const idAcessora =
+            idAcessoraTurma ??
+            (Number.isFinite(turmaId) && turmaId > 0
+                ? (
+                      await this.uow.turmasRP.findOne({
+                          where: { id: turmaId, deletado_em: IsNull() as any },
+                          select: ['id', 'id_acessora'] as any,
+                      })
+                  )?.id_acessora ?? null
+                : null);
         if (idAcessora && Number(idAcessora) !== Number(userId)) {
             const acessora = await this.uow.usuariosRP.findOne({
                 where: { id: idAcessora },

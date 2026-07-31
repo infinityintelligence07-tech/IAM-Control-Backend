@@ -13,9 +13,9 @@ export interface ContractDestinationProfile {
   showPayment: boolean;
   allowBoletoParcelado: boolean;
   showQuantidadeInscricoes: boolean;
-  // Regra de negócio: TODA venda de treinamento/mentoria tem testemunhas no
-  // contrato (a QUANTIDADE varia pela origem da venda — ex.: IPR com origem
-  // Masterclass tem uma única testemunha, o usuário logado).
+  // Testemunhas no contrato digital. Exceção: contratos de IPR (Imersão
+  // Prosperar) e variantes (comum/especial/taxa) não usam testemunhas.
+  // Nos demais treinamentos/mentorias, a QUANTIDADE varia pela origem da venda.
   showTestemunhas: boolean;
 }
 
@@ -121,7 +121,7 @@ const PROFILE_RULES: Array<{
       showPayment: false,
       allowBoletoParcelado: false,
       showQuantidadeInscricoes: true,
-      showTestemunhas: true,
+      showTestemunhas: false,
     },
   },
   {
@@ -135,7 +135,23 @@ const PROFILE_RULES: Array<{
       showPayment: false,
       allowBoletoParcelado: false,
       showQuantidadeInscricoes: true,
-      showTestemunhas: true,
+      showTestemunhas: false,
+    },
+  },
+  {
+    // Imersão Prosperar (IPR) e demais variantes: contrato sem testemunhas.
+    // Mantém o restante igual ao DEFAULT_IAM (pagamento, boleto, etc.).
+    when: (n) => n.includes("imersao prosperar") || n.includes("ipr"),
+    profile: {
+      key: "IPR",
+      brand: "IAM",
+      treinamentoLabel: "TREINAMENTO",
+      dataLabel: "DATA PREVISTA",
+      showBonus: false,
+      showPayment: true,
+      allowBoletoParcelado: true,
+      showQuantidadeInscricoes: false,
+      showTestemunhas: false,
     },
   },
   {

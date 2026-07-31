@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+    CONTRACT_DIGITAL_SIGNATURE_LEGAL_TEXT,
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT,
     CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT,
 } from './constants/contract-signature.constants';
@@ -266,6 +267,16 @@ export class ContractTemplateService {
             border-top: 1px solid #000;
             margin-bottom: 10px;
             height: 1px;
+        }
+
+        .digital-signature-legal {
+            font-size: 11px;
+            color: #222;
+            letter-spacing: 0.2px;
+            text-align: center;
+            line-height: 1.3;
+            max-width: 420px;
+            margin: 12px auto 8px auto;
         }
         
         .declaration {
@@ -551,7 +562,7 @@ export class ContractTemplateService {
         </div>
 
         <div class="signature-main">
-            <div class="signature-line"></div>
+            <div class="digital-signature-legal">assinado digitalmente, conforme MP 2.200-2/2001 e Lei 14.063/2020</div>
             <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
         </div>
 
@@ -603,7 +614,7 @@ export class ContractTemplateService {
             </div>
             
             <div class="signature-main">
-                <div class="signature-line"></div>
+                <div class="digital-signature-legal">assinado digitalmente, conforme MP 2.200-2/2001 e Lei 14.063/2020</div>
                 <div class="signature-label">Assinatura do ALUNO/Contratante.</div>
             </div>
             
@@ -1136,12 +1147,9 @@ export class ContractTemplateService {
                 );
             }
 
-            // Seção de testemunhas guiada pelos DADOS do contrato: sem nenhuma
-            // testemunha gravada (perfil sem testemunhas ou contrato antigo de
-            // IPR), a seção sai por completo; com apenas a Testemunha 1 (venda
-            // de IPR com origem Masterclass — testemunha única, o usuário
-            // logado), o bloco da Testemunha 2 é removido e os textos ficam no
-            // singular.
+            // Seção de testemunhas: perfil do produto (IPR = sem testemunhas) e
+            // dados gravados. Sem testemunha informada, a seção sai por completo;
+            // com apenas a Testemunha 1, o bloco da Testemunha 2 é removido.
             const temTestemunhaUm = Boolean(testemunhas?.testemunha_um?.nome);
             const temTestemunhaDois = Boolean(testemunhas?.testemunha_dois?.nome);
             if (!destinationProfile.showTestemunhas || (!temTestemunhaUm && !temTestemunhaDois)) {
@@ -1240,6 +1248,19 @@ export class ContractTemplateService {
             return `<div style="height: 100%; display: flex; align-items: flex-end; justify-content: center;"><div class="digital-signature-fallback">${assinaturaTextoPadrao}</div></div>`;
         };
 
+        const renderAlunoAssinaturaBlock = () => `
+                <div style="text-align: center; margin: 30px 0;">
+                  <div style="min-height: 35px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
+                    ${
+                        hasSignatureImage(contrato.assinatura_aluno_base64)
+                            ? renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')
+                            : `<div class="digital-signature-fallback">${CONTRACT_DIGITAL_SIGNATURE_LEGAL_TEXT}</div>`
+                    }
+                  </div>
+                  <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
+                </div>`;
+
+
         const dadosPessoaisHTML = isIPRContract
             ? `
               <table class="table">
@@ -1324,13 +1345,7 @@ export class ContractTemplateService {
                   </tr>
                 </table>
               
-                <div style="text-align: center; margin: 30px 0;">
-                  <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                    ${renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')}
-                  </div>
-                  <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
-                  <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
-                </div>
+                ${renderAlunoAssinaturaBlock()}
                 
                 ${
                     mostrarTestemunhas
@@ -1478,13 +1493,7 @@ export class ContractTemplateService {
                             </tr>
                           </table>
                         
-                          <div style="text-align: center; margin: 30px 0;">
-                            <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                              ${renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')}
-                            </div>
-                            <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
-                            <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
-                          </div>
+                          ${renderAlunoAssinaturaBlock()}
                           
                 ${
                     mostrarTestemunhas
@@ -1745,14 +1754,23 @@ export class ContractTemplateService {
               }
 
               .digital-signature-fallback {
-                font-size: 10px;
+                font-size: 11px;
                 color: #222;
-                text-transform: uppercase;
-                letter-spacing: 0.3px;
+                letter-spacing: 0.2px;
                 text-align: center;
-                line-height: 1.15;
-                max-width: 280px;
-                margin: 0 auto 2px auto;
+                line-height: 1.3;
+                max-width: 420px;
+                margin: 0 auto 8px auto;
+              }
+
+              .digital-signature-legal {
+                font-size: 11px;
+                color: #222;
+                letter-spacing: 0.2px;
+                text-align: center;
+                line-height: 1.3;
+                max-width: 420px;
+                margin: 0 auto 8px auto;
               }
               
               .clauses-section {
@@ -2442,13 +2460,7 @@ export class ContractTemplateService {
                 </tr>
               </table>
               
-              <div style="text-align: center; margin: 30px 0;">
-                <div style="height: 35px; display: flex; align-items: center; justify-content: center;">
-                  ${renderSignatureVisual(contrato.assinatura_aluno_base64, 'Assinatura do Aluno')}
-                </div>
-                <div class="signature-line" style="width: 60%; margin: 0 auto;"></div>
-                <strong style="font-size: 11px;">Assinatura do ALUNO/Contratante.</strong>
-              </div>
+              ${renderAlunoAssinaturaBlock()}
               
               ${
                   mostrarTestemunhas

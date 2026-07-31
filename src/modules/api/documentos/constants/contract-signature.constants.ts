@@ -1,5 +1,9 @@
-export const CONTRACT_DIGITAL_SIGNATURE_FALLBACK_TEXT = 'Contrato assinado digitalmente';
+/** Texto legal exibido no lugar da linha de assinatura do aluno (contrato digital). */
+export const CONTRACT_DIGITAL_SIGNATURE_LEGAL_TEXT =
+    'assinado digitalmente, conforme MP 2.200-2/2001 e Lei 14.063/2020';
 
-export const CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT = 'Assinado Digitalmente pelo Contrate e Testemunhas';
+export const CONTRACT_DIGITAL_SIGNATURE_FALLBACK_TEXT = CONTRACT_DIGITAL_SIGNATURE_LEGAL_TEXT;
 
-export const CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT = 'Assinado Digitalmente pelo Contrate';
+export const CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITH_WITNESSES_TEXT = CONTRACT_DIGITAL_SIGNATURE_LEGAL_TEXT;
+
+export const CONTRACT_DIGITAL_SIGNATURE_SIGNERS_WITHOUT_WITNESSES_TEXT = CONTRACT_DIGITAL_SIGNATURE_LEGAL_TEXT;

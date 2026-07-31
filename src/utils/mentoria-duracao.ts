@@ -31,6 +31,28 @@ export interface MentoriaDuracaoInput {
  * (`duracao_meses`); na ausência de um valor válido, aplica-se o padrão de
  * 12 meses.
  */
+/** Liberty Begin ou Liberty (mentoria pura, pelo nome do produto). */
+export const isMentoriaLibertyProduto = (
+  input: MentoriaDuracaoInput | { treinamento?: string | null; nome?: string | null; tipo_mentoria?: boolean | null } | null | undefined,
+): boolean => {
+  const nome = normalize(
+    (input as MentoriaDuracaoInput)?.treinamento ||
+      (input as MentoriaDuracaoInput)?.nome ||
+      '',
+  );
+  if (!nome.includes('liberty')) return false;
+  // Eventos da mentoria às vezes reutilizam o nome; se tipo_mentoria=false explícito, não conta.
+  if (
+    input &&
+    typeof input === 'object' &&
+    'tipo_mentoria' in input &&
+    input.tipo_mentoria === false
+  ) {
+    return false;
+  }
+  return true;
+};
+
 export const resolverDuracaoMentoriaMeses = (
   input: MentoriaDuracaoInput | null | undefined,
 ): number => {

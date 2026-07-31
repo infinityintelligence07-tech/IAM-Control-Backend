@@ -8327,6 +8327,12 @@ export class DocumentosService {
                 throw new BadRequestException('Contrato não possui documento no ZapSign');
             }
 
+            // Contrato assinado no papel e anexado: o documento físico é a prova
+            // da assinatura e ninguém vai assinar na ZapSign, que responde
+            // "pending" para sempre. Sem esta trava, a sincronização rebaixava o
+            // ASSINADO gravado por `salvarAssinatura` de volta para pendente.
+            const assinadoNoPapel = Boolean(contrato.foto_documento_aluno_base64);
+
             // Buscar o status atual do documento no ZapSign
             const zapSignDocument = await this.zapSignService.getDocument(contrato.zapsign_document_id);
 
@@ -8397,8 +8403,15 @@ export class DocumentosService {
             // derivar ambos da mesma contagem é o que mantém as duas telas iguais
             // (a ZapSign às vezes devolve o documento como pendente/assinado sem
             // refletir a soma dos signatários).
-            const statusDocumentoNormalizado =
-                totalSigners === 0 ? String(zapSignDocument.status || 'pending') : todosAssinaram ? 'signed' : assinaturasCompletas > 0 ? 'partial' : 'pending';
+            const statusDocumentoNormalizado = assinadoNoPapel
+                ? 'signed'
+                : totalSigners === 0
+                  ? String(zapSignDocument.status || 'pending')
+                  : todosAssinaram
+                    ? 'signed'
+                    : assinaturasCompletas > 0
+                      ? 'partial'
+                      : 'pending';
 
             const documentStatus = {
                 status: statusDocumentoNormalizado,
@@ -8410,7 +8423,12 @@ export class DocumentosService {
             // As colunas status_ass_* refletem SOMENTE a pessoa correspondente; o
             // "parcialmente assinado" é do documento (zapsign_document_status) e
             // não deve sobrescrever o status individual do aluno.
-            if (alunoSigner) {
+            if (assinadoNoPapel) {
+                contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
+                if (!contrato.data_ass_aluno) {
+                    contrato.data_ass_aluno = new Date();
+                }
+            } else if (alunoSigner) {
                 if (this.zapSignSignatarioAssinou(alunoSigner)) {
                     contrato.status_ass_aluno = EStatusAssinaturasContratos.ASSINADO;
                     if (alunoSigner.signed_at) {
@@ -8626,6 +8644,9 @@ export class DocumentosService {
             .createQueryBuilder('contrato')
             .where('contrato.zapsign_document_id IS NOT NULL')
             .andWhere('contrato.deletado_em IS NULL')
+            // Assinado no papel: já está concluído, consultar a ZapSign a cada
+            // ciclo só gastaria chamadas de API para receber "pending" eterno.
+            .andWhere("COALESCE(contrato.foto_documento_aluno_base64, '') = ''")
             .andWhere('contrato.criado_em BETWEEN :inicio AND :fim', { inicio: dataLimite, fim: new Date() })
             .andWhere(
                 `(

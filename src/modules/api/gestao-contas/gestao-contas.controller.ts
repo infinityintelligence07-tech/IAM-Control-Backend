@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@nestjs/common';
 
-import { WebhookTokenGuard } from '../webhooks/webhook-token.guard';
+import { GestaoContasTokenGuard } from './gestao-contas-token.guard';
 import { GestaoContasClientesService } from './gestao-contas-clientes.service';
 import { GestaoContasStatusService } from './gestao-contas-status.service';
 import { ClientesGestaoContasResponseDto, GetClientesGestaoContasDto } from './dto/gestao-contas-clientes.dto';
@@ -15,7 +15,7 @@ import { ReceberStatusGestaoContasDto, ReceberStatusGestaoContasResponseDto } fr
  *   - Query `?token=`
  */
 @Controller('webhooks/gestao-contas')
-@UseGuards(WebhookTokenGuard)
+@UseGuards(GestaoContasTokenGuard)
 export class GestaoContasController {
     constructor(
         private readonly clientesService: GestaoContasClientesService,

@@ -10,8 +10,16 @@ São dois webhooks, um em cada direção:
 | Saída (clientes) | `GET /api/webhooks/gestao-contas/clientes` | Gestão de Contas (pull) |
 | Entrada (inadimplência) | `POST /api/webhooks/gestao-contas/status` | Gestão de Contas (push) |
 
-Autenticação idêntica à dos demais webhooks (`WebhookTokenGuard`): header
-`x-webhook-token`, `Authorization: Bearer <token>` ou query `?token=`.
+## Autenticação
+
+Header `x-webhook-token`, `Authorization: Bearer <token>` ou query `?token=`.
+
+Estas rotas usam o `GestaoContasTokenGuard`, que aceita o token dedicado
+`GESTAO_CONTAS_WEBHOOK_TOKEN` (ver `gestao-contas-token.guard.ts`) e também o
+token mestre dos webhooks, para depuração interna. O caminho inverso não vale: o
+token dedicado **não** abre `/api/webhooks/eventos` nem o push de masterclass, de
+modo que a credencial entregue à Gestão de Contas fica restrita a esta
+integração e pode ser rotacionada sozinha.
 
 ## Saída — `GET /clientes`
 
@@ -94,4 +102,7 @@ preenchidos apenas quando ainda estão vazios.
 | Secret | Valor |
 | --- | --- |
 | `IAM_CONTROL_API_URL` | `https://iamcontrol.com.br/api` (default do código) |
-| `IAM_CONTROL_WEBHOOK_TOKEN` | mesmo token de `webhook-token.guard.ts` |
+| `IAM_CONTROL_WEBHOOK_TOKEN` | `GESTAO_CONTAS_WEBHOOK_TOKEN` de `gestao-contas-token.guard.ts` |
+
+Para rotacionar a credencial: troque a constante no guard, faça deploy do
+backend e atualize o secret no Supabase.

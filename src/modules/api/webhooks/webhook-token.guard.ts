@@ -18,17 +18,23 @@ export const WEBHOOK_TOKEN = 'iamctrl_whk_20ce9fca6b56a9ae32162eb6c4087da2d9116f
  *  - Header `Authorization: Bearer <token>`
  *  - Query param `token`
  *
- * E comparado, de forma constante (timing-safe), com o token fixo `WEBHOOK_TOKEN`.
+ * E comparado, de forma constante (timing-safe), com os tokens aceitos.
  */
 @Injectable()
 export class WebhookTokenGuard implements CanActivate {
-    canActivate(context: ExecutionContext): boolean {
-        const expectedToken = WEBHOOK_TOKEN;
+    /**
+     * Tokens que este guard aceita. Subclasses sobrescrevem para expor um token
+     * com escopo restrito a uma integração específica.
+     */
+    protected get tokensAceitos(): string[] {
+        return [WEBHOOK_TOKEN];
+    }
 
+    canActivate(context: ExecutionContext): boolean {
         const request = context.switchToHttp().getRequest<Request>();
         const providedToken = this.extractToken(request);
 
-        if (!providedToken || !this.tokensMatch(providedToken, expectedToken)) {
+        if (!providedToken || !this.tokensAceitos.some((aceito) => this.tokensMatch(providedToken, aceito))) {
             throw new UnauthorizedException('Token de webhook inválido ou ausente.');
         }
 

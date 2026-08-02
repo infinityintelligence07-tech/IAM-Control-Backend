@@ -4061,9 +4061,42 @@ export class DocumentosService {
         hist_staff_lider_id: number | null;
     }> {
         const base = this.montarColunasHistoricoVenda(dadosContratoRaw, criadoPor);
+        const dadosContrato = dadosContratoRaw || {};
+        const idOrigem = Number(
+            dadosContrato?.fluxo_evento_origem_id_turma || dadosContrato?.id_turma_origem || dadosContrato?.turma_origem?.id || 0,
+        );
+        const idDestino = Number(
+            dadosContrato?.fluxo_evento_destino_id_turma || dadosContrato?.id_turma_destino || dadosContrato?.turma?.id || 0,
+        );
+        // Quando o snapshot só traz o id (ex.: campos_variaveis "Turma de Destino"
+        // = "91"), resolve o rótulo "Treinamento - Edição" pela relação — senão
+        // hist_turma_* fica null ou só com o número e o filtro EVENTOS some.
+        const idsRotulo = [idOrigem, idDestino].filter((id) => Number.isFinite(id) && id > 0);
+        const turmasPorId = new Map<number, Turmas>();
+        if (idsRotulo.length > 0) {
+            const turmas = await this.uow.turmasRP.find({
+                where: { id: In(idsRotulo), deletado_em: IsNull() },
+                relations: ['id_treinamento_fk'],
+            });
+            turmas.forEach((turma) => turmasPorId.set(turma.id, turma));
+        }
+        const rotuloOrigem = idOrigem > 0 ? this.rotuloTurmaHistorico(turmasPorId.get(idOrigem)) : null;
+        const rotuloDestino = idDestino > 0 ? this.rotuloTurmaHistorico(turmasPorId.get(idDestino)) : null;
+        const histTurmaOrigemEhIdPuro = Boolean(base.hist_turma_origem && /^\d+$/.test(base.hist_turma_origem));
+        const histTurmaDestinoEhIdPuro = Boolean(base.hist_turma_destino && /^\d+$/.test(base.hist_turma_destino));
+
         const idsTurmas = this.obterIdsTurmasParaStaffLider(dadosContratoRaw, idsTurmasExtras);
         const hist_staff_lider_id = await this.resolverHistStaffLiderId(base.hist_vendedor_id, idsTurmas);
-        return { ...base, hist_staff_lider_id };
+        return {
+            ...base,
+            hist_turma_origem: rotuloOrigem || (!histTurmaOrigemEhIdPuro ? base.hist_turma_origem : null),
+            hist_turma_destino: rotuloDestino || (!histTurmaDestinoEhIdPuro ? base.hist_turma_destino : null),
+            hist_treinamento_origem:
+                (idOrigem > 0
+                    ? String(turmasPorId.get(idOrigem)?.id_treinamento_fk?.treinamento || '').trim() || null
+                    : null) || base.hist_treinamento_origem,
+            hist_staff_lider_id,
+        };
     }
 
     /**

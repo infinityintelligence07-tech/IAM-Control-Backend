@@ -5651,6 +5651,60 @@ export class TurmasService {
     }
 
     /**
+     * Matrículas soft-deletadas que foram substituídas por outra matrícula do
+     * mesmo aluno na mesma turma (padrão "excluiu por erro e lançou de novo").
+     * Sem isso, o acompanhamento conta 2 entradas (e 1 saída) para 1 venda real
+     * — caso CONF 57 / Lorena Emilia.
+     */
+    private idsMatriculasSupersededPorRecriacao(
+        matRows: Array<{
+            id_turma_aluno: string;
+            id_aluno: string | number;
+            id_turma?: string | number;
+            criado_em: Date | string | null | undefined;
+            deletado_em: Date | string | null | undefined;
+        }>,
+    ): Set<string> {
+        const toTime = (v: Date | string | null | undefined): number => {
+            if (v == null || v === '') return Number.NaN;
+            const t = (v instanceof Date ? v : new Date(v)).getTime();
+            return Number.isNaN(t) ? Number.NaN : t;
+        };
+
+        type Linha = { id: string; criado: number; deletado: number | null };
+        const porChave = new Map<string, Linha[]>();
+        for (const row of matRows) {
+            const idAluno = Number(row.id_aluno);
+            if (!Number.isFinite(idAluno) || idAluno <= 0) continue;
+            const idTurma = row.id_turma != null ? Number(row.id_turma) : 0;
+            const criado = toTime(row.criado_em);
+            if (Number.isNaN(criado)) continue;
+            const deletadoRaw = toTime(row.deletado_em);
+            const chave = `${idTurma}:${idAluno}`;
+            const lista = porChave.get(chave) ?? [];
+            lista.push({
+                id: String(row.id_turma_aluno),
+                criado,
+                deletado: Number.isNaN(deletadoRaw) ? null : deletadoRaw,
+            });
+            porChave.set(chave, lista);
+        }
+
+        const superseded = new Set<string>();
+        for (const lista of porChave.values()) {
+            if (lista.length < 2) continue;
+            lista.sort((a, b) => a.criado - b.criado);
+            for (let i = 0; i < lista.length; i++) {
+                const atual = lista[i];
+                if (atual.deletado == null) continue;
+                const temSucessora = lista.some((outra, j) => j > i && outra.criado >= atual.deletado!);
+                if (temSucessora) superseded.add(atual.id);
+            }
+        }
+        return superseded;
+    }
+
+    /**
      * Extrato extratificado de movimentação de turmas (acompanhamento/conferência).
      * Fonte única de verdade: matrículas (`criado_em`/`deletado_em`), a mesma dos
      * modais de saldo — assim Início + Entrada − Saída = Saldo final sempre fecha.
@@ -5763,6 +5817,7 @@ export class TurmasService {
                 .withDeleted()
                 .select('ta.id', 'id_turma_aluno')
                 .addSelect('ta.id_turma', 'id_turma')
+                .addSelect('ta.id_aluno', 'id_aluno')
                 .addSelect('ta.id_turma_transferencia_para', 'id_turma_transferencia_para')
                 .addSelect('ta.criado_em', 'criado_em')
                 .addSelect('ta.deletado_em', 'deletado_em')
@@ -5774,6 +5829,7 @@ export class TurmasService {
                 .getRawMany<{
                     id_turma_aluno: string;
                     id_turma: number;
+                    id_aluno: string | number;
                     id_turma_transferencia_para: number | string | null;
                     criado_em: Date | string;
                     deletado_em: Date | string | null;
@@ -5786,6 +5842,9 @@ export class TurmasService {
                 const d = v instanceof Date ? v : new Date(v);
                 return Number.isNaN(d.getTime()) ? null : d;
             };
+
+            // Excluiu e relançou no período: a matrícula antiga não gera entrada/saída.
+            const matriculasSuperseded = this.idsMatriculasSupersededPorRecriacao(matRows);
 
             // Logs/transferências: só para classificar canal/motivo (não definem a contagem).
             const logRows = await this.uow.historicoAlunosTurmasLogsRP
@@ -5867,6 +5926,12 @@ export class TurmasService {
                 const inFim = criado <= endInclusive && (deletado == null || deletado > endInclusive);
                 const isEntrada = criado >= start && criado <= endInclusive;
                 const isSaida = deletado != null && deletado >= start && deletado <= endInclusive;
+                const superseded = matriculasSuperseded.has(idTurmaAluno);
+                // Recriação no período: ignora entrada e saída da matrícula antiga
+                // (a nova entrada permanece). Se a antiga já estava no saldo inicial,
+                // a saída continua contando para a equação fechar.
+                const ignoraEntradaSuperseded = superseded && isEntrada;
+                const ignoraSaidaSuperseded = superseded && isSaida && isEntrada;
 
                 if (inInicio) {
                     const arr = inicioIdsPorTurma.get(idTurma) ?? [];
@@ -5878,7 +5943,7 @@ export class TurmasService {
                     arr.push(idTurmaAluno);
                     fimIdsPorTurma.set(idTurma, arr);
                 }
-                if (isEntrada) {
+                if (isEntrada && !ignoraEntradaSuperseded) {
                     const arr = entradaIdsPorTurma.get(idTurma) ?? [];
                     arr.push(idTurmaAluno);
                     entradaIdsPorTurma.set(idTurma, arr);
@@ -5890,7 +5955,7 @@ export class TurmasService {
                         id_turma_aluno: idTurmaAluno,
                     });
                 }
-                if (isSaida) {
+                if (isSaida && !ignoraSaidaSuperseded) {
                     // Saída por transferência (destino real):
                     // 1) histórico alinhado ao soft delete (≤24h);
                     // 2) flag id_turma_transferencia_para sem log de cancel/remoção
@@ -6189,6 +6254,10 @@ export class TurmasService {
                     dia_deletado: string | null;
                 }>();
 
+            const matriculasSuperseded = this.idsMatriculasSupersededPorRecriacao(
+                matRows.map((row) => ({ ...row, id_turma })),
+            );
+
             const logRows = await this.uow.historicoAlunosTurmasLogsRP
                 .createQueryBuilder('l')
                 .select('l.id_turma_aluno', 'id_turma_aluno')
@@ -6261,8 +6330,11 @@ export class TurmasService {
                 const isEntrada = criado >= start && criado <= endInclusive;
                 const isSaida = deletado != null && deletado >= start && deletado <= endInclusive;
                 const idAluno = Number(row.id_aluno);
+                const superseded = matriculasSuperseded.has(idTurmaAluno);
+                const ignoraEntradaSuperseded = superseded && isEntrada;
+                const ignoraSaidaSuperseded = superseded && isSaida && isEntrada;
 
-                if (isEntrada) {
+                if (isEntrada && !ignoraEntradaSuperseded) {
                     const transf = transferenciaEntrada.get(idTurmaAluno);
                     if (transf) {
                         itens.push({
@@ -6285,7 +6357,7 @@ export class TurmasService {
                         });
                     }
                 }
-                if (isSaida) {
+                if (isSaida && !ignoraSaidaSuperseded) {
                     const logCat = logSaidaPorMatricula.get(idTurmaAluno);
                     const flagPara =
                         row.id_turma_transferencia_para != null && row.id_turma_transferencia_para !== '' ? Number(row.id_turma_transferencia_para) : null;

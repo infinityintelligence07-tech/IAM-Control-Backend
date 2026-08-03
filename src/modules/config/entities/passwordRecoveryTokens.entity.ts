@@ -10,7 +10,8 @@ export class PasswordRecoveryTokens {
     @Column({ type: 'int', name: 'id_usuario', nullable: false })
     id_usuario: number;
 
-    @Column({ type: 'uuid', unique: true })
+    /** SHA-256 (hex) do token enviado por e-mail — nunca o valor em claro. */
+    @Column({ type: 'varchar', length: 64, unique: true })
     token: string;
 
     @ManyToOne(() => Usuarios, (usuarios) => usuarios.passwordRecoveryTokens)

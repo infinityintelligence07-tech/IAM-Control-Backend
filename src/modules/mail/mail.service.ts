@@ -31,10 +31,8 @@ export class MailService {
         }
     }
 
-    async sendPasswordRecovery(email: string, token: string) {
+    async sendPasswordRecovery(email: string, resetLink: string) {
         this.checkConfiguration();
-
-        const resetLink = `${process.env.FRONTEND_URL}/recoverypassword/${token}`;
 
         await this.transporter.sendMail({
             from: '"IAM Control" <no-reply@iamcontrol.com>',

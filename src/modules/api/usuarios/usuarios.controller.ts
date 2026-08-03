@@ -29,12 +29,7 @@ export class UsuariosController {
     // listar todos os usuários independentemente do nível de acesso.
     @Get()
     @UseGuards(JwtAuthGuard)
-    async findAll(@Query() filters: GetUsuariosDto, @Req() req: any): Promise<UsuariosListResponseDto> {
-        console.log('[usuarios-url-debug][backend][controller] requisição recebida:', {
-            originalUrl: req?.originalUrl,
-            rawQuery: req?.query,
-            transformedFilters: filters,
-        });
+    async findAll(@Query() filters: GetUsuariosDto): Promise<UsuariosListResponseDto> {
         return this.usuariosService.findAll(filters);
     }
 
@@ -42,16 +37,22 @@ export class UsuariosController {
     @UseGuards(JwtAuthGuard, PermissionsGuard)
     @RequirePermission({ module: 'usuarios', action: 'view' })
     async findById(@Param('id', ParseIntPipe) id: number): Promise<UsuarioResponseDto | null> {
-        console.log('Buscando usuário por ID:', id);
         return this.usuariosService.findById(id);
     }
 
     @Put(':id')
     @UseGuards(JwtAuthGuard, PermissionsGuard)
     @RequirePermission({ module: 'usuarios', action: 'edit' })
-    async update(@Param('id', ParseIntPipe) id: number, @Body() updateUsuarioDto: UpdateUsuarioDto): Promise<UsuarioResponseDto> {
-        console.log('Atualizando usuário ID:', id, 'Dados:', updateUsuarioDto);
-        return this.usuariosService.update(id, updateUsuarioDto);
+    async update(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() updateUsuarioDto: UpdateUsuarioDto,
+        @Req() req: any,
+    ): Promise<UsuarioResponseDto> {
+        const atorId = req.user?.sub;
+        if (!atorId) {
+            throw new ForbiddenException('Usuário autenticado inválido.');
+        }
+        return this.usuariosService.update(id, updateUsuarioDto, atorId);
     }
 
     @Put(':id/aprovar')
@@ -62,7 +63,6 @@ export class UsuariosController {
         if (!aprovadoPor) {
             throw new ForbiddenException('Usuário autenticado inválido para aprovar cadastro.');
         }
-        console.log('Aprovando usuário ID:', id, 'Aprovado por:', aprovadoPor);
         return this.usuariosService.approve(id, aprovadoPor);
     }
 
@@ -70,7 +70,6 @@ export class UsuariosController {
     @UseGuards(JwtAuthGuard, PermissionsGuard)
     @RequirePermission({ module: 'usuarios', action: 'delete' })
     async softDelete(@Param('id', ParseIntPipe) id: number, @Body() softDeleteDto: SoftDeleteUsuarioDto): Promise<void> {
-        console.log('Fazendo soft delete do usuário ID:', id);
         return this.usuariosService.softDelete(id, softDeleteDto);
     }
 
@@ -78,7 +77,6 @@ export class UsuariosController {
     @UseGuards(JwtAuthGuard, PermissionsGuard)
     @RequirePermission({ module: 'usuarios', action: 'delete' })
     async delete(@Param('id', ParseIntPipe) id: number): Promise<void> {
-        console.log('Deletando permanentemente o usuário ID:', id);
         return this.usuariosService.delete(id);
     }
 }

@@ -1,4 +1,4 @@
-import { IsEmail, IsString, IsOptional, IsEnum, IsArray, ArrayMinSize, MinLength, MaxLength, Matches, ValidateIf } from 'class-validator';
+import { IsEmail, IsString, IsOptional, IsEnum, IsArray, ArrayMinSize, MinLength, MaxLength, Matches } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ESetores, EFuncoes } from '../../modules/config/entities/enum';
 import { normalizeSetores } from '../utils/setor.util';
@@ -76,6 +76,7 @@ export class ForgotPasswordDto {
 
 export class ResetPasswordDto {
     @IsString()
+    @Matches(/^[a-f0-9]{64}$/, { message: 'Token inválido' })
     token: string;
 
     @IsString()
@@ -85,6 +86,104 @@ export class ResetPasswordDto {
         message: 'Senha deve conter ao menos uma letra minúscula, uma maiúscula, um número e um caractere especial',
     })
     senha: string;
+}
+
+/**
+ * Allowlist do perfil próprio. `id`, `setor`, `funcao` e `aprovado` são
+ * proibidos aqui: papéis/setores só mudam por PUT /usuarios/:id (admin).
+ */
+export class UpdateProfileDto {
+    @IsOptional()
+    @IsString()
+    @MaxLength(50)
+    primeiro_nome?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(50)
+    sobrenome?: string;
+
+    @IsOptional()
+    @IsEmail({}, { message: 'E-mail inválido' })
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(20)
+    telefone?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(9)
+    cep?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(150)
+    logradouro?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    complemento?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(20)
+    numero?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    bairro?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    cidade?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(50)
+    estado?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(20)
+    cpf?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(20)
+    cnpj?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(20)
+    rg?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(30)
+    ctps?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(150)
+    chave_pix?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(50)
+    tipo_colaborador?: string;
+
+    @IsOptional()
+    @IsString()
+    data_nascimento?: string;
+
+    @IsOptional()
+    @IsString()
+    data_admissao?: string;
 }
 
 export class ChangePasswordDto {
@@ -97,24 +196,6 @@ export class ChangePasswordDto {
     @MaxLength(16, { message: 'Nova senha deve ter no máximo 16 caracteres' })
     @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,16}$/, {
         message: 'Nova senha deve conter ao menos uma letra minúscula, uma maiúscula, um número e um caractere especial',
-    })
-    nova_senha: string;
-}
-
-export class ResetPasswordDirectDto {
-    @ValidateIf((o) => !o.telefone || o.telefone.length === 0)
-    @IsEmail({}, { message: 'E-mail inválido' })
-    email?: string;
-
-    @ValidateIf((o) => !o.email || o.email.length === 0)
-    @IsString({ message: 'Telefone é obrigatório quando email não é informado' })
-    telefone?: string;
-
-    @IsString()
-    @MinLength(8, { message: 'Senha deve ter no mínimo 8 caracteres' })
-    @MaxLength(16, { message: 'Senha deve ter no máximo 16 caracteres' })
-    @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,16}$/, {
-        message: 'Senha deve conter ao menos uma letra minúscula, uma maiúscula, um número e um caractere especial',
     })
     nova_senha: string;
 }

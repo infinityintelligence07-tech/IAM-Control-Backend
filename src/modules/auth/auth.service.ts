@@ -2,12 +2,13 @@ import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UnitOfWorkService } from '../config/unit_of_work/uow.service';
-import { v4 as uuidv4 } from 'uuid';
+import { createHash, randomBytes } from 'crypto';
 import { MailService } from '../mail/mail.service';
 import { PasswordValidator } from '../../common/validators/password.validator';
 import { EncryptionService } from '../../common/services/encryption.service';
 import { EFuncoes, ESetores } from '../config/entities/enum';
 import { normalizeSetores } from '../../common/utils/setor.util';
+import { UpdateProfileDto } from '../../common/dto/auth.dto';
 
 @Injectable()
 export class AuthService {
@@ -281,67 +282,49 @@ export class AuthService {
         };
     }
 
+    /** Só o hash do token é persistido; o valor em claro existe apenas no e-mail do titular. */
+    private hashResetToken(token: string): string {
+        return createHash('sha256').update(token).digest('hex');
+    }
+
     async requestPasswordReset(email: string, frontendUrl: string) {
         const user = await this.findUsuarioAtivoPorEmail(email);
-        if (!user) return; // silently ignore
+        if (!user) return; // resposta genérica: não revela se o e-mail existe
 
-        const token = uuidv4();
-        const expires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+        const token = randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
 
-        const rec = this.uow.passRecTokenRP.create({ id_usuario: user.id, token, expira_em: expires });
+        // Um pedido novo invalida os anteriores do mesmo usuário.
+        await this.uow.passRecTokenRP.delete({ id_usuario: user.id });
+
+        const rec = this.uow.passRecTokenRP.create({
+            id_usuario: user.id,
+            token: this.hashResetToken(token),
+            expira_em: expires,
+        });
         await this.uow.passRecTokenRP.save(rec);
 
-        const resetLink = `${frontendUrl.replace(/\/$/, '')}/auth/reset?token=${token}`;
-        await this.mail.sendPasswordRecovery(email, resetLink);
+        const resetLink = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+        await this.mail.sendPasswordRecovery(user.email, resetLink);
     }
 
     async resetPassword(token: string, novaSenha: string) {
-        const rec = await this.uow.passRecTokenRP.findOne({ where: { token } });
+        PasswordValidator.validate(novaSenha);
+
+        const rec = await this.uow.passRecTokenRP.findOne({ where: { token: this.hashResetToken(token) } });
         if (!rec) throw new BadRequestException('Token inválido');
-        if (new Date(rec.expira_em).getTime() < Date.now()) throw new BadRequestException('Token expirado');
+        if (new Date(rec.expira_em).getTime() < Date.now()) {
+            await this.uow.passRecTokenRP.delete({ id: rec.id });
+            throw new BadRequestException('Token expirado');
+        }
 
         const user = await this.uow.usuariosRP.findOne({ where: { id: rec.id_usuario } });
         if (!user) throw new BadRequestException('Usuário inválido');
 
         user.senha = await bcrypt.hash(novaSenha, 10);
         await this.uow.usuariosRP.save(user);
-        await this.uow.passRecTokenRP.delete({ id: rec.id });
+        await this.uow.passRecTokenRP.delete({ id_usuario: rec.id_usuario });
         return { ok: true };
-    }
-
-    async resetPasswordDirect(email?: string, telefone?: string, novaSenha?: string) {
-        if (!email && !telefone) {
-            throw new BadRequestException('Email ou telefone é obrigatório');
-        }
-
-        if (!novaSenha) {
-            throw new BadRequestException('Nova senha é obrigatória');
-        }
-
-        // Validar senha
-        PasswordValidator.validate(novaSenha);
-
-        let user;
-        if (email) {
-            user = await this.findUsuarioAtivoPorEmail(email);
-            if (!user) {
-                throw new BadRequestException('Usuário não encontrado com este email');
-            }
-        } else if (telefone) {
-            user = await this.uow.usuariosRP.findOne({ where: { telefone } });
-            if (!user) {
-                throw new BadRequestException('Usuário não encontrado com este telefone');
-            }
-        }
-
-        if (!user) {
-            throw new BadRequestException('Usuário não encontrado');
-        }
-
-        user.senha = await bcrypt.hash(novaSenha, 10);
-        await this.uow.usuariosRP.save(user);
-
-        return { ok: true, message: 'Senha redefinida com sucesso' };
     }
 
     async changePassword(userId: number, senhaAtual: string, novaSenha: string) {
@@ -376,38 +359,12 @@ export class AuthService {
         };
     }
 
-    async updateProfile(
-        userId: number,
-        primeiro_nome: string,
-        sobrenome: string,
-        email: string,
-        telefone: string,
-        setor: ESetores | ESetores[],
-        funcao: EFuncoes[],
-        cep?: string,
-        logradouro?: string,
-        complemento?: string,
-        numero?: string,
-        bairro?: string,
-        cidade?: string,
-        estado?: string,
-        cpf?: string,
-        cnpj?: string,
-        rg?: string,
-        ctps?: string,
-        chave_pix?: string,
-        tipo_colaborador?: string,
-        data_nascimento?: string,
-        data_admissao?: string,
-    ) {
-        console.log('updateProfile chamado com:', {
-            userId,
+    async updateProfile(userId: number, dto: UpdateProfileDto) {
+        const {
             primeiro_nome,
             sobrenome,
             email,
             telefone,
-            setor,
-            funcao,
             cep,
             logradouro,
             complemento,
@@ -423,7 +380,7 @@ export class AuthService {
             tipo_colaborador,
             data_nascimento,
             data_admissao,
-        });
+        } = dto;
 
         try {
             const user = await this.uow.usuariosRP.findOne({ where: { id: userId } });
@@ -435,18 +392,8 @@ export class AuthService {
             const emailAtualNormalizado = user.email?.toLowerCase().trim();
             const emailNovoNormalizado = email?.toLowerCase().trim();
 
-            console.log('Validando email:', {
-                emailAtual: user.email,
-                emailNovo: email,
-                emailAtualNormalizado,
-                emailNovoNormalizado,
-                userId,
-            });
-
             // Só validar se o email realmente mudou (ignorando caixa)
-            if (emailNovoNormalizado !== emailAtualNormalizado) {
-                console.log('Email mudou, validando duplicação...');
-
+            if (emailNovoNormalizado && emailNovoNormalizado !== emailAtualNormalizado) {
                 const existingUserCount = await this.uow.usuariosRP
                     .createQueryBuilder('usuario')
                     .where('LOWER(TRIM(usuario.email)) = :email', { email: emailNovoNormalizado })
@@ -454,37 +401,27 @@ export class AuthService {
                     .andWhere('usuario.deletado_em IS NULL')
                     .getCount();
 
-                console.log('Contagem de usuários com mesmo email:', existingUserCount);
-
                 if (existingUserCount > 0) {
                     throw new BadRequestException('Email já está em uso por outro usuário');
                 }
-            } else {
-                console.log('Email não mudou (ou só a caixa), normalizando se necessário');
             }
 
-            const setores = normalizeSetores(setor);
-            if (setores.length === 0) {
-                throw new BadRequestException('Informe ao menos um setor');
-            }
+            const nomeFinal = primeiro_nome ?? user.primeiro_nome;
+            const sobrenomeFinal = sobrenome ?? user.sobrenome;
 
             const updateData: any = {
-                primeiro_nome,
-                sobrenome,
-                nome: `${primeiro_nome} ${sobrenome}`,
-                telefone,
-                setor: setores,
-                funcao,
+                primeiro_nome: nomeFinal,
+                sobrenome: sobrenomeFinal,
+                nome: `${nomeFinal} ${sobrenomeFinal}`,
                 atualizado_em: new Date(),
             };
+
+            if (telefone !== undefined) updateData.telefone = telefone;
 
             // Sempre persiste e-mail em minúsculas (inclusive quando só a caixa mudou).
             if (emailNovoNormalizado && user.email !== emailNovoNormalizado) {
                 await this.liberarEmailSoftDeletados(emailNovoNormalizado, userId);
                 updateData.email = emailNovoNormalizado;
-                console.log('Email será atualizado para:', emailNovoNormalizado);
-            } else {
-                console.log('Email já normalizado, mantendo:', user.email);
             }
 
             // Adicionar campos de endereço se fornecidos
@@ -536,8 +473,7 @@ export class AuthService {
 
             const updateQuery = this.uow.usuariosRP.createQueryBuilder().update('Usuarios').set(updateData).where('id = :userId', { userId });
 
-            const updateResult = await updateQuery.execute();
-            console.log('Resultado da atualização (updateQueryBuilder):', updateResult);
+            await updateQuery.execute();
 
             // Buscar o usuário atualizado para retornar os dados corretos
             const updatedUser = await this.uow.usuariosRP.findOne({ where: { id: userId } });

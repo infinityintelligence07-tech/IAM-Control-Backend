@@ -1,13 +1,30 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { UnitOfWorkService } from '../../config/unit_of_work/uow.service';
 import { GetUsuariosDto, UsuariosListResponseDto, UsuarioResponseDto, UpdateUsuarioDto, SoftDeleteUsuarioDto } from './dto/usuarios.dto';
 import { IsNull, ArrayContains, Raw } from 'typeorm';
+import { EFuncoes } from '../../config/entities/enum';
 
 @Injectable()
 export class UsuariosService {
     constructor(private readonly uow: UnitOfWorkService) {}
+    private readonly logger = new Logger(UsuariosService.name);
     private readonly sourceAccents = 'áàâãäéèêëíìîïóòôõöúùûüçñýÿ';
     private readonly targetAccents = 'aaaaaeeeeiiiiooooouuuucnyy';
+
+    /** Papéis e setores só podem ser alterados por ADMINISTRADOR (ver PT-01). */
+    private async ehAdministrador(usuarioId: number): Promise<boolean> {
+        const ator = await this.uow.usuariosRP.findOne({
+            where: { id: usuarioId, deletado_em: IsNull() },
+            select: ['id', 'funcao'] as any,
+        });
+        return Array.isArray(ator?.funcao) && ator.funcao.includes(EFuncoes.ADMINISTRADOR);
+    }
+
+    private listasIguais(a?: unknown[], b?: unknown[]): boolean {
+        const x = (a ?? []).map(String).sort();
+        const y = (b ?? []).map(String).sort();
+        return x.length === y.length && x.every((valor, i) => valor === y[i]);
+    }
 
     private normalizeEmail(value: string): string {
         return value.trim().toLowerCase();
@@ -33,8 +50,6 @@ export class UsuariosService {
 
     async findAll(filters: GetUsuariosDto): Promise<UsuariosListResponseDto> {
         const { page = 1, limit = 10, nome, email, setor, funcao, aprovado } = filters;
-
-        console.log('[usuarios-url-debug][backend][service] filtros recebidos:', filters);
 
         // Construir condições de busca
         const whereConditions: any = {
@@ -187,7 +202,7 @@ export class UsuariosService {
         }
     }
 
-    async update(id: number, updateUsuarioDto: UpdateUsuarioDto): Promise<UsuarioResponseDto> {
+    async update(id: number, updateUsuarioDto: UpdateUsuarioDto, atorId: number): Promise<UsuarioResponseDto> {
         try {
             const usuario = await this.uow.usuariosRP.findOne({
                 where: { id, deletado_em: IsNull() },
@@ -195,6 +210,20 @@ export class UsuariosService {
 
             if (!usuario) {
                 throw new NotFoundException('Usuário não encontrado');
+            }
+
+            const alteraFuncao = updateUsuarioDto.funcao !== undefined && !this.listasIguais(updateUsuarioDto.funcao, usuario.funcao);
+            const alteraSetor = updateUsuarioDto.setor !== undefined && !this.listasIguais(updateUsuarioDto.setor, usuario.setor);
+
+            if (alteraFuncao || alteraSetor) {
+                if (!(await this.ehAdministrador(atorId))) {
+                    throw new ForbiddenException('Apenas administradores podem alterar função ou setor de um usuário.');
+                }
+                this.logger.warn(
+                    `Alteração de acesso: ator=${atorId} alvo=${id} ` +
+                        `funcao=${JSON.stringify(usuario.funcao)}->${JSON.stringify(updateUsuarioDto.funcao ?? usuario.funcao)} ` +
+                        `setor=${JSON.stringify(usuario.setor)}->${JSON.stringify(updateUsuarioDto.setor ?? usuario.setor)}`,
+                );
             }
 
             // Verificar se o email já existe em outro usuário (se estiver sendo alterado).

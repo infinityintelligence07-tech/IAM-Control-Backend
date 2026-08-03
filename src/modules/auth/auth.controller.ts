@@ -6,7 +6,7 @@ import { AdminGuard } from './guards/admin.guard';
 import { PermissionsMatrixService } from './permissions-matrix.service';
 import { SavePermissionsMatrixDto } from './dto/permissions-matrix.dto';
 import { Request } from 'express';
-import { SignupDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, ResetPasswordDirectDto } from '../../common/dto/auth.dto';
+import { SignupDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto, UpdateProfileDto } from '../../common/dto/auth.dto';
 import { ESetores, EFuncoes } from '../config/entities/enum';
 
 @Controller('auth')
@@ -124,11 +124,6 @@ export class AuthController {
         return this.auth.resetPassword(dto.token, dto.senha);
     }
 
-    @Post('reset-direct')
-    async resetDirect(@Body() dto: ResetPasswordDirectDto) {
-        return this.auth.resetPasswordDirect(dto.email, dto.telefone, dto.nova_senha);
-    }
-
     @Get('setores')
     getSetores() {
         return Object.values(ESetores);
@@ -159,85 +154,12 @@ export class AuthController {
 
     @Put('profile')
     @UseGuards(JwtAuthGuard)
-    async updateProfile(@Body() body: any, @Req() req: any) {
-        try {
-            const {
-                primeiro_nome,
-                sobrenome,
-                email,
-                telefone,
-                setor,
-                funcao,
-                cep,
-                logradouro,
-                complemento,
-                numero,
-                bairro,
-                cidade,
-                estado,
-                cpf,
-                cnpj,
-                rg,
-                ctps,
-                chave_pix,
-                tipo_colaborador,
-                data_nascimento,
-                data_admissao,
-            } = body;
-            const userId = body.id;
-            console.log('Controller recebeu:', { userId, body });
-            console.log('Dados extraídos:', {
-                primeiro_nome,
-                sobrenome,
-                email,
-                telefone,
-                setor,
-                funcao,
-                cep,
-                logradouro,
-                complemento,
-                numero,
-                bairro,
-                cidade,
-                estado,
-                cpf,
-                cnpj,
-                rg,
-                ctps,
-                chave_pix,
-                tipo_colaborador,
-                data_nascimento,
-                data_admissao,
-            });
-
-            return this.auth.updateProfile(
-                userId,
-                primeiro_nome,
-                sobrenome,
-                email,
-                telefone,
-                setor,
-                funcao,
-                cep,
-                logradouro,
-                complemento,
-                numero,
-                bairro,
-                cidade,
-                estado,
-                cpf,
-                cnpj,
-                rg,
-                ctps,
-                chave_pix,
-                tipo_colaborador,
-                data_nascimento,
-                data_admissao,
-            );
-        } catch (error) {
-            console.error('Error in updateProfile controller:', error);
-            throw error;
+    async updateProfile(@Body() dto: UpdateProfileDto, @Req() req: any) {
+        const userId = req.user?.sub;
+        if (!userId) {
+            throw new UnauthorizedException('Usuário autenticado inválido.');
         }
+        return this.auth.updateProfile(userId, dto);
     }
 
     @Put('change-password')

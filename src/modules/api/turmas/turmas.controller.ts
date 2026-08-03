@@ -114,26 +114,19 @@ export class TurmasController {
     }
 
     @Get('usuarios-lideres')
+    @UseGuards(JwtAuthGuard)
     async getUsuariosLideres(): Promise<{ id: number; nome: string; email: string; cpf: string | null; telefone: string; funcao: string[] }[]> {
-        console.log('Buscando usuários líderes');
-        try {
-            const result = await this.turmasService.getUsuariosLideres();
-            console.log('Usuários encontrados:', result);
-            return result;
-        } catch (error) {
-            console.error('Erro no controller ao buscar usuários:', error);
-            throw error;
-        }
+        return this.turmasService.getUsuariosLideres();
     }
 
     @Get('alunos-disponiveis')
+    @UseGuards(JwtAuthGuard)
     async getAlunosDisponiveis(
         @Query('id_turma') id_turma?: number,
         @Query('page') page: number = 1,
         @Query('limit') limit: number = 10,
         @Query('search') search?: string,
     ): Promise<AlunosDisponiveisResponseDto> {
-        console.log('Buscando alunos disponíveis para turma:', id_turma, 'search:', search);
         const pageNum = page ? parseInt(page.toString()) : 1;
         const limitNum = limit ? parseInt(limit.toString()) : 10;
         const searchStr = typeof search === 'string' && search.trim() ? search.trim() : undefined;
@@ -302,34 +295,13 @@ export class TurmasController {
     @UseGuards(JwtAuthGuard, PermissionsGuard)
     @RequirePermission({ module: 'turmas', action: 'view' })
     async findAll(@Query() filters: GetTurmasDto): Promise<TurmasListResponseDto> {
-        console.log('Buscando turmas com filtros:', filters);
-        return await this.turmasService.findAll(filters);
-    }
-
-    @Get('public')
-    async findAllPublic(@Query() filters: GetTurmasDto): Promise<TurmasListResponseDto> {
-        console.log('🔓 Buscando turmas (endpoint público) com filtros:', filters);
-        return await this.turmasService.findAll(filters);
+        return this.turmasService.findAll(filters);
     }
 
     @Get('ipr-bonus')
+    @UseGuards(JwtAuthGuard)
     async findIPRTurmasBonus(): Promise<TurmaResponseDto[]> {
-        console.log('🎯 Buscando turmas de IPR para bônus...');
         return this.turmasService.findIPRTurmasBonus();
-    }
-
-    @Get('public/ipr-bonus')
-    async findIPRTurmasBonusPublic(): Promise<TurmaResponseDto[]> {
-        console.log('🔓 [DEBUG] Endpoint público /api/turmas/public/ipr-bonus chamado');
-        console.log('🔓 [DEBUG] Chamando turmasService.findIPRTurmasBonus()');
-        try {
-            const result = await this.turmasService.findIPRTurmasBonus();
-            console.log('🔓 [DEBUG] Resultado do service:', result.length, 'turmas encontradas');
-            return result;
-        } catch (error) {
-            console.error('🔓 [DEBUG] Erro no controller:', error);
-            throw error;
-        }
     }
 
     @Post('snapshot/congelar-lote')
@@ -371,9 +343,10 @@ export class TurmasController {
     }
 
     @Get(':id')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async findById(@Param('id', ParseIntPipe) id: number): Promise<TurmaResponseDto | null> {
-        console.log('Buscando turma por ID:', id);
-        return await this.turmasService.findById(id);
+        return this.turmasService.findById(id);
     }
 
     @Get(':id/status-resumo')
@@ -483,17 +456,19 @@ export class TurmasController {
     // Gerenciamento de Alunos na Turma
 
     @Get(':id/alunos/export')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
     async getAlunosTurmaExport(@Param('id', ParseIntPipe) id_turma: number): Promise<AlunosTurmaExportResponseDto> {
         return this.turmasService.getAlunosTurmaExport(id_turma);
     }
 
     @Get(':id/alunos')
+    @UseGuards(JwtAuthGuard)
     async getAlunosTurma(
         @Param('id', ParseIntPipe) id_turma: number,
         @Query('page', ParseIntPipe) page: number = 1,
         @Query('limit', ParseIntPipe) limit: number = 10,
     ): Promise<AlunosTurmaListResponseDto> {
-        console.log('Buscando alunos da turma:', id_turma);
         return this.turmasService.getAlunosTurma(id_turma, page, limit);
     }
 

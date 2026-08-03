@@ -52,8 +52,8 @@ export class DocumentosController {
     }
 
     @Get(':id')
+    @UseGuards(JwtAuthGuard)
     async findDocumentoById(@Param('id', ParseIntPipe) id: number): Promise<DocumentoResponseDto> {
-        console.log('Buscando documento ID:', id);
         return this.documentosService.findDocumentoById(id);
     }
 
@@ -107,22 +107,22 @@ export class DocumentosController {
     }
 
     @Get('contratos')
+    @UseGuards(JwtAuthGuard)
     async findAllContratos(@Query('page', ParseIntPipe) page: number = 1, @Query('limit', ParseIntPipe) limit: number = 10): Promise<DocumentosListResponseDto> {
-        console.log('Buscando contratos - página:', page, 'limite:', limit);
         const filter: DocumentosFilterDto = { tipo_documento: 'CONTRATO' as any };
         return this.documentosService.findAllDocumentos(page, limit, filter);
     }
 
     @Get('termos')
+    @UseGuards(JwtAuthGuard)
     async findAllTermos(@Query('page', ParseIntPipe) page: number = 1, @Query('limit', ParseIntPipe) limit: number = 10): Promise<DocumentosListResponseDto> {
-        console.log('Buscando termos - página:', page, 'limite:', limit);
         const filter: DocumentosFilterDto = { tipo_documento: 'TERMO' as any };
         return this.documentosService.findAllDocumentos(page, limit, filter);
     }
 
     @Get('formas-pagamento')
+    @UseGuards(JwtAuthGuard)
     getFormasPagamento() {
-        console.log('Buscando formas de pagamento disponíveis');
         return {
             formas_pagamento: Object.values(EFormasPagamento).map((forma) => ({
                 id: forma,
@@ -137,59 +137,9 @@ export class DocumentosController {
 
     // Endpoints para integração com ZapSign
     @Get('zapsign/templates')
+    @UseGuards(JwtAuthGuard)
     async buscarTemplatesZapSign() {
-        console.log('=== ENDPOINT CHAMADO: /api/documentos/zapsign/templates ===');
-        console.log('Buscando templates do banco de dados');
-        try {
-            const resultado = await this.documentosService.buscarTemplatesZapSign();
-            console.log('Templates encontrados:', resultado.length);
-            console.log('Primeiros templates:', resultado.slice(0, 3));
-            return resultado;
-        } catch (error) {
-            console.error('Erro no controller:', error);
-            throw error;
-        }
-    }
-
-    // Endpoint público para teste (TEMPORÁRIO)
-    @Get('public/templates')
-    async buscarTemplatesPublico() {
-        console.log('=== ENDPOINT PÚBLICO CHAMADO: /api/documentos/public/templates ===');
-        try {
-            const resultado = await this.documentosService.buscarTemplatesZapSign();
-            console.log('Templates encontrados (público):', resultado.length);
-            return resultado;
-        } catch (error) {
-            console.error('Erro no endpoint público:', error);
-            throw error;
-        }
-    }
-
-    @Get('public/documentos')
-    async buscarDocumentosPublico() {
-        console.log('=== ENDPOINT PÚBLICO CHAMADO: /api/documentos/public/documentos ===');
-        try {
-            const resultado = await this.documentosService.buscarTemplatesZapSign();
-            console.log('Documentos encontrados (público):', resultado.length);
-            return resultado;
-        } catch (error) {
-            console.error('Erro no endpoint público:', error);
-            throw error;
-        }
-    }
-
-    // Endpoint de teste simples
-    @Get('test')
-    teste() {
-        console.log('=== ENDPOINT DE TESTE CHAMADO ===');
-        return { message: 'Endpoint funcionando!', timestamp: new Date().toISOString() };
-    }
-
-    // Endpoint público de teste sem autenticação
-    @Get('public/test')
-    testePublico() {
-        console.log('=== ENDPOINT PÚBLICO DE TESTE CHAMADO ===');
-        return { message: 'Teste público funcionando!', timestamp: new Date().toISOString() };
+        return this.documentosService.buscarTemplatesZapSign();
     }
 
     // Criação de contrato liberada a qualquer autenticado: qualquer usuário
@@ -545,8 +495,8 @@ export class DocumentosController {
     // `incluir_excluidos=true` permite abrir os detalhes de contratos soft-deletados
     // (aba "Contratos excluídos" do Histórico de Vendas).
     @Get('contrato/:id')
+    @UseGuards(JwtAuthGuard)
     async buscarContratoCompleto(@Param('id') id: string, @Query('incluir_excluidos') incluirExcluidos?: string) {
-        console.log('Buscando contrato completo:', id);
         return this.documentosService.buscarContratoCompleto(id, incluirExcluidos === 'true');
     }
 
@@ -557,59 +507,11 @@ export class DocumentosController {
         return this.documentosService.salvarAssinatura(signatureData);
     }
 
-    // Endpoint de teste para verificar dados do contrato
-    @Get('test/contrato/:id')
-    async testContrato(@Param('id') id: string) {
-        console.log('=== TESTE CONTRATO ===');
-        console.log('ID:', id);
-        const contrato = await this.documentosService.buscarContratoCompleto(id);
-        console.log('Contrato retornado:', JSON.stringify(contrato, null, 2));
-        return contrato;
-    }
-
-    // Endpoint de teste simples para verificar dados básicos
-    @Get('test/simple/:id')
-    async testSimple(@Param('id') id: string) {
-        console.log('=== TESTE SIMPLES ===');
-        console.log('ID:', id);
-
-        try {
-            // Buscar apenas o contrato básico usando o método do serviço
-            const contratoBasico = await this.documentosService.buscarContratoBasico(id);
-
-            console.log('Contrato básico:', contratoBasico ? 'ENCONTRADO' : 'NÃO ENCONTRADO');
-            if (contratoBasico) {
-                console.log('ID:', contratoBasico.id);
-                console.log('ID TurmaAlunoTreinamento:', contratoBasico.id_turma_aluno_treinamento);
-                console.log('ID Documento:', contratoBasico.id_documento);
-                console.log('Status:', contratoBasico.status_ass_aluno);
-            }
-
-            return {
-                encontrado: !!contratoBasico,
-                dados: contratoBasico
-                    ? {
-                          id: contratoBasico.id,
-                          id_turma_aluno_treinamento: contratoBasico.id_turma_aluno_treinamento,
-                          id_documento: contratoBasico.id_documento,
-                          status_ass_aluno: contratoBasico.status_ass_aluno,
-                          dados_contrato: contratoBasico.dados_contrato,
-                      }
-                    : null,
-            };
-        } catch (error) {
-            console.error('Erro no teste simples:', error);
-            return { erro: (error as Error).message };
-        }
-    }
-
     // Endpoint para gerar contrato PDF usando dados salvos no banco
     @Get('gerar-pdf/:id')
+    @UseGuards(JwtAuthGuard)
     async gerarContratoPDF(@Param('id') id: string, @Res() res: any) {
         try {
-            console.log('=== GERANDO CONTRATO PDF ===');
-            console.log('ID do contrato:', id);
-
             const pdfBuffer = await this.documentosService.gerarContratoPDF(id);
 
             // Configurar headers para download do PDF

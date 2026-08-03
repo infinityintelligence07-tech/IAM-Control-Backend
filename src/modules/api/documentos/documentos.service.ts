@@ -1181,6 +1181,9 @@ export class DocumentosService {
                         comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda),
                     },
                     status_conciliacao: statusConciliacao,
+                    // Flag persistida: a sync ZapSign e o Histórico tratam como
+                    // assinado no papel mesmo se o anexo ainda não chegou / falhou.
+                    ...(isContratoManual ? { contrato_manual: true } : {}),
                     ...(atribuicaoRecriacao
                         ? {
                               recriacao: {
@@ -3296,6 +3299,10 @@ export class DocumentosService {
                     (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)?.aluno?.nome || 'Aluno';
                 const alunoDados =
                     (contrato.dados_contrato as { aluno?: { nome?: string; cpf?: string; email?: string; telefone_um?: string } } | null)?.aluno || {};
+                contrato.dados_contrato = {
+                    ...(contrato.dados_contrato || {}),
+                    contrato_manual: true,
+                };
                 contrato.zapsign_signers_data = [
                     {
                         name: alunoNome,
@@ -3309,7 +3316,7 @@ export class DocumentosService {
                 contrato.zapsign_document_status = {
                     status: 'signed',
                     created_at: dataAssinatura.toISOString(),
-                    document_id: '',
+                    document_id: contrato.zapsign_document_id || '',
                     signing_url: '',
                 };
             }
@@ -4608,10 +4615,24 @@ export class DocumentosService {
     }
 
     /** Contrato com assinatura digital concluída OU manuscrito anexado. */
+    /** Contrato escrito à mão (anexo ou flag persistida na criação/anexo). */
+    private sqlContratoManual(aliasContrato = 'contrato'): string {
+        return `(
+            COALESCE(${aliasContrato}.foto_documento_aluno_base64, '') <> ''
+            OR LOWER(COALESCE(${aliasContrato}.dados_contrato->>'contrato_manual', '')) IN ('true', 't', '1')
+        )`;
+    }
+
+    private contratoAssinadoNoPapel(contrato: Pick<TurmasAlunosTreinamentosContratos, 'foto_documento_aluno_base64' | 'dados_contrato'>): boolean {
+        if (contrato.foto_documento_aluno_base64) return true;
+        const flag = (contrato.dados_contrato as { contrato_manual?: unknown } | null)?.contrato_manual;
+        return flag === true || flag === 'true' || flag === 1 || flag === '1';
+    }
+
     private sqlContratoTemAssinatura(aliasContrato = 'contrato'): string {
         const statusDocumentoSql = `LOWER(COALESCE(${aliasContrato}.zapsign_document_status->>'status', ''))`;
         return `(
-            ${aliasContrato}.foto_documento_aluno_base64 IS NOT NULL
+            ${this.sqlContratoManual(aliasContrato)}
             OR ${statusDocumentoSql} IN ('signed', 'complete', 'completed', 'assinado')
         )`;
     }
@@ -7138,8 +7159,7 @@ export class DocumentosService {
                         .createQueryBuilder('contrato')
                         .select('contrato.id', 'id')
                         .where('contrato.id IN (:...idsPagina)', { idsPagina })
-                        .andWhere('contrato.foto_documento_aluno_base64 IS NOT NULL')
-                        .andWhere("COALESCE(contrato.foto_documento_aluno_base64, '') <> ''")
+                        .andWhere(this.sqlContratoManual('contrato'))
                         .getRawMany<{ id: string }>(),
                     omitirComprovantes
                         ? this.uow.turmasAlunosTreinamentosContratosRP
@@ -8360,11 +8380,11 @@ export class DocumentosService {
                 throw new BadRequestException('Contrato não possui documento no ZapSign');
             }
 
-            // Contrato assinado no papel e anexado: o documento físico é a prova
-            // da assinatura e ninguém vai assinar na ZapSign, que responde
-            // "pending" para sempre. Sem esta trava, a sincronização rebaixava o
-            // ASSINADO gravado por `salvarAssinatura` de volta para pendente.
-            const assinadoNoPapel = Boolean(contrato.foto_documento_aluno_base64);
+            // Contrato assinado no papel (anexo ou flag contrato_manual): o
+            // documento físico é a prova e ninguém vai assinar na ZapSign, que
+            // responde "pending" para sempre. Sem esta trava, a sincronização
+            // rebaixava o ASSINADO de volta para pendente.
+            const assinadoNoPapel = this.contratoAssinadoNoPapel(contrato);
 
             // Buscar o status atual do documento no ZapSign
             const zapSignDocument = await this.zapSignService.getDocument(contrato.zapsign_document_id);
@@ -8677,9 +8697,9 @@ export class DocumentosService {
             .createQueryBuilder('contrato')
             .where('contrato.zapsign_document_id IS NOT NULL')
             .andWhere('contrato.deletado_em IS NULL')
-            // Assinado no papel: já está concluído, consultar a ZapSign a cada
-            // ciclo só gastaria chamadas de API para receber "pending" eterno.
-            .andWhere("COALESCE(contrato.foto_documento_aluno_base64, '') = ''")
+            // Assinado no papel (foto ou flag): já concluído — consultar a
+            // ZapSign a cada ciclo só gastaria API para receber "pending" eterno.
+            .andWhere(`NOT ${this.sqlContratoManual('contrato')}`)
             .andWhere('contrato.criado_em BETWEEN :inicio AND :fim', { inicio: dataLimite, fim: new Date() })
             .andWhere(
                 `(

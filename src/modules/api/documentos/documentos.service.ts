@@ -3355,22 +3355,6 @@ export class DocumentosService {
         return { message: 'Assinatura salva com sucesso', success: true };
     }
 
-    async buscarContratoBasico(contratoId: string): Promise<any> {
-        try {
-            const contratoBasico = await this.uow.turmasAlunosTreinamentosContratosRP.findOne({
-                where: {
-                    id: contratoId,
-                    deletado_em: null,
-                },
-            });
-
-            return contratoBasico;
-        } catch (error) {
-            this.logger.error('contract.repo.get.basic | Erro ao buscar contrato básico', error instanceof Error ? error.stack : undefined);
-            throw new Error('Erro ao buscar contrato básico');
-        }
-    }
-
     async buscarContratoCompleto(contratoId: string, incluirExcluidos = false): Promise<any> {
         try {
             // O frontend de vendas pode enviar o token ZapSign (retorno de

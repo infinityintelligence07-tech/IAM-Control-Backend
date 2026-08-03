@@ -342,9 +342,10 @@ export class TurmasController {
         return this.turmasService.getPeixinhoAlunos(id_turma);
     }
 
+    // Detalhe da turma é lido pelo fluxo de vendas e pelo calendário, cujos papéis
+    // não têm necessariamente `turmas.view`. O escopo por permissão entra na Fase 1.
     @Get(':id')
-    @UseGuards(JwtAuthGuard, PermissionsGuard)
-    @RequirePermission({ module: 'turmas', action: 'view' })
+    @UseGuards(JwtAuthGuard)
     async findById(@Param('id', ParseIntPipe) id: number): Promise<TurmaResponseDto | null> {
         return this.turmasService.findById(id);
     }

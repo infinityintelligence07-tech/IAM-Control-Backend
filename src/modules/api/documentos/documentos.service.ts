@@ -7884,7 +7884,16 @@ export class DocumentosService {
 
     async enviarContratoPorEmail(email: string, nomeSignatario: string, signingUrl: string): Promise<void> {
         try {
-            await this.mailService.sendContractEmail(email, nomeSignatario, signingUrl);
+            // Réplicas de inscrição usam local+inscN_n_comp@dominio. No envio do
+            // link por e-mail, o destino precisa ser o endereço sem o marcador
+            // (+insc2, +insc2_n_comp, …) para cair na caixa do comprador.
+            const emailDestino = this.emailDestinoEnvioContrato(email);
+            if (emailDestino !== String(email || '').trim()) {
+                this.logger.debug(
+                    `contract.email.send | Destino ajustado de marcador insc | de=${email} para=${emailDestino}`,
+                );
+            }
+            await this.mailService.sendContractEmail(emailDestino, nomeSignatario, signingUrl);
         } catch (error) {
             this.logger.error('contract.email.send | Erro ao enviar email de contrato', error instanceof Error ? error.stack : undefined);
 
@@ -7907,6 +7916,21 @@ export class DocumentosService {
 
             throw new BadRequestException('Erro ao enviar email de contrato. Verifique as configurações MAIL_* no servidor.');
         }
+    }
+
+    /**
+     * Remove marcadores `+inscN…` do local-part (ex.: `a+insc2_n_comp@x.com` → `a@x.com`).
+     * Usado só no envio do contrato por e-mail.
+     */
+    private emailDestinoEnvioContrato(email: string): string {
+        const trimmed = String(email || '').trim();
+        const at = trimmed.lastIndexOf('@');
+        if (at <= 0) return trimmed;
+        const local = trimmed.slice(0, at);
+        const dominio = trimmed.slice(at);
+        const localLimpo = local.replace(/\+insc\d+[^+]*/gi, '');
+        if (!localLimpo) return trimmed;
+        return `${localLimpo}${dominio}`;
     }
 
     async criarTermoZapSign(criarTermoDto: CriarTermoZapSignDto, userId?: number): Promise<RespostaTermoZapSignDto> {

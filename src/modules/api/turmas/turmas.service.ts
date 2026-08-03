@@ -2571,7 +2571,13 @@ export class TurmasService {
                 queryBuilder.andWhere('turma.data_inicio <= :data_final', { data_final });
             }
 
-            queryBuilder.orderBy('turma.criado_em', 'DESC');
+            // Próximas turmas por data do evento (não por criado_em):
+            // ordenar por criação cortava Masterclasses antigas no sync (ex.: Goiânia #156)
+            // fora do limit 300 mesmo estando no dia corrente.
+            queryBuilder
+                .orderBy('turma.data_inicio', 'ASC', 'NULLS LAST')
+                .addOrderBy('turma.data_final', 'ASC', 'NULLS LAST')
+                .addOrderBy('turma.id', 'ASC');
             queryBuilder.skip((page - 1) * limit);
             queryBuilder.take(limit);
 

@@ -142,7 +142,13 @@ export class DocumentosService {
     // que não se vinculam a nenhum líder de time de Imersão Prosperar
     // (ex.: vendas de Masterclass sem time/líder definido).
     private readonly staffLiderSemVinculoSentinela = '__SEM_STAFF_LIDER__';
-    private readonly janelaCronSincronizacaoDias = 7;
+    // Contratos com assinatura ainda pendente entram na sincronização até
+    // esta idade (testemunhas/alunos que assinam semanas depois da venda).
+    // Antes era só 7 dias pelo criado_em — quem assinava tarde ficava
+    // eternamente "pendente" no Histórico mesmo com ZapSign concluída.
+    private readonly janelaCronSincronizacaoDias = 120;
+    /** Teto por ciclo para não estourar a API ZapSign em lotes grandes. */
+    private readonly limiteContratosPorCicloCron = 60;
     private sincronizacaoStatusCronEmExecucao = false;
     /** Cache curto do mapa global membro→líder IPR (invalidado com caches do histórico). */
     private mapaLiderIprCache: {
@@ -8708,7 +8714,7 @@ export class DocumentosService {
             // Assinado no papel (foto ou flag): já concluído — consultar a
             // ZapSign a cada ciclo só gastaria API para receber "pending" eterno.
             .andWhere(`NOT ${this.sqlContratoManual('contrato')}`)
-            .andWhere('contrato.criado_em BETWEEN :inicio AND :fim', { inicio: dataLimite, fim: new Date() })
+            .andWhere('contrato.criado_em >= :inicio', { inicio: dataLimite })
             .andWhere(
                 `(
                     LOWER(COALESCE(contrato.zapsign_document_status->>'status', '')) NOT IN (:...statusAssinado)
@@ -8721,6 +8727,9 @@ export class DocumentosService {
                     assinado: EStatusAssinaturasContratos.ASSINADO,
                 },
             )
+            // Prioriza os que estão há mais tempo sem atualizar (assinatura tardia).
+            .orderBy('contrato.atualizado_em', 'ASC')
+            .take(this.limiteContratosPorCicloCron)
             .getMany();
 
         let sincronizados = 0;

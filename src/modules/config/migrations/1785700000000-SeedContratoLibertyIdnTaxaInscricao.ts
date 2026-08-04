@@ -25,6 +25,51 @@ export class SeedContratoLibertyIdnTaxaInscricao1785700000000 implements Migrati
         ].join('\n\n');
     }
 
+    /** Mesmo padrão dos contratos Liberty de treinamento (PEA / Leader Skills). */
+    private camposDocumento(): object[] {
+        return [
+            { tipo: 'texto', campo: 'Nome Completo do Aluno', opcoes: [], descricao: 'Nome Completo do Responsável pelo Contrato' },
+            { tipo: 'documento', campo: 'CPF/CNPJ do Aluno', opcoes: [], descricao: 'CPF ou CNPJ do Responsável pelo Contrato' },
+            { tipo: 'data', campo: 'Data de Nascimento do Aluno', opcoes: [], descricao: 'Data de Nascimento do Responsável pelo Contrato' },
+            { tipo: 'telefone', campo: 'WhatsApp do Aluno', opcoes: [], descricao: 'Telefone principal de preferência com WhatsApp  do Responsável pelo Contrato' },
+            { tipo: 'email', campo: 'E-Mail do Aluno', opcoes: [], descricao: 'E-mail principal do Responsável pelo Contrato' },
+            { tipo: 'texto', campo: 'Endereço do Aluno', opcoes: [], descricao: 'Endereço do Responsável pelo Contrato' },
+            { tipo: 'texto', campo: 'Cidade/Estado do Aluno', opcoes: [], descricao: 'Cidade e Estado (UF) do Responsável pelo Contrato' },
+            { tipo: 'cep', campo: 'CEP do Aluno', opcoes: [], descricao: 'CEP do Responsável pelo Contrato' },
+            { tipo: 'texto', campo: 'Nome do Treinamento Contratado', opcoes: [], descricao: 'Nome do Treinamento Contratado pelo Aluno' },
+            { tipo: 'texto', campo: 'Cidade do Treinamento', opcoes: [], descricao: 'Cidade do Treinamento Contratado pelo Aluno' },
+            { tipo: 'data', campo: 'Data Prevista do Treinamento', opcoes: [], descricao: 'Data Prevista para Realização do Treinamento Contratado pelo Aluno' },
+            { tipo: 'numero', campo: 'Preço do Treinamento', opcoes: [], descricao: 'Preço do Treinamento Contratado pelo Aluno' },
+            {
+                tipo: 'select',
+                campo: 'À Vista',
+                opcoes: [
+                    'À Vista - Cartão de Crédito',
+                    'À Vista - Cartão de Débito',
+                    'À Vista - PIX/Transferência',
+                    'À Vista - Espécie',
+                ],
+                descricao: 'Seção para seleção de Forma de Pagamento à vista',
+            },
+            {
+                tipo: 'select',
+                campo: 'Parcelado',
+                opcoes: [
+                    'Parcelado - Cartão de Crédito',
+                    'Parcelado - Boleto: {{Quantidade de Boletos}} Parcelas de: {{Valor dos Boletos}}. Melhor dia de Vencimento: {{Dia do Mês para Vencimento dos Boletos}}. Data para o 1º Boleto: {{Data do Primeiro Boleto}}.',
+                ],
+                descricao: 'Seção para seleção de Forma de Pagamento à prazo',
+            },
+            { tipo: 'texto', campo: 'Observações', opcoes: [], descricao: 'Campo para inserção de observações relacionadas ao contrato' },
+            { tipo: 'texto', campo: 'Local de Assinatura do Contrato', opcoes: [], descricao: 'Cidade e Estado (UF) de Assinatura do Contrato' },
+            { tipo: 'data', campo: 'Data de Assinatura do Contrato', opcoes: [], descricao: 'Data de Assinatura do Contrato' },
+            { tipo: 'texto', campo: 'Nome da Testemunha 1', opcoes: [], descricao: 'Nome da Testemunha 1 que assinará o Contrato' },
+            { tipo: 'documento', campo: 'CPF/CNPJ da Testemunha 1', opcoes: [], descricao: 'CPF ou CNPJ da Testemunha 1 que assinará o Contrato' },
+            { tipo: 'texto', campo: 'Nome da Testemunha 2', opcoes: [], descricao: 'Nome da Testemunha 2 que assinará o Contrato' },
+            { tipo: 'documento', campo: 'CPF/CNPJ da Testemunha 2', opcoes: [], descricao: 'CPF ou CNPJ da Testemunha 2 que assinará o Contrato' },
+        ];
+    }
+
     public async up(queryRunner: QueryRunner): Promise<void> {
         const idsResult = await queryRunner.query(`
             SELECT array_agg(id ORDER BY id) AS ids
@@ -59,17 +104,26 @@ export class SeedContratoLibertyIdnTaxaInscricao1785700000000 implements Migrati
             [this.nomeDocumento],
         );
 
+        const camposJson = JSON.stringify(this.camposDocumento());
+
         if (existing?.[0]?.id) {
             await queryRunner.query(
                 `
                 UPDATE documentos
                 SET documento = $2,
                     clausulas = $3,
+                    campos_documento = CASE
+                        WHEN campos_documento IS NULL
+                          OR jsonb_typeof(campos_documento) <> 'array'
+                          OR jsonb_array_length(campos_documento) = 0
+                        THEN $5::jsonb
+                        ELSE campos_documento
+                    END,
                     treinamentos_relacionados = $4::jsonb,
                     atualizado_em = NOW()
                 WHERE id = $1
                 `,
-                [existing[0].id, this.nomeDocumento, clausulas, idsJson],
+                [existing[0].id, this.nomeDocumento, clausulas, idsJson, camposJson],
             );
             return;
         }
@@ -89,14 +143,14 @@ export class SeedContratoLibertyIdnTaxaInscricao1785700000000 implements Migrati
                 $1,
                 'CONTRATO',
                 $2,
-                '[]'::jsonb,
+                $4::jsonb,
                 $3::jsonb,
                 1,
                 NOW(),
                 NOW()
             )
             `,
-            [this.nomeDocumento, clausulas, idsJson],
+            [this.nomeDocumento, clausulas, idsJson, camposJson],
         );
     }
 

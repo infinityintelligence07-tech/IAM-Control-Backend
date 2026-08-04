@@ -200,7 +200,20 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
             }
 
             if ((LIDER_FUNCOES as readonly string[]).includes(funcao)) {
-                const lider = buildLiderPermissions(setor);
+                let lider = buildLiderPermissions(setor);
+                // CD + LIDER (prioridade ≥ 90) e acima: excluir turmas
+                // (PUT /turmas/:id/soft-delete exige turmas.delete).
+                if (
+                    setor === ESetores.CD &&
+                    getFunctionPriority(funcao) >= FUNCTION_PRIORITY.LIDER
+                ) {
+                    lider = grantModule(lider, 'turmas', [
+                        'view',
+                        'create',
+                        'edit',
+                        'delete',
+                    ]);
+                }
                 if (funcao === EFuncoes.LIDER) {
                     // Líder de departamento: CRUD completo de usuários (aprovar + excluir).
                     sectorRow[funcao] = grantModule(lider, 'usuarios', [

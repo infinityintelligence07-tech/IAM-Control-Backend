@@ -331,6 +331,7 @@ export class PermissionsMatrixService {
      *     o botão aparecia, mas o PUT /usuarios/:id/soft-delete retornava 403.
      * v14: reaplica usuarios.delete (edit → delete) para corrigir matrizes já em v13
      *     sem delete e caches PM2 dessincronizados após update no banco.
+     * v15: CD + LIDER (prioridade ≥ 90) ganha turmas.delete (excluir turma).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -490,6 +491,16 @@ export class PermissionsMatrixService {
                         view: true,
                         create: Boolean(role.usuarios?.create || defaultRole.usuarios?.create),
                         edit: Boolean(role.usuarios?.edit || defaultRole.usuarios?.edit),
+                        delete: true,
+                    };
+                }
+
+                if (fromVersion < 15 && defaultRole.turmas?.delete) {
+                    // CD + LIDER+: excluir turmas (soft delete / DELETE exigem turmas.delete).
+                    role.turmas = {
+                        view: Boolean(role.turmas?.view || defaultRole.turmas.view),
+                        create: Boolean(role.turmas?.create || defaultRole.turmas.create),
+                        edit: Boolean(role.turmas?.edit || defaultRole.turmas.edit),
                         delete: true,
                     };
                 }

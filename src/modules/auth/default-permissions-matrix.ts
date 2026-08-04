@@ -201,11 +201,12 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
 
             if ((LIDER_FUNCOES as readonly string[]).includes(funcao)) {
                 let lider = buildLiderPermissions(setor);
-                // CD + LIDER (prioridade ≥ 90) e acima: excluir turmas
+                // CD / Eventos / Expansão + líder (LIDER e LIDER_DE_*): excluir turmas
                 // (PUT /turmas/:id/soft-delete exige turmas.delete).
                 if (
-                    setor === ESetores.CD &&
-                    getFunctionPriority(funcao) >= FUNCTION_PRIORITY.LIDER
+                    setor === ESetores.CD ||
+                    setor === ESetores.EVENTOS ||
+                    setor === ESetores.EXPANSAO
                 ) {
                     lider = grantModule(lider, 'turmas', [
                         'view',

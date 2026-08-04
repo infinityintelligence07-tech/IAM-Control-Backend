@@ -332,6 +332,8 @@ export class PermissionsMatrixService {
      * v14: reaplica usuarios.delete (edit → delete) para corrigir matrizes já em v13
      *     sem delete e caches PM2 dessincronizados após update no banco.
      * v15: CD + LIDER (prioridade ≥ 90) ganha turmas.delete (excluir turma).
+     * v16: Eventos/Expansão + todos LIDER_FUNCOES (incl. LIDER_DE_*) ganham
+     *     turmas.delete; reaplica delete onde o padrão prevê.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -495,8 +497,10 @@ export class PermissionsMatrixService {
                     };
                 }
 
-                if (fromVersion < 15 && defaultRole.turmas?.delete) {
-                    // CD + LIDER+: excluir turmas (soft delete / DELETE exigem turmas.delete).
+                if (fromVersion < 16 && defaultRole.turmas?.delete) {
+                    // CD / Eventos / Expansão + líderes: excluir turmas
+                    // (soft delete / DELETE exigem turmas.delete).
+                    // v15 cobria só CD+LIDER; v16 amplia e reaplica.
                     role.turmas = {
                         view: Boolean(role.turmas?.view || defaultRole.turmas.view),
                         create: Boolean(role.turmas?.create || defaultRole.turmas.create),

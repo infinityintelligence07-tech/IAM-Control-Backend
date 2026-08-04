@@ -4621,9 +4621,39 @@ export class DocumentosService {
 
     private sqlContratoTemAssinatura(aliasContrato = 'contrato'): string {
         const statusDocumentoSql = `LOWER(COALESCE(${aliasContrato}.zapsign_document_status->>'status', ''))`;
+        const statusAssinadoSql = (coluna: string) =>
+            `UPPER(COALESCE(${aliasContrato}.${coluna}::text, '')) IN ('ASSINADO', 'SIGNED', 'COMPLETE', 'COMPLETED')`;
+        const testemunhaInformadaSql = (chave: 'testemunha_um' | 'testemunha_dois') => `(
+            NULLIF(TRIM(COALESCE(${aliasContrato}.dados_contrato->'testemunhas'->'${chave}'->>'nome', '')), '') IS NOT NULL
+            OR NULLIF(TRIM(COALESCE(${aliasContrato}.dados_contrato->'testemunhas'->'${chave}'->>'cpf', '')), '') IS NOT NULL
+            OR NULLIF(TRIM(COALESCE(${aliasContrato}.dados_contrato->'testemunhas'->'${chave}'->>'email', '')), '') IS NOT NULL
+        )`;
+        // Alinha com o resolver do frontend: manual OU doc ZapSign signed OU
+        // todas as colunas status_ass_* necessárias OU todos os signers no JSON.
         return `(
             ${this.sqlContratoManual(aliasContrato)}
             OR ${statusDocumentoSql} IN ('signed', 'complete', 'completed', 'assinado')
+            OR (
+                ${statusAssinadoSql('status_ass_aluno')}
+                AND (
+                    NOT ${testemunhaInformadaSql('testemunha_um')}
+                    OR ${statusAssinadoSql('status_ass_test_um')}
+                )
+                AND (
+                    NOT ${testemunhaInformadaSql('testemunha_dois')}
+                    OR ${statusAssinadoSql('status_ass_test_dois')}
+                )
+            )
+            OR (
+                jsonb_typeof(COALESCE(${aliasContrato}.zapsign_signers_data, '[]'::jsonb)) = 'array'
+                AND jsonb_array_length(COALESCE(${aliasContrato}.zapsign_signers_data, '[]'::jsonb)) > 0
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(${aliasContrato}.zapsign_signers_data, '[]'::jsonb)) AS signer
+                    WHERE NULLIF(TRIM(COALESCE(signer->>'name', '')), '') IS NOT NULL
+                      AND LOWER(COALESCE(signer->>'status', '')) NOT IN ('signed', 'complete', 'completed', 'assinado')
+                )
+            )
         )`;
     }
 
@@ -4923,13 +4953,27 @@ export class DocumentosService {
 
         const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
             where: { id: In(idsUnicos), deletado_em: IsNull() },
-            select: { id: true },
+            select: { id: true, dados_contrato: true },
         });
         if (contratos.length === 0) {
             throw new NotFoundException('Nenhuma venda encontrada para alterar o status.');
         }
 
-        await this.uow.turmasAlunosTreinamentosContratosRP.update({ id: In(contratos.map((contrato) => contrato.id)) }, { status_conciliacao: status });
+        // Atualiza coluna materializada + snapshot em dados_contrato (leituras
+        // antigas / caches que ainda olham o JSON não revertem o status).
+        for (const contrato of contratos) {
+            const dadosContrato = {
+                ...((contrato.dados_contrato as Record<string, unknown> | null) || {}),
+                status_conciliacao: status,
+            };
+            await this.uow.turmasAlunosTreinamentosContratosRP.update(
+                { id: contrato.id },
+                {
+                    status_conciliacao: status,
+                    dados_contrato: dadosContrato as any,
+                },
+            );
+        }
         this.invalidarCachesHistoricoVendas();
 
         return { atualizados: contratos.length };
@@ -7699,6 +7743,7 @@ export class DocumentosService {
                         data_ass_aluno: contrato.data_ass_aluno,
                         data_ass_test_um: contrato.data_ass_test_um,
                         data_ass_test_dois: contrato.data_ass_test_dois,
+                        status_conciliacao: contrato.status_conciliacao || 'NOVO',
                         criado_em: contrato.criado_em,
                         atualizado_em: contrato.atualizado_em,
                         criado_por: criadoPorConsolidado,

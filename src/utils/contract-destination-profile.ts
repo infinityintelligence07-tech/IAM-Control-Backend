@@ -200,15 +200,18 @@ const PROFILE_RULES: Array<{
     },
   },
   {
+    // Imersão de Negócios (IDN): contrato Liberty de treinamento com
+    // quantidade de inscrições. Time de Vendas e demais canais precisam
+    // registrar formas de pagamento para preencher Preço e Observações.
     when: (n) => n.includes("imersao de negocios"),
     profile: {
-      key: "IMERSAO_NEGOCIOS_TAXA",
+      key: "IMERSAO_NEGOCIOS",
       brand: "LIBERTY",
       treinamentoLabel: "TREINAMENTO",
       dataLabel: "DATA PREVISTA",
       showBonus: false,
-      showPayment: false,
-      allowBoletoParcelado: false,
+      showPayment: true,
+      allowBoletoParcelado: true,
       showQuantidadeInscricoes: true,
       showTestemunhas: true,
     },

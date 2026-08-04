@@ -816,7 +816,33 @@ export class ContractTemplateService {
                 return normalized ? escapeHtml(normalized) : fallback;
             };
 
-            const totalContrato = formasPagamento.reduce((total: number, fp: any) => total + Number(fp?.valor || 0), 0);
+            const totalFormas = formasPagamento.reduce((total: number, fp: any) => total + Number(fp?.valor || 0), 0);
+            const valoresFormas = pagamento?.valores_formas_pagamento || {};
+            const totalInformado = Number(valoresFormas?.total_contrato || 0);
+            const qtdInscricoes = Number(
+                valoresFormas?.quantidade_inscricoes ||
+                    campos_variaveis?.['Quantidade de Inscrições'] ||
+                    campos_variaveis?.['Quantidade de Inscricoes'] ||
+                    1,
+            );
+            const totalUnitario = Number(valoresFormas?.total_unitario || 0);
+            const totalPorUnitario =
+                totalUnitario > 0 ? totalUnitario * Math.max(1, qtdInscricoes || 1) : 0;
+            const precoTreinamento = Number(
+                treinamento?.preco_treinamento ||
+                    campos_variaveis?.['Preço do Treinamento'] ||
+                    0,
+            );
+            const totalContrato =
+                totalFormas > 0
+                    ? totalFormas
+                    : totalInformado > 0
+                      ? totalInformado
+                      : totalPorUnitario > 0
+                        ? totalPorUnitario
+                        : precoTreinamento > 0
+                          ? precoTreinamento
+                          : 0;
             const enderecoFormatado = [aluno?.endereco?.logradouro, aluno?.endereco?.numero, aluno?.endereco?.complemento, aluno?.endereco?.bairro]
                 .filter(Boolean)
                 .join(', ');

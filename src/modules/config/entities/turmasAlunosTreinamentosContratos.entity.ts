@@ -93,7 +93,7 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     hist_receita_total: string | number;
 
     @Column({ type: 'varchar', length: 32, name: 'hist_canal_venda', nullable: true })
-    hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | string | null;
+    hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS' | string | null;
 
     @Column({ type: 'varchar', length: 255, name: 'hist_treinamento_origem', nullable: true })
     hist_treinamento_origem: string | null;
@@ -110,6 +110,14 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     /** Staff líder IPR resolvido para a venda (null = sem vínculo / "Sem Staff Líder"). */
     @Column({ type: 'int', name: 'hist_staff_lider_id', nullable: true })
     hist_staff_lider_id: number | null;
+
+    /** Palestrante da venda (canal PALESTRANTES_EXTRAS); id do usuário quando houver. */
+    @Column({ type: 'int', name: 'hist_palestrante_id', nullable: true })
+    hist_palestrante_id: number | null;
+
+    /** Nome do palestrante (usuário ou texto livre) materializado para filtros. */
+    @Column({ type: 'varchar', length: 255, name: 'hist_palestrante_nome', nullable: true })
+    hist_palestrante_nome: string | null;
 
     // Comprovante(s) de pagamento desta venda/contrato. É um ARRAY porque cada
     // pagamento pode ter um ou múltiplos comprovantes (imagens e/ou PDFs em

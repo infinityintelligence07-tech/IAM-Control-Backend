@@ -3791,7 +3791,24 @@ export class DocumentosService {
         treinamentoOrigem: string,
         turmaOrigem: string,
         camposVariaveis: Record<string, string>,
-    ): 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' {
+    ): 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS' {
+        const canalExplicito = String(
+            camposVariaveis['Canal de Vendas'] ||
+                camposVariaveis['Canal da Venda'] ||
+                camposVariaveis['Origem da Venda'] ||
+                '',
+        )
+            .trim()
+            .toUpperCase()
+            .replace(/\s+/g, '_');
+        if (
+            canalExplicito === 'PALESTRANTES_EXTRAS' ||
+            canalExplicito === 'PALESTRANTE_EXTRAS' ||
+            canalExplicito === 'PALESTRA_EXTRA'
+        ) {
+            return 'PALESTRANTES_EXTRAS';
+        }
+
         const texto = [
             treinamentoOrigem,
             turmaOrigem,
@@ -3805,6 +3822,11 @@ export class DocumentosService {
             .toLowerCase()
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '');
+
+        // Antes de Masterclass: "Palestrantes Extras" / "Palestra Extra".
+        if (texto.includes('palestrantes extras') || texto.includes('palestra extra')) {
+            return 'PALESTRANTES_EXTRAS';
+        }
 
         // "Masterclass", "Master Class", "MC - Cidade", "MC_TRINDADE", etc.
         if (
@@ -3830,6 +3852,35 @@ export class DocumentosService {
         return 'EVENTOS';
     }
 
+    private extrairPalestranteHistorico(dadosContrato: Record<string, any>, camposVariaveis: Record<string, string>): {
+        hist_palestrante_id: number | null;
+        hist_palestrante_nome: string | null;
+    } {
+        const idCandidatos = [
+            camposVariaveis['Palestrante ID'],
+            dadosContrato?.palestrante_id,
+            dadosContrato?.palestrante?.id,
+        ];
+        let hist_palestrante_id: number | null = null;
+        for (const candidato of idCandidatos) {
+            const id = Number(candidato);
+            if (Number.isFinite(id) && id > 0) {
+                hist_palestrante_id = id;
+                break;
+            }
+        }
+        const nome = String(
+            camposVariaveis['Palestrante'] ||
+                dadosContrato?.palestrante_nome ||
+                dadosContrato?.palestrante?.nome ||
+                '',
+        ).trim();
+        return {
+            hist_palestrante_id,
+            hist_palestrante_nome: nome ? nome.slice(0, 255) : null,
+        };
+    }
+
     /**
      * Deriva as colunas materializadas do Histórico de Vendas a partir do JSON
      * `dados_contrato` (+ criado_por). Mantém listagem/resumo/filtros sem parse
@@ -3843,11 +3894,13 @@ export class DocumentosService {
         hist_qtd_bonus: number;
         hist_pendencia_pagamento: boolean;
         hist_receita_total: number;
-        hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS';
         hist_treinamento_origem: string | null;
         hist_turma_origem: string | null;
         hist_turma_destino: string | null;
         hist_vendedor_id: number | null;
+        hist_palestrante_id: number | null;
+        hist_palestrante_nome: string | null;
     } {
         const dadosContrato = dadosContratoRaw || {};
         const contratoFake = { dados_contrato: dadosContrato };
@@ -3861,8 +3914,8 @@ export class DocumentosService {
             },
             dados_contrato: dadosContrato,
         };
-        const treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoFake) || '').trim();
-        const turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoFake) || '').trim();
+        let treinamentoOrigem = String(this.extrairTreinamentoOrigemServidor(contratoFake) || '').trim();
+        let turmaOrigem = String(this.extrairTurmaOrigemServidor(contratoFake) || '').trim();
         const turmaDestino = String(this.extrairTurmaDestinoServidor(contratoFake) || '').trim();
         const criadoPorConfronto = dadosContrato?.criado_por_confronto || {};
         const vendedorCandidatos = [criadoPorConfronto?.consolidado, criadoPor, dadosContrato?.criado_por, criadoPorConfronto?.contrato];
@@ -3875,16 +3928,29 @@ export class DocumentosService {
             }
         }
 
+        const hist_canal_venda = this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis);
+        const palestrante = this.extrairPalestranteHistorico(dadosContrato, camposVariaveis);
+        if (hist_canal_venda === 'PALESTRANTES_EXTRAS') {
+            if (!treinamentoOrigem) treinamentoOrigem = 'Palestrantes Extras';
+            if (!turmaOrigem && palestrante.hist_palestrante_nome) {
+                turmaOrigem = `Palestrantes Extras - ${palestrante.hist_palestrante_nome}`;
+            } else if (!turmaOrigem) {
+                turmaOrigem = 'Palestrantes Extras';
+            }
+        }
+
         return {
             hist_qtd_inscricoes: this.obterQuantidadeInscricoesVendidasResumo(contratoMapeado),
             hist_qtd_bonus: this.obterQuantidadeInscricoesBonusResumoHistorico(contratoMapeado),
             hist_pendencia_pagamento: Boolean(turmaAluno?.pendencia_pagamento),
             hist_receita_total: this.obterValorTotalVendaResumo(dadosContrato),
-            hist_canal_venda: this.inferirCanalVendaServidor(treinamentoOrigem, turmaOrigem, camposVariaveis),
+            hist_canal_venda,
             hist_treinamento_origem: treinamentoOrigem ? treinamentoOrigem.slice(0, 255) : null,
             hist_turma_origem: turmaOrigem ? turmaOrigem.slice(0, 255) : null,
             hist_turma_destino: turmaDestino ? turmaDestino.slice(0, 255) : null,
             hist_vendedor_id: histVendedorId,
+            hist_palestrante_id: palestrante.hist_palestrante_id,
+            hist_palestrante_nome: palestrante.hist_palestrante_nome,
         };
     }
 
@@ -4050,12 +4116,14 @@ export class DocumentosService {
         hist_qtd_bonus: number;
         hist_pendencia_pagamento: boolean;
         hist_receita_total: number;
-        hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        hist_canal_venda: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS';
         hist_treinamento_origem: string | null;
         hist_turma_origem: string | null;
         hist_turma_destino: string | null;
         hist_vendedor_id: number | null;
         hist_staff_lider_id: number | null;
+        hist_palestrante_id: number | null;
+        hist_palestrante_nome: string | null;
     }> {
         const base = this.montarColunasHistoricoVenda(dadosContratoRaw, criadoPor);
         const dadosContrato = dadosContratoRaw || {};
@@ -4704,7 +4772,7 @@ export class DocumentosService {
         data_inicio?: string;
         data_fim?: string;
         search?: string;
-        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS';
         somente_com_pendencia?: boolean | string;
         status?: string;
         treinamento_origem?: string;
@@ -5361,7 +5429,7 @@ export class DocumentosService {
         data_inicio?: string;
         data_fim?: string;
         search?: string;
-        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS';
         somente_com_pendencia?: boolean | string;
         status?: string;
         treinamento_origem?: string;
@@ -5467,7 +5535,7 @@ export class DocumentosService {
                 .addSelect(`contrato.dados_contrato->'aluno'->>'email'`, 'aluno_email_snapshot');
         }
 
-        if (canalVendaFiltro === 'MASTERCLASS') {
+        if (canalVendaFiltro === 'MASTERCLASS' || canalVendaFiltro === 'PALESTRANTES_EXTRAS') {
             opcoesQb.andWhere('contrato.hist_canal_venda = :canalVendaFiltro', { canalVendaFiltro });
         } else if (canalVendaFiltro === 'TIME_VENDAS') {
             // Mentoria pura (turma única) conta como Time de Vendas mesmo quando
@@ -6377,7 +6445,7 @@ export class DocumentosService {
         data_inicio?: string;
         data_fim?: string;
         search?: string;
-        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS';
+        canal_venda?: 'MASTERCLASS' | 'EVENTOS' | 'TIME_VENDAS' | 'PALESTRANTES_EXTRAS';
         somente_com_pendencia?: boolean | string;
         somente_sem_assinatura?: boolean | string;
         somente_sem_conciliacao?: boolean | string;
@@ -6406,6 +6474,10 @@ export class DocumentosService {
          * itens de combo.
          */
         id_empresa?: string | number;
+        /** Filtro pelo usuário palestrante (canal PALESTRANTES_EXTRAS). */
+        palestrante_id?: string | number;
+        /** Busca textual pelo nome do palestrante materializado. */
+        palestrante_nome?: string;
         staff_lider_id?: string;
         // Origem do aluno (canal do dashboard/planilha). Aceita múltiplos valores
         // separados por "|" (ex.: "Bônus|Transbordo"). Filtra tanto a listagem
@@ -6495,6 +6567,8 @@ export class DocumentosService {
                 turma_destino: filtros?.turma_destino || null,
                 id_turma_destino: filtros?.id_turma_destino || null,
                 id_empresa: filtros?.id_empresa || null,
+                palestrante_id: filtros?.palestrante_id || null,
+                palestrante_nome: filtros?.palestrante_nome || null,
                 staff_lider_id: staffLiderId || null,
                 origem: filtros?.origem || null,
                 ordenacao_data:
@@ -6944,6 +7018,10 @@ export class DocumentosService {
                 baseQb.andWhere(`contrato.hist_canal_venda = :canalMasterclass`, {
                     canalMasterclass: 'MASTERCLASS',
                 });
+            } else if (filtros?.canal_venda === 'PALESTRANTES_EXTRAS') {
+                baseQb.andWhere(`contrato.hist_canal_venda = :canalPalestrantesExtras`, {
+                    canalPalestrantesExtras: 'PALESTRANTES_EXTRAS',
+                });
             } else if (filtros?.canal_venda === 'TIME_VENDAS') {
                 // Mentoria pura (ex. id 193) → Time de Vendas; evento vinculado
                 // (ex. 2435, com id_turma_mentoria_vinculada) permanece em Eventos.
@@ -6956,6 +7034,19 @@ export class DocumentosService {
                     `contrato.hist_canal_venda = :canalEventos AND NOT (${this.sqlOrigemEhMentoriaPuraHistorico})`,
                     { canalEventos: 'EVENTOS' },
                 );
+            }
+
+            const palestranteIdFiltro = Number(filtros?.palestrante_id);
+            if (Number.isFinite(palestranteIdFiltro) && palestranteIdFiltro > 0) {
+                baseQb.andWhere('contrato.hist_palestrante_id = :palestranteIdFiltro', {
+                    palestranteIdFiltro,
+                });
+            }
+            const palestranteNomeFiltro = this.normalizarTexto(filtros?.palestrante_nome);
+            if (palestranteNomeFiltro) {
+                baseQb.andWhere(`contrato.hist_palestrante_nome ILIKE :palestranteNomeFiltro`, {
+                    palestranteNomeFiltro: `%${palestranteNomeFiltro}%`,
+                });
             }
 
             // Filtro por origem do aluno (multi-seleção). Aplicado ao baseQb, portanto
@@ -7058,6 +7149,9 @@ export class DocumentosService {
                 atualizado_em: true,
                 criado_por: true,
                 dados_contrato: true,
+                hist_canal_venda: true,
+                hist_palestrante_id: true,
+                hist_palestrante_nome: true,
                 zapsign_document_id: true,
                 zapsign_signers_data: true,
                 zapsign_document_status: true,

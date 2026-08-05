@@ -8672,6 +8672,18 @@ export class DocumentosService {
                 }
             }
 
+            // Sem signatário de testemunha na ZapSign e documento já completo:
+            // limpa o DEFAULT ASSINATURA_PENDENTE das colunas (não há o que
+            // assinar). Evita lixo residual e filtros que olham essas colunas.
+            if (todosAssinaram || assinadoNoPapel) {
+                if (!testemunhaUmSigner && contrato.status_ass_test_um !== EStatusAssinaturasContratos.ASSINADO) {
+                    contrato.status_ass_test_um = EStatusAssinaturasContratos.ASSINADO;
+                }
+                if (!testemunhaDoisSigner && contrato.status_ass_test_dois !== EStatusAssinaturasContratos.ASSINADO) {
+                    contrato.status_ass_test_dois = EStatusAssinaturasContratos.ASSINADO;
+                }
+            }
+
             // Atualizar dados do ZapSign no contrato
             contrato.zapsign_signers_data = signersData;
             contrato.zapsign_document_status = documentStatus;
@@ -8843,10 +8855,15 @@ export class DocumentosService {
         const dataLimite = new Date();
         dataLimite.setDate(dataLimite.getDate() - janelaDias);
 
-        // Pendente = documento não concluído OU alguma assinatura individual em
-        // aberto. Filtrar só por status_ass_aluno parava a sincronização assim que
-        // o aluno assinava e congelava as testemunhas como pendentes para sempre.
-        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP
+            // Pendente = documento ZapSign ainda não concluído. NÃO usar as
+            // colunas status_ass_test_* sozinhas: no banco elas nascem com
+            // DEFAULT ASSINATURA_PENDENTE mesmo sem testemunha no contrato, e
+            // isso enfileirava centenas de docs já "signed" para sempre
+            // (backlog fantasma), atrasando a sync dos que o aluno já assinou
+            // na ZapSign mas o Histórico ainda mostrava "Sem assinatura".
+            // Documento "partial" (aluno ok, falta testemunha real) continua
+            // na fila porque o status do documento não entra em STATUS_ZAPSIGN_ASSINADO.
+            const contratos = await this.uow.turmasAlunosTreinamentosContratosRP
             .createQueryBuilder('contrato')
             .where('contrato.zapsign_document_id IS NOT NULL')
             .andWhere('contrato.deletado_em IS NULL')
@@ -8854,18 +8871,9 @@ export class DocumentosService {
             // ZapSign a cada ciclo só gastaria API para receber "pending" eterno.
             .andWhere(`NOT ${this.sqlContratoManual('contrato')}`)
             .andWhere('contrato.criado_em >= :inicio', { inicio: dataLimite })
-            .andWhere(
-                `(
-                    LOWER(COALESCE(contrato.zapsign_document_status->>'status', '')) NOT IN (:...statusAssinado)
-                    OR contrato.status_ass_aluno::text <> :assinado
-                    OR (contrato.status_ass_test_um IS NOT NULL AND contrato.status_ass_test_um::text <> :assinado)
-                    OR (contrato.status_ass_test_dois IS NOT NULL AND contrato.status_ass_test_dois::text <> :assinado)
-                )`,
-                {
-                    statusAssinado: DocumentosService.STATUS_ZAPSIGN_ASSINADO,
-                    assinado: EStatusAssinaturasContratos.ASSINADO,
-                },
-            )
+            .andWhere(`LOWER(COALESCE(contrato.zapsign_document_status->>'status', '')) NOT IN (:...statusAssinado)`, {
+                statusAssinado: DocumentosService.STATUS_ZAPSIGN_ASSINADO,
+            })
             // Prioriza os que estão há mais tempo sem atualizar (assinatura tardia).
             .orderBy('contrato.atualizado_em', 'ASC')
             .take(this.limiteContratosPorCicloCron)

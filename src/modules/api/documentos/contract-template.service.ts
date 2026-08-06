@@ -724,20 +724,25 @@ export class ContractTemplateService {
                 }).format(Number(value) || 0);
 
             const formatDatePtBr = (value: unknown, fallback: string = '___/___/___'): string => {
-                if (!value) return fallback;
+                if (value == null || value === '') return fallback;
+                // Date do TypeORM (coluna `date`): usa componentes UTC para não
+                // “voltar” um dia em UTC-3.
+                if (value instanceof Date && !Number.isNaN(value.getTime())) {
+                    const ano = value.getUTCFullYear();
+                    const mes = String(value.getUTCMonth() + 1).padStart(2, '0');
+                    const dia = String(value.getUTCDate()).padStart(2, '0');
+                    return `${dia}/${mes}/${ano}`;
+                }
                 if (typeof value !== 'string' && typeof value !== 'number') return fallback;
                 const raw = String(value).trim();
                 if (!raw) return fallback;
-
-                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-                    const [ano, mes, dia] = raw.split('-');
-                    return `${dia}/${mes}/${ano}`;
-                }
                 if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
-
-                const parsed = new Date(raw);
-                if (!Number.isNaN(parsed.getTime())) {
-                    return parsed.toLocaleDateString('pt-BR');
+                // "YYYY-MM-DD" ou ISO completo ("YYYY-MM-DDTHH:mm:ss.sssZ"):
+                // formata só a parte da data, sem new Date() (evita -1 dia).
+                const somenteData = raw.slice(0, 10);
+                if (/^\d{4}-\d{2}-\d{2}$/.test(somenteData)) {
+                    const [ano, mes, dia] = somenteData.split('-');
+                    return `${dia}/${mes}/${ano}`;
                 }
                 return fallback;
             };
@@ -847,15 +852,7 @@ export class ContractTemplateService {
                 .filter(Boolean)
                 .join(', ');
 
-            const dataNascimentoFormatada = (() => {
-                if (!aluno?.data_nascimento) return '___/___/___';
-                const dataISO = String(aluno.data_nascimento);
-                if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                    const [ano, mes, dia] = dataISO.split('-');
-                    return `${dia}/${mes}/${ano}`;
-                }
-                return new Date(dataISO).toLocaleDateString('pt-BR');
-            })();
+            const dataNascimentoFormatada = formatDatePtBr(aluno?.data_nascimento);
 
             const dataPrevistaRaw = campos_variaveis?.['Data Prevista do Treinamento'] || '';
             const dataFinalRaw = campos_variaveis?.['Data Final do Treinamento'] || '';
@@ -1336,15 +1333,9 @@ export class ContractTemplateService {
                 </tr>
                 <tr class="table-row">
                   <td class="table-cell half-width"><strong>CPF:</strong> ${aluno?.cpf || '_________________'}</td>
-                  <td class="table-cell half-width"><strong>Data de nascimento:</strong> ${(() => {
-                      if (!aluno?.data_nascimento) return '___/___/___';
-                      const dataISO = aluno.data_nascimento;
-                      if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                          const [ano, mes, dia] = dataISO.split('-');
-                          return `${dia}/${mes}/${ano}`;
-                      }
-                      return new Date(dataISO).toLocaleDateString('pt-BR');
-                  })()}</td>
+                  <td class="table-cell half-width"><strong>Data de nascimento:</strong> ${
+                      this.formatDate(aluno?.data_nascimento) || '___/___/___'
+                  }</td>
                 </tr>
                 <tr class="table-row">
                   <td class="table-cell half-width"><strong>WhatsApp:</strong> ${aluno?.telefone_um || '_________________'}</td>
@@ -1359,15 +1350,9 @@ export class ContractTemplateService {
                 </tr>
                 <tr class="table-row">
                   <td class="table-cell half-width"><strong>CPF/CNPJ:</strong> ${aluno?.cpf || '_________________'}</td>
-                  <td class="table-cell half-width"><strong>Data de Nascimento:</strong> ${(() => {
-                      if (!aluno?.data_nascimento) return '___/___/___';
-                      const dataISO = aluno.data_nascimento;
-                      if (dataISO.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                          const [ano, mes, dia] = dataISO.split('-');
-                          return `${dia}/${mes}/${ano}`;
-                      }
-                      return new Date(dataISO).toLocaleDateString('pt-BR');
-                  })()}</td>
+                  <td class="table-cell half-width"><strong>Data de Nascimento:</strong> ${
+                      this.formatDate(aluno?.data_nascimento) || '___/___/___'
+                  }</td>
                 </tr>
                 <tr class="table-row">
                   <td class="table-cell half-width"><strong>WhatsApp:</strong> ${aluno?.telefone_um || '_________________'}</td>
@@ -2918,22 +2903,31 @@ export class ContractTemplateService {
     }
 
     /**
-     * Formata a data para exibição. Datas "YYYY-MM-DD" (colunas `date`) são
-     * formatadas direto da string: parsear com `new Date()` interpretaria como
-     * meia-noite UTC e, em UTC-3, a data exibida voltaria um dia.
+     * Formata a data para exibição. Datas "YYYY-MM-DD" (colunas `date`) e ISO
+     * completo são formatadas pela parte da data: parsear com `new Date()`
+     * interpretaria meia-noite UTC e, em UTC-3, a data exibida voltaria um dia.
      */
-    formatDate(date: string | Date): string {
-        if (!date) return '';
+    formatDate(date: string | Date | null | undefined): string {
+        if (date == null || date === '') return '';
+
+        if (date instanceof Date && !Number.isNaN(date.getTime())) {
+            const ano = date.getUTCFullYear();
+            const mes = String(date.getUTCMonth() + 1).padStart(2, '0');
+            const dia = String(date.getUTCDate()).padStart(2, '0');
+            return `${dia}/${mes}/${ano}`;
+        }
 
         if (typeof date === 'string') {
-            const somenteData = date.slice(0, 10);
+            const raw = date.trim();
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
+            const somenteData = raw.slice(0, 10);
             if (/^\d{4}-\d{2}-\d{2}$/.test(somenteData)) {
                 const [ano, mes, dia] = somenteData.split('-');
                 return `${dia}/${mes}/${ano}`;
             }
-            return new Date(date).toLocaleDateString('pt-BR');
         }
-        return date.toLocaleDateString('pt-BR');
+
+        return '';
     }
 
     /**

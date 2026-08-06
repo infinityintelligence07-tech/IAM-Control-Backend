@@ -885,7 +885,13 @@ export class ContractTemplateService {
                 campos_variaveis?.['Quantidade de Inscricoes'] ||
                 pagamento?.valores_formas_pagamento?.quantidade_inscricoes ||
                 '1';
-            const destinationProfile = getContractDestinationProfile(nomeTreinamento, {
+            // Preferir nome do produto; se o documento for de IDN (taxa inscrição),
+            // o perfil sem testemunhas ainda precisa bater mesmo com sigla curta.
+            const nomeParaPerfilContrato =
+                [nomeTreinamento, template?.nome, template?.tipo_documento]
+                    .filter((v) => typeof v === 'string' && v.trim())
+                    .join(' ') || nomeTreinamento;
+            const destinationProfile = getContractDestinationProfile(nomeParaPerfilContrato, {
                 tipoMentoria: treinamento?.tipo_mentoria ?? null,
             });
             const normalizedTrainingName = normalizeString(nomeTreinamento);
@@ -1173,28 +1179,59 @@ export class ContractTemplateService {
                 );
             }
 
-            // Seção de testemunhas: perfil do produto (IPR = sem testemunhas) e
-            // dados gravados. Sem testemunha informada, a seção sai por completo;
-            // com apenas a Testemunha 1, o bloco da Testemunha 2 é removido.
+            // Seção de testemunhas: perfil do produto (IPR / IDN = sem testemunhas)
+            // e dados gravados. Remoção por profundidade de <div> — o regex antigo
+            // cortava no meio do 1º bloco e deixava "Testemunha 2" órfã na pág. 1.
             const temTestemunhaUm = Boolean(testemunhas?.testemunha_um?.nome);
             const temTestemunhaDois = Boolean(testemunhas?.testemunha_dois?.nome);
+
+            const removeDivBlocksByClass = (html: string, className: string): string => {
+                const openTag = `<div class="${className}"`;
+                let output = html;
+                let searchFrom = 0;
+                while (true) {
+                    const start = output.toLowerCase().indexOf(openTag.toLowerCase(), searchFrom);
+                    if (start < 0) break;
+                    const tagEnd = output.indexOf('>', start);
+                    if (tagEnd < 0) break;
+                    let depth = 1;
+                    let i = tagEnd + 1;
+                    while (i < output.length && depth > 0) {
+                        const nextOpen = output.toLowerCase().indexOf('<div', i);
+                        const nextClose = output.toLowerCase().indexOf('</div>', i);
+                        if (nextClose < 0) break;
+                        if (nextOpen >= 0 && nextOpen < nextClose) {
+                            depth += 1;
+                            i = nextOpen + 4;
+                        } else {
+                            depth -= 1;
+                            i = nextClose + 6;
+                        }
+                    }
+                    output = output.slice(0, start) + output.slice(i);
+                    searchFrom = start;
+                }
+                return output;
+            };
+
             if (!destinationProfile.showTestemunhas || (!temTestemunhaUm && !temTestemunhaDois)) {
-                renderedTemplate = renderedTemplate.replace(/<div class="witnesses-section"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/i, '</div></div>');
+                renderedTemplate = removeDivBlocksByClass(renderedTemplate, 'witnesses-section');
                 renderedTemplate = renderedTemplate.replace(/na presença de 2 testemunhas\./gi, 'na forma digital.');
+                renderedTemplate = renderedTemplate.replace(/na presença de 1 testemunha\./gi, 'na forma digital.');
                 renderedTemplate = renderedTemplate.replace(/na presença das testemunhas abaixo\./gi, 'na forma digital.');
+                renderedTemplate = renderedTemplate.replace(/na presença da testemunha abaixo\./gi, 'na forma digital.');
             } else if (!temTestemunhaDois) {
+                // Remove só o bloco da Testemunha 2 (mantém a 1ª).
                 renderedTemplate = renderedTemplate.replace(
-                    /<div class="witness">\s*<div class="witness-line"><\/div>\s*<div class="witness-info">\s*<div><span class="bold">Testemunha 2<\/span><\/div>[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi,
+                    /<div class="witness">\s*<div class="witness-line"><\/div>\s*<div class="witness-info">\s*<div><span class="bold">Testemunha 2<\/span><\/div>\s*<div>[\s\S]*?<\/div>\s*<div>[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi,
                     '',
                 );
                 renderedTemplate = renderedTemplate.replace(/na presença de 2 testemunhas\./gi, 'na presença de 1 testemunha.');
                 renderedTemplate = renderedTemplate.replace(/na presença das testemunhas abaixo\./gi, 'na presença da testemunha abaixo.');
-                // Testemunha única não é numerada.
                 renderedTemplate = renderedTemplate.replace(
                     /<div><span class="bold">Testemunha 1<\/span><\/div>/gi,
                     '<div><span class="bold">Testemunha</span></div>',
                 );
-                // Bloco único centralizado (a seção usa layout lado a lado).
                 renderedTemplate = renderedTemplate.replace(
                     /<div class="witnesses-section"( style="[^"]*")?>/gi,
                     '<div class="witnesses-section"$1 data-testemunha-unica="true">',
@@ -1206,7 +1243,11 @@ export class ContractTemplateService {
 
         // Função para gerar footer com logo
         const destinationTrainingName = treinamento?.nome || treinamento?.treinamento || campos_variaveis?.['Nome do Treinamento Contratado'] || '';
-        const destinationProfileEmbedded = getContractDestinationProfile(destinationTrainingName, {
+        const nomeParaPerfilEmbedded =
+            [destinationTrainingName, template?.nome, template?.tipo_documento]
+                .filter((v) => typeof v === 'string' && String(v).trim())
+                .join(' ') || destinationTrainingName;
+        const destinationProfileEmbedded = getContractDestinationProfile(nomeParaPerfilEmbedded, {
             tipoMentoria: treinamento?.tipo_mentoria ?? null,
         });
         const normalizedDestinationTrainingName = String(destinationTrainingName)

@@ -205,7 +205,13 @@ const PROFILE_RULES: Array<{
     // quantidade de inscrições e SEM testemunhas (igual IPR). Time de Vendas
     // e demais canais precisam registrar formas de pagamento para preencher
     // Preço e Observações.
-    when: (n) => n.includes("imersao de negocios"),
+    when: (n) =>
+      n.includes("imersao de negocios") ||
+      n === "idn" ||
+      n.startsWith("idn ") ||
+      n.endsWith(" idn") ||
+      n.includes(" idn ") ||
+      /\bidn\b/.test(n),
     profile: {
       key: "IMERSAO_NEGOCIOS",
       brand: "LIBERTY",

@@ -334,6 +334,8 @@ export class PermissionsMatrixService {
      * v15: CD + LIDER (prioridade ≥ 90) ganha turmas.delete (excluir turma).
      * v16: Eventos/Expansão + todos LIDER_FUNCOES (incl. LIDER_DE_*) ganham
      *     turmas.delete; reaplica delete onde o padrão prevê.
+     * v17: Cuidado de Alunos (não líderes) perde turmas.create — acessoras
+     *     não criam turma/evento.
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -506,6 +508,24 @@ export class PermissionsMatrixService {
                         create: Boolean(role.turmas?.create || defaultRole.turmas.create),
                         edit: Boolean(role.turmas?.edit || defaultRole.turmas.edit),
                         delete: true,
+                    };
+                }
+
+                if (
+                    fromVersion < 17 &&
+                    setor === 'CUIDADO_DE_ALUNOS' &&
+                    funcao !== 'LIDER' &&
+                    funcao !== 'LIDER_DE_EVENTOS' &&
+                    funcao !== 'LIDER_DE_MASTERCLASS' &&
+                    funcao !== 'LIDER_DE_CONFRONTO' &&
+                    funcao !== 'ADMINISTRADOR'
+                ) {
+                    // Acessoras / colaboradoras do Cuidado: não criam turma/evento.
+                    role.turmas = {
+                        view: Boolean(role.turmas?.view || defaultRole.turmas?.view),
+                        create: false,
+                        edit: Boolean(role.turmas?.edit),
+                        delete: Boolean(role.turmas?.delete),
                     };
                 }
             }

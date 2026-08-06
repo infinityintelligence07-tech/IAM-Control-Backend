@@ -56,6 +56,29 @@ export class PermissionsGuard implements CanActivate {
 
         const { module, action } = isPermissionKey(requirement) ? PERMISSION_KEY_MAP[requirement] : requirement;
 
+        // Acessora (Cuidado de Alunos sem liderança): não cria turma/evento,
+        // mesmo se a matriz/customização ou outro setor conceder turmas.create.
+        const FUNCOES_LIDERANCA = [
+            EFuncoes.LIDER,
+            EFuncoes.LIDER_DE_EVENTOS,
+            EFuncoes.LIDER_DE_MASTERCLASS,
+            EFuncoes.LIDER_DE_CONFRONTO,
+            'LIDER',
+            'LIDER_DE_EVENTOS',
+            'LIDER_DE_MASTERCLASS',
+            'LIDER_DE_CONFRONTO',
+        ] as const;
+        if (
+            module === 'turmas' &&
+            action === 'create' &&
+            userHasSetor(usuario, 'CUIDADO_DE_ALUNOS') &&
+            !funcoes.some((f) => (FUNCOES_LIDERANCA as readonly string[]).includes(f))
+        ) {
+            throw new ForbiddenException(
+                'Acessoras do Cuidado de Alunos não podem criar turmas ou eventos.',
+            );
+        }
+
         const allowed = await this.permissionsMatrix.hasModuleAction(usuario.setor, funcoes, module, action);
         if (!allowed) {
             throw new ForbiddenException(`Acesso negado. Permissão necessária: ${module}.${action}.`);

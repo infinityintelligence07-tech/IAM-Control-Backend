@@ -63,10 +63,6 @@ export class SeedContratoLibertyIdnTaxaInscricao1785700000000 implements Migrati
             { tipo: 'texto', campo: 'Observações', opcoes: [], descricao: 'Campo para inserção de observações relacionadas ao contrato' },
             { tipo: 'texto', campo: 'Local de Assinatura do Contrato', opcoes: [], descricao: 'Cidade e Estado (UF) de Assinatura do Contrato' },
             { tipo: 'data', campo: 'Data de Assinatura do Contrato', opcoes: [], descricao: 'Data de Assinatura do Contrato' },
-            { tipo: 'texto', campo: 'Nome da Testemunha 1', opcoes: [], descricao: 'Nome da Testemunha 1 que assinará o Contrato' },
-            { tipo: 'documento', campo: 'CPF/CNPJ da Testemunha 1', opcoes: [], descricao: 'CPF ou CNPJ da Testemunha 1 que assinará o Contrato' },
-            { tipo: 'texto', campo: 'Nome da Testemunha 2', opcoes: [], descricao: 'Nome da Testemunha 2 que assinará o Contrato' },
-            { tipo: 'documento', campo: 'CPF/CNPJ da Testemunha 2', opcoes: [], descricao: 'CPF ou CNPJ da Testemunha 2 que assinará o Contrato' },
         ];
     }
 

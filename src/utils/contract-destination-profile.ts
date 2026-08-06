@@ -14,8 +14,9 @@ export interface ContractDestinationProfile {
   allowBoletoParcelado: boolean;
   showQuantidadeInscricoes: boolean;
   // Testemunhas no contrato digital. Exceção: contratos de IPR (Imersão
-  // Prosperar) e variantes (comum/especial/taxa) não usam testemunhas.
-  // Nos demais treinamentos/mentorias, a QUANTIDADE varia pela origem da venda.
+  // Prosperar) e variantes (comum/especial/taxa), e Imersão de Negócios (IDN),
+  // não usam testemunhas. Nos demais treinamentos/mentorias, a QUANTIDADE
+  // varia pela origem da venda.
   showTestemunhas: boolean;
 }
 
@@ -201,8 +202,9 @@ const PROFILE_RULES: Array<{
   },
   {
     // Imersão de Negócios (IDN): contrato Liberty de treinamento com
-    // quantidade de inscrições. Time de Vendas e demais canais precisam
-    // registrar formas de pagamento para preencher Preço e Observações.
+    // quantidade de inscrições e SEM testemunhas (igual IPR). Time de Vendas
+    // e demais canais precisam registrar formas de pagamento para preencher
+    // Preço e Observações.
     when: (n) => n.includes("imersao de negocios"),
     profile: {
       key: "IMERSAO_NEGOCIOS",
@@ -213,7 +215,7 @@ const PROFILE_RULES: Array<{
       showPayment: true,
       allowBoletoParcelado: true,
       showQuantidadeInscricoes: true,
-      showTestemunhas: true,
+      showTestemunhas: false,
     },
   },
   {

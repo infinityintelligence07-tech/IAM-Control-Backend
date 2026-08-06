@@ -120,30 +120,6 @@ export class FixCamposContratoIdnTaxaInscricao1785800000000 implements Migration
                 opcoes: [],
                 descricao: 'Data de Assinatura do Contrato',
             },
-            {
-                tipo: 'texto',
-                campo: 'Nome da Testemunha 1',
-                opcoes: [],
-                descricao: 'Nome da Testemunha 1 que assinará o Contrato',
-            },
-            {
-                tipo: 'documento',
-                campo: 'CPF/CNPJ da Testemunha 1',
-                opcoes: [],
-                descricao: 'CPF ou CNPJ da Testemunha 1 que assinará o Contrato',
-            },
-            {
-                tipo: 'texto',
-                campo: 'Nome da Testemunha 2',
-                opcoes: [],
-                descricao: 'Nome da Testemunha 2 que assinará o Contrato',
-            },
-            {
-                tipo: 'documento',
-                campo: 'CPF/CNPJ da Testemunha 2',
-                opcoes: [],
-                descricao: 'CPF ou CNPJ da Testemunha 2 que assinará o Contrato',
-            },
         ];
     }
 

@@ -658,6 +658,20 @@ export class AtualizarStatusConciliacaoDto {
     status: EStatusConciliacaoVenda;
 }
 
+/**
+ * Marca vendas como verificadas (dados do aluno conferidos) ou não verificadas.
+ * Usado no Histórico de Vendas / modal de detalhes.
+ */
+export class AtualizarVerificadoContratoDto {
+    @IsArray()
+    @IsString({ each: true })
+    @IsNotEmpty({ each: true })
+    ids: string[];
+
+    @IsBoolean()
+    verificado: boolean;
+}
+
 /** Body obrigatório ao excluir venda/contrato no Histórico de Vendas. */
 export class ExcluirContratoDto {
     @IsEnum(ECategoriaExclusaoContrato)

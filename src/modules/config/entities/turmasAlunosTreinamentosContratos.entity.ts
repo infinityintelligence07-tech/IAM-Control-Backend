@@ -89,6 +89,14 @@ export class TurmasAlunosTreinamentosContratos extends BaseEntity {
     })
     status_conciliacao: 'NOVO' | 'CONCILIADO' | 'PENDENTE' | string;
 
+    /**
+     * Conferência cadastral da venda no Histórico: após revisar os dados do
+     * aluno e confirmar que nada falta, marca-se como verificado.
+     * Default false = Não verificado.
+     */
+    @Column({ type: 'boolean', name: 'verificado', nullable: false, default: false })
+    verificado: boolean;
+
     @Column({ type: 'numeric', precision: 14, scale: 2, name: 'hist_receita_total', nullable: false, default: 0 })
     hist_receita_total: string | number;
 

@@ -129,7 +129,8 @@ export class VendasDashboardService {
             contratos,
         });
 
-        const domManha = turmasRanking.reduce((acc, t) => acc + Math.max(0, t.presentesCount || 0), 0);
+        // Dom Manhã = qtd_manha do pitch de domingo (Disponibilidade / Pitch).
+        const domManha = await this.somarQtdManhaPitchPorTurmas(turmasRanking.map((t) => t.id));
         const aquisicaoPorEvento = await this.agregarAquisicaoPorEvento({
             dataInicio,
             dataFim,
@@ -706,6 +707,41 @@ export class VendasDashboardService {
         }));
     }
 
+    /**
+     * Soma `qtd_manha` da Disponibilidade / Pitch: só registros de **domingo**
+     * (fuso America/Sao_Paulo). Para cada turma, usa o snapshot mais recente.
+     * Sexta, sábado, segunda etc. são ignorados.
+     */
+    private async somarQtdManhaPitchPorTurmas(turmaIds: number[]): Promise<number> {
+        if (!turmaIds.length) return 0;
+
+        // data_hora é gravada em UTC (ISO); DOW em America/Sao_Paulo (0 = domingo).
+        const rows = await this.uow.turmaDisponibilidadeRP
+            .createQueryBuilder('reg')
+            .select('reg.id_turma', 'id_turma')
+            .addSelect('reg.qtd_manha', 'qtd_manha')
+            .addSelect('reg.data_hora', 'data_hora')
+            .where('reg.deletado_em IS NULL')
+            .andWhere('reg.id_turma IN (:...ids)', { ids: turmaIds })
+            .andWhere(
+                `EXTRACT(DOW FROM ((reg.data_hora AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')) = 0`,
+            )
+            .orderBy('reg.data_hora', 'DESC')
+            .addOrderBy('reg.id', 'DESC')
+            .getRawMany<{ id_turma: string | number; qtd_manha: string | number }>();
+
+        const qtdPorTurma = new Map<number, number>();
+        for (const row of rows) {
+            const idTurma = Number(row.id_turma);
+            if (!Number.isFinite(idTurma) || qtdPorTurma.has(idTurma)) continue;
+            qtdPorTurma.set(idTurma, Math.max(0, Number(row.qtd_manha) || 0));
+        }
+
+        let total = 0;
+        for (const qtd of qtdPorTurma.values()) total += qtd;
+        return total;
+    }
+
     private async getContadoresPorTurmas(
         turmaIds: number[],
     ): Promise<Record<number, { alunos_total: number; alunos_confirmados: number; presentes: number }>> {
@@ -816,7 +852,7 @@ export class VendasDashboardService {
                 return t.dataInicioMs >= inicioMs && t.dataInicioMs <= fimMs;
             });
 
-        // Dom Manhã / rankings: se filtro de turma, só ela; senão limitamos impacto.
+        // Rankings / Dom Manhã (pitch): se filtro de turma, só ela; senão ordena por data.
         if (!opts.turmaId) {
             candidatas = candidatas.sort((a, b) => (b.dataInicioMs || 0) - (a.dataInicioMs || 0));
         }

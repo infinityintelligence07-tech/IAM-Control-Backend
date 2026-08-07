@@ -94,7 +94,7 @@ export class MetricasDashboardVendasDto {
     pix: number;
     boleto: number;
     pendencia: number;
-    /** Soma de presentes (Dom Manhã) nas turmas filtradas. */
+    /** Soma de qtd_manha (Disponibilidade / Pitch) do último domingo por turma filtrada. */
     domManha: number;
 }
 

@@ -15,6 +15,7 @@ import {
     RespostaTermoZapSignDto,
     ExcluirContratoDto,
     AtualizarStatusConciliacaoDto,
+    AtualizarVerificadoContratoDto,
 } from './dto/documentos.dto';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { PermissionsGuard } from '@/modules/auth/guards/permissions.guard';
@@ -200,6 +201,8 @@ export class DocumentosController {
         @Query('somente_sem_assinatura') somente_sem_assinatura?: string,
         @Query('somente_sem_conciliacao') somente_sem_conciliacao?: string,
         @Query('status_conciliacao') status_conciliacao?: string,
+        /** true = só verificados; false = só não verificados. */
+        @Query('verificado') verificado?: string,
         @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma',
         @Query('treinamento_origem') treinamento_origem?: string,
         @Query('turma_origem') turma_origem?: string,
@@ -229,6 +232,7 @@ export class DocumentosController {
             somente_sem_assinatura,
             somente_sem_conciliacao,
             status_conciliacao,
+            verificado,
             tipo_filtro_busca,
             treinamento_origem,
             turma_origem,
@@ -293,6 +297,7 @@ export class DocumentosController {
         @Query('somente_sem_assinatura') somente_sem_assinatura?: string,
         @Query('somente_sem_conciliacao') somente_sem_conciliacao?: string,
         @Query('status_conciliacao') status_conciliacao?: string,
+        @Query('verificado') verificado?: string,
         @Query('tipo_filtro_busca') tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma',
         @Query('treinamento_origem') treinamento_origem?: string,
         @Query('turma_origem') turma_origem?: string,
@@ -317,6 +322,7 @@ export class DocumentosController {
             somente_sem_assinatura,
             somente_sem_conciliacao,
             status_conciliacao,
+            verificado,
             tipo_filtro_busca,
             treinamento_origem,
             turma_origem,
@@ -384,6 +390,13 @@ export class DocumentosController {
     @UseGuards(JwtAuthGuard)
     atualizarStatusConciliacaoContratos(@Body() body: AtualizarStatusConciliacaoDto) {
         return this.documentosService.atualizarStatusConciliacaoContratos(body.ids, body.status);
+    }
+
+    // Conferência cadastral: Verificado / Não verificado (após revisar dados do aluno).
+    @Post('public/contratos-banco/verificado')
+    @UseGuards(JwtAuthGuard)
+    atualizarVerificadoContratos(@Body() body: AtualizarVerificadoContratoDto) {
+        return this.documentosService.atualizarVerificadoContratos(body.ids, body.verificado);
     }
 
     @Post('public/contratos-banco/:id/sincronizar-bonus-ipr')

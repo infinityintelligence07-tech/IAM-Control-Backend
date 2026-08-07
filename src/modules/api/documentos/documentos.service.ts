@@ -1077,6 +1077,7 @@ export class DocumentosService {
                 testemunha_um: testemunhaUmUsuarioId,
                 testemunha_dois: testemunhaDoisUsuarioId,
                 status_conciliacao: statusConciliacao,
+                verificado: false,
                 // Comprovante(s) de pagamento desta venda, vinculados ao contrato.
                 comprovantes_pagamento: comprovantesVenda.length > 0 ? comprovantesVenda : null,
                 // Campos ZapSign específicos (ausentes quando contrato escrito à mão)
@@ -1187,6 +1188,7 @@ export class DocumentosService {
                         comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda),
                     },
                     status_conciliacao: statusConciliacao,
+                    verificado: false,
                     // Flag persistida: a sync ZapSign e o Histórico tratam como
                     // assinado no papel mesmo se o anexo ainda não chegou / falhou.
                     ...(isContratoManual ? { contrato_manual: true } : {}),
@@ -3386,6 +3388,7 @@ export class DocumentosService {
                 status_ass_test_dois: true,
                 data_ass_test_dois: true,
                 status_conciliacao: true,
+                verificado: true,
                 dados_contrato: true,
                 comprovantes_pagamento: true,
                 zapsign_document_id: true,
@@ -3565,6 +3568,7 @@ export class DocumentosService {
             const contratoMapeado = {
                 id: contrato.id,
                 status_conciliacao: contrato.status_conciliacao,
+                verificado: Boolean(contrato.verificado),
                 status_ass_aluno: contrato.status_ass_aluno,
                 status_ass_test_um: contrato.status_ass_test_um,
                 status_ass_test_dois: contrato.status_ass_test_dois,
@@ -5048,6 +5052,48 @@ export class DocumentosService {
     }
 
     /**
+     * Marca vendas como Verificado / Não verificado após conferência dos dados
+     * do aluno no Histórico. Default de novos contratos: não verificado.
+     */
+    async atualizarVerificadoContratos(
+        ids: string[],
+        verificado: boolean,
+    ): Promise<{ atualizados: number }> {
+        const idsUnicos = Array.from(
+            new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean)),
+        );
+        if (idsUnicos.length === 0) {
+            throw new BadRequestException('Informe ao menos uma venda para alterar a verificação.');
+        }
+
+        const contratos = await this.uow.turmasAlunosTreinamentosContratosRP.find({
+            where: { id: In(idsUnicos), deletado_em: IsNull() },
+            select: { id: true, dados_contrato: true },
+        });
+        if (contratos.length === 0) {
+            throw new NotFoundException('Nenhuma venda encontrada para alterar a verificação.');
+        }
+
+        const valor = Boolean(verificado);
+        for (const contrato of contratos) {
+            const dadosContrato = {
+                ...((contrato.dados_contrato as Record<string, unknown> | null) || {}),
+                verificado: valor,
+            };
+            await this.uow.turmasAlunosTreinamentosContratosRP.update(
+                { id: contrato.id },
+                {
+                    verificado: valor,
+                    dados_contrato: dadosContrato as any,
+                },
+            );
+        }
+        this.invalidarCachesHistoricoVendas();
+
+        return { atualizados: contratos.length };
+    }
+
+    /**
      * Lista compras (contratos ativos) que podem estar ligadas ao MESMO
      * comprovante de pagamento de uma venda em andamento: contratos com a
      * mesma turma de ORIGEM e/ou criados no mesmo dia. Usado pelo autocomplete
@@ -6451,6 +6497,8 @@ export class DocumentosService {
         somente_sem_conciliacao?: boolean | string;
         /** Filtro exato: NOVO | CONCILIADO | PENDENTE */
         status_conciliacao?: string;
+        /** true = só verificados; false = só não verificados. */
+        verificado?: boolean | string;
         tipo_filtro_busca?: 'periodo' | 'treinamento' | 'turma';
         treinamento_origem?: string;
         turma_origem?: string;
@@ -6547,7 +6595,8 @@ export class DocumentosService {
                 // v2: total_vendas no resumo + id_turma_destino; invalida cache antigo
                 // que podia divergir dos filtros de turma origem/destino.
                 // v4: filtro por empresa do produto de destino.
-                resumo_v: 4,
+                // v5: filtro verificado / não verificado.
+                resumo_v: 5,
                 marcadorAtualizacao,
                 id_aluno: filtros?.id_aluno || null,
                 id_treinamento: filtros?.id_treinamento || null,
@@ -6560,6 +6609,7 @@ export class DocumentosService {
                 somente_sem_assinatura: filtros?.somente_sem_assinatura || null,
                 somente_sem_conciliacao: filtros?.somente_sem_conciliacao || null,
                 status_conciliacao: filtros?.status_conciliacao || null,
+                verificado: filtros?.verificado ?? null,
                 tipo_filtro_busca: filtros?.tipo_filtro_busca || null,
                 treinamento_origem: filtros?.treinamento_origem || null,
                 turma_origem: filtros?.turma_origem || null,
@@ -6646,6 +6696,16 @@ export class DocumentosService {
                 .toUpperCase();
             const statusConciliacaoFiltroAtivo =
                 statusConciliacaoFiltro === 'NOVO' || statusConciliacaoFiltro === 'CONCILIADO' || statusConciliacaoFiltro === 'PENDENTE';
+            const verificadoFiltroRaw = String(filtros?.verificado ?? '')
+                .trim()
+                .toLowerCase();
+            const verificadoFiltroAtivo =
+                verificadoFiltroRaw === 'true' ||
+                verificadoFiltroRaw === '1' ||
+                verificadoFiltroRaw === 'false' ||
+                verificadoFiltroRaw === '0';
+            const verificadoFiltroValor =
+                verificadoFiltroRaw === 'true' || verificadoFiltroRaw === '1';
             const idTurmaOrigemDadosContratoSql = this.sqlIdTurmaOrigemHistorico;
 
             // Expressões compartilhadas com listarOpcoesFiltrosOrigem: o rótulo
@@ -6907,6 +6967,12 @@ export class DocumentosService {
                 });
             }
 
+            if (verificadoFiltroAtivo) {
+                baseQb.andWhere(`COALESCE(contrato.verificado, false) = :verificadoFiltroValor`, {
+                    verificadoFiltroValor,
+                });
+            }
+
             if (statusFiltro && statusFiltro !== 'all') {
                 if (statusFiltro === 'completed') {
                     baseQb.andWhere(`${statusDocumentoSql} IN (:...statusConcluido)`, {
@@ -7145,6 +7211,7 @@ export class DocumentosService {
                 data_ass_test_um: true,
                 data_ass_test_dois: true,
                 status_conciliacao: true,
+                verificado: true,
                 criado_em: true,
                 atualizado_em: true,
                 criado_por: true,
@@ -7838,6 +7905,7 @@ export class DocumentosService {
                         data_ass_test_um: contrato.data_ass_test_um,
                         data_ass_test_dois: contrato.data_ass_test_dois,
                         status_conciliacao: contrato.status_conciliacao || 'NOVO',
+                        verificado: Boolean(contrato.verificado),
                         criado_em: contrato.criado_em,
                         atualizado_em: contrato.atualizado_em,
                         criado_por: criadoPorConsolidado,

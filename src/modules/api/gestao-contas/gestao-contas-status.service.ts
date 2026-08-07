@@ -248,7 +248,22 @@ export class GestaoContasStatusService {
         if (!normalizado) return null;
 
         if (normalizado.includes('inadimpl')) return EStatusAlunosGeral.INADIMPLENTE;
-        if (normalizado.includes('cancel') || normalizado.includes('distrat')) return EStatusAlunosGeral.CANCELADO;
+
+        // Mais específico primeiro: "Cancelamento solicitado" ≠ cancelamento definitivo.
+        if (
+            normalizado.includes('cancelamento solicitado') ||
+            (normalizado.includes('solicit') && normalizado.includes('cancel'))
+        ) {
+            return EStatusAlunosGeral.CANCELAMENTO_SOLICITADO;
+        }
+        if (
+            normalizado.includes('contrato cancelado') ||
+            normalizado.includes('cancel') ||
+            normalizado.includes('distrat')
+        ) {
+            return EStatusAlunosGeral.CONTRATO_CANCELADO;
+        }
+
         if (normalizado.includes('suspens')) return EStatusAlunosGeral.SUSPENSO;
         if (normalizado.includes('inativ')) return EStatusAlunosGeral.INATIVO;
         if (normalizado.includes('adimpl') || normalizado.includes('quitad') || normalizado.includes('em dia') || normalizado.includes('ativo')) {
@@ -256,6 +271,17 @@ export class GestaoContasStatusService {
         }
 
         return null;
+    }
+
+    /** Status que o booleano `inadimplente` sozinho não pode sobrescrever. */
+    private statusProtegidoDeInadimplenciaAutomatica(status: EStatusAlunosGeral | null | undefined): boolean {
+        return (
+            status === EStatusAlunosGeral.CANCELAMENTO_SOLICITADO ||
+            status === EStatusAlunosGeral.CONTRATO_CANCELADO ||
+            status === EStatusAlunosGeral.CANCELADO ||
+            status === EStatusAlunosGeral.SUSPENSO ||
+            status === EStatusAlunosGeral.INATIVO
+        );
     }
 
     /**
@@ -271,6 +297,7 @@ export class GestaoContasStatusService {
         if (statusExplicito) return statusExplicito;
 
         if (inadimplente === null) return null;
+        if (this.statusProtegidoDeInadimplenciaAutomatica(aluno.status_aluno_geral)) return null;
         if (inadimplente) return EStatusAlunosGeral.INADIMPLENTE;
 
         return aluno.status_aluno_geral === EStatusAlunosGeral.INADIMPLENTE ? EStatusAlunosGeral.ATIVO : null;

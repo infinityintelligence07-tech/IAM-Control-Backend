@@ -56,6 +56,40 @@ reimplementar a normalização.
 }
 ```
 
+### Mapeamento de `status` (GC → IAM Control)
+
+| Rótulo na Gestão de Contas | `status_aluno_geral` no IAM |
+| --- | --- |
+| Inadimplente (ou texto com `inadimpl`) | `INADIMPLENTE` |
+| Cancelamento solicitado | `CANCELAMENTO_SOLICITADO` |
+| Cancelado | `CONTRATO_CANCELADO` |
+| Ativo / Em dia / Quitado / Adimplente | `ATIVO` |
+| Suspenso | `SUSPENSO` |
+| Inativo | `INATIVO` |
+
+Exemplos de payload para cancelamento:
+
+```json
+{
+  "itens": [
+    {
+      "iam_control_aluno_id": 1747,
+      "status": "Cancelamento solicitado"
+    },
+    {
+      "iam_control_aluno_id": 1801,
+      "status": "Cancelado"
+    }
+  ]
+}
+```
+
+O webhook altera apenas o **Status Geral** do aluno (não cancela a matrícula na
+turma). Um rótulo explícito de cancelamento não força `pendencia_pagamento`; o
+booleano `inadimplente` sozinho também não sobrescreve quem já está em
+cancelamento solicitado, contrato cancelado, cancelado legado, suspenso ou
+inativo.
+
 Máximo de 500 itens por requisição. A resposta traz um `detalhes[]` por item com
 `resultado` (`atualizado`, `sem_alteracao`, `nao_encontrado`, `ambiguo`, `erro`),
 `casado_por` e o que foi aplicado.
@@ -77,8 +111,9 @@ item precisa ser reenviado com `iam_control_aluno_id`.
 
 Um rótulo em `status` é sempre respeitado. Quando a decisão vem só do booleano
 `inadimplente`, a única transição automática é INADIMPLENTE ⇄ ATIVO: quitar a
-dívida limpa a inadimplência, mas não promove cadastro `PENDENTE` nem reativa
-quem foi cancelado ou suspenso aqui dentro.
+dívida limpa a inadimplência, mas não promove cadastro `PENDENTE` nem altera
+quem está em cancelamento solicitado, contrato cancelado, cancelado legado,
+suspenso ou inativo.
 
 ## Lado da Gestão de Contas (Supabase)
 

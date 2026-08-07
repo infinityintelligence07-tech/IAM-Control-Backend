@@ -5320,8 +5320,9 @@ export class DocumentosService {
     }
 
     /**
-     * Notifica líderes do Cuidado de Alunos (+ acessora da turma de destino e
-     * financeiro configurado) sobre uma NOVA venda. Nunca lança.
+     * Notifica líderes (qualquer setor) e administradores, além da acessora da
+     * turma de destino e do financeiro configurado, sobre uma NOVA venda.
+     * Nunca lança.
      */
     private async notificarNovaVenda(
         contratoId: string,
@@ -5330,7 +5331,7 @@ export class DocumentosService {
     ): Promise<void> {
         try {
             const idTurmaDestino = Number(info.idTurmaDestino) || null;
-            const destinatarios = await this.resolverDestinatariosMudancaVenda(idTurmaDestino);
+            const destinatarios = await this.resolverDestinatariosNovaVenda(idTurmaDestino);
             if (destinatarios.length === 0) {
                 return;
             }
@@ -5376,6 +5377,48 @@ export class DocumentosService {
                 `notificacoes.venda.nova | Falha ao notificar nova venda do contrato ${contratoId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
             );
         }
+    }
+
+    /**
+     * Destinatários de NOVA_VENDA: todos os líderes (e acima) de qualquer setor,
+     * + acessora da turma de destino + financeiro configurado.
+     */
+    private async resolverDestinatariosNovaVenda(idTurmaDestino?: number | null): Promise<number[]> {
+        const ids = new Set<number>();
+
+        try {
+            const lideres = await this.uow.usuariosRP
+                .createQueryBuilder('usuario')
+                .select(['usuario.id'])
+                .where('usuario.deletado_em IS NULL')
+                .andWhere(
+                    '(usuario.funcao && :funcoes OR usuario.setor && :setorAdmin)',
+                    {
+                        funcoes: [
+                            EFuncoes.ADMINISTRADOR,
+                            EFuncoes.LIDER,
+                            EFuncoes.LIDER_DE_EVENTOS,
+                            EFuncoes.LIDER_DE_MASTERCLASS,
+                            EFuncoes.LIDER_DE_CONFRONTO,
+                        ],
+                        setorAdmin: [ESetores.ADMINISTRADOR],
+                    },
+                )
+                .getMany();
+            lideres.forEach((lider) => {
+                if (lider?.id) ids.add(Number(lider.id));
+            });
+        } catch (error) {
+            this.logger.warn(
+                `notificacoes.destinatarios.nova_venda | Falha ao buscar líderes: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+        }
+
+        // Reaproveita acessora + financeiro da resolução padrão de mudanças.
+        const extras = await this.resolverDestinatariosMudancaVenda(idTurmaDestino);
+        extras.forEach((id) => ids.add(id));
+
+        return Array.from(ids);
     }
 
     /**

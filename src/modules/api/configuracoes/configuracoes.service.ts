@@ -32,7 +32,32 @@ export const CONFIG_KEYS = {
     KAMINO_CONTAS_DESTINO: 'kamino_contas_destino',
     KAMINO_TIPOS_RECEBIMENTO: 'kamino_tipos_recebimento',
     KAMINO_CODIGOS_CLASSIFICACAO: 'kamino_codigos_classificacao',
+    /** Número WhatsApp (source Gupshup) usado no envio das mensagens. */
+    WHATSAPP_NUMERO_ENVIO: 'whatsapp_numero_envio',
+    /**
+     * Copy padrão da mensagem de check-in (texto livre pós-template).
+     * Placeholders: {{nome}} {{treinamento}} {{data}} {{local}} {{endereco}} {{link}}
+     */
+    WHATSAPP_COPY_CHECKIN: 'whatsapp_copy_checkin',
 } as const;
+
+/** Copy padrão histórica do check-in (usada quando a config ainda está vazia). */
+export const DEFAULT_WHATSAPP_COPY_CHECKIN = `Olá *{{nome}}*, parabéns por dizer SIM a essa jornada transformadora! ✨
+
+Você garantiu a sua vaga no _*{{treinamento}}*_ e estamos muito animados pra te receber! 🤩
+
+📌*DATA*: {{data}}
+{{local_line}}📌*ENDEREÇO*: {{endereco}}
+
+Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
+Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
+
+{{link}}
+
+Assim que finalizar, seu check-in será realizado automaticamente.
+Para não correr o risco de esquecer ou perder o prazo, faça agora mesmo seu check-in.
+
+Vamos Prosperar! 🙌`;
 
 /** Chaves cujo valor é monetário em reais (>= 0, aceita decimais). */
 export const CONFIG_KEYS_MONETARIAS: string[] = [CONFIG_KEYS.TAXA_INSCRICAO_IPR_MASTERCLASS];
@@ -85,6 +110,8 @@ export const CONFIG_DEFAULTS: Record<string, string> = {
     [CONFIG_KEYS.KAMINO_CONTAS_DESTINO]: JSON.stringify(DEFAULT_KAMINO_CONTAS_DESTINO),
     [CONFIG_KEYS.KAMINO_TIPOS_RECEBIMENTO]: JSON.stringify(DEFAULT_KAMINO_TIPOS_RECEBIMENTO),
     [CONFIG_KEYS.KAMINO_CODIGOS_CLASSIFICACAO]: JSON.stringify(DEFAULT_KAMINO_CODIGOS_CLASSIFICACAO),
+    [CONFIG_KEYS.WHATSAPP_NUMERO_ENVIO]: '',
+    [CONFIG_KEYS.WHATSAPP_COPY_CHECKIN]: DEFAULT_WHATSAPP_COPY_CHECKIN,
 };
 
 @Injectable()

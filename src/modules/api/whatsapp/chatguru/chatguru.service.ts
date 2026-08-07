@@ -42,6 +42,20 @@ export class ChatGuruService {
         this.http.axiosRef.defaults.timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 20000;
     }
 
+    /** Override do número remetente (source) vindo da configuração editável no IAM. */
+    private runtimeSource: string | null = null;
+
+    /** Define/limpa o número de envio em runtime (somente dígitos). */
+    useSource(source?: string | null): void {
+        const digits = String(source || '').replace(/\D/g, '');
+        this.runtimeSource = digits || null;
+    }
+
+    /** Source efetivo: config do IAM, senão variável de ambiente. */
+    private get activeSource(): string {
+        return this.runtimeSource || this.gupshupSource;
+    }
+
     /**
      * Normaliza o número de telefone removendo caracteres especiais
      */
@@ -634,7 +648,7 @@ export class ChatGuruService {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
             // Verifica se as credenciais da Gupshup estão configuradas
-            if (!this.gupshupApiKey || !this.gupshupSource) {
+            if (!this.gupshupApiKey || !this.activeSource) {
                 throw new Error('Credenciais da Gupshup não configuradas');
             }
 
@@ -651,7 +665,7 @@ export class ChatGuruService {
             // Payload para mensagem de texto
             const formData = new URLSearchParams();
             formData.append('channel', 'whatsapp');
-            formData.append('source', this.gupshupSource);
+            formData.append('source', this.activeSource);
             formData.append('destination', destination);
             formData.append(
                 'message',
@@ -709,7 +723,7 @@ export class ChatGuruService {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
             // Verifica se as credenciais da Gupshup estão configuradas
-            if (!this.gupshupApiKey || !this.gupshupSource) {
+            if (!this.gupshupApiKey || !this.activeSource) {
                 throw new Error('Credenciais da Gupshup não configuradas');
             }
 
@@ -736,7 +750,7 @@ export class ChatGuruService {
             // Payload para mensagem de imagem
             const formData = new URLSearchParams();
             formData.append('channel', 'whatsapp');
-            formData.append('source', this.gupshupSource);
+            formData.append('source', this.activeSource);
             formData.append('destination', destination);
             formData.append(
                 'message',
@@ -941,7 +955,7 @@ export class ChatGuruService {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
             // Verifica se as credenciais da Gupshup estão configuradas
-            if (!this.gupshupApiKey || !this.gupshupSource) {
+            if (!this.gupshupApiKey || !this.activeSource) {
                 throw new Error('Credenciais da Gupshup não configuradas');
             }
 
@@ -991,7 +1005,7 @@ export class ChatGuruService {
             // https://docs.gupshup.io/reference/sending-image-template
             const formData = new URLSearchParams();
             formData.append('channel', 'whatsapp');
-            formData.append('source', this.gupshupSource);
+            formData.append('source', this.activeSource);
             formData.append('destination', destination);
             formData.append('src.name', this.gupshupAppName); // OBRIGATÓRIO!
             formData.append('template', JSON.stringify(templatePayload));
@@ -999,7 +1013,7 @@ export class ChatGuruService {
 
             this.logger.debug('Payload COMPLETO do template com imagem:', {
                 channel: 'whatsapp',
-                source: this.gupshupSource,
+                source: this.activeSource,
                 destination: destination,
                 'src.name': this.gupshupAppName,
                 template: JSON.stringify(templatePayload),
@@ -1148,7 +1162,7 @@ export class ChatGuruService {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
             // Verifica se as credenciais da Gupshup estão configuradas
-            if (!this.gupshupApiKey || !this.gupshupSource) {
+            if (!this.gupshupApiKey || !this.activeSource) {
                 throw new Error('Credenciais da Gupshup não configuradas');
             }
 
@@ -1170,7 +1184,7 @@ export class ChatGuruService {
             // 1. Primeiro envia a mensagem de texto
             const textFormData = new URLSearchParams();
             textFormData.append('channel', 'whatsapp');
-            textFormData.append('source', this.gupshupSource);
+            textFormData.append('source', this.activeSource);
             textFormData.append('destination', destination);
             textFormData.append(
                 'message',
@@ -1216,7 +1230,7 @@ export class ChatGuruService {
             // 3. Envia a imagem
             const imageFormData = new URLSearchParams();
             imageFormData.append('channel', 'whatsapp');
-            imageFormData.append('source', this.gupshupSource);
+            imageFormData.append('source', this.activeSource);
             imageFormData.append('destination', destination);
             imageFormData.append(
                 'message',
@@ -1378,7 +1392,7 @@ export class ChatGuruService {
             const normalizedNumber = this.normalizePhoneNumber(phoneNumber);
 
             // Verifica se as credenciais da Gupshup estão configuradas
-            if (!this.gupshupApiKey || !this.gupshupSource) {
+            if (!this.gupshupApiKey || !this.activeSource) {
                 throw new Error(
                     'Credenciais da Gupshup não configuradas. Configure GUPSHUP_API_KEY e GUPSHUP_PHONE_NUMBER (ou GUPSHUP_SOURCE) nas variáveis de ambiente.',
                 );
@@ -1399,7 +1413,7 @@ export class ChatGuruService {
                 apiKey: this.gupshupApiKey
                     ? `${this.gupshupApiKey.substring(0, 10)}...${this.gupshupApiKey.substring(this.gupshupApiKey.length - 5)}`
                     : 'não configurada',
-                source: this.gupshupSource || 'não configurado',
+                source: this.activeSource || 'não configurado',
                 appName: this.gupshupAppName || 'não configurado',
                 appId: this.gupshupAppId || 'não configurado',
             });
@@ -1423,7 +1437,7 @@ export class ChatGuruService {
             // O campo 'message' pode ser necessário mesmo para templates
             const formData = new URLSearchParams();
             formData.append('channel', 'whatsapp');
-            formData.append('source', this.gupshupSource);
+            formData.append('source', this.activeSource);
             formData.append('destination', destination);
 
             // Para templates, a Gupshup pode aceitar diferentes formatos
@@ -1488,7 +1502,7 @@ export class ChatGuruService {
             this.logger.debug(`Enviando template via Gupshup:`, {
                 endpoint: gupshupEndpoint,
                 channel: 'whatsapp',
-                source: this.gupshupSource,
+                source: this.activeSource,
                 destination: destination,
                 template_id: templateId,
                 params_count: templateParams.length,

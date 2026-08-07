@@ -23,6 +23,7 @@ import {
     TurmaTimesResponseDto,
     UpdateStatusEventoDto,
     UpdateTurmasImersaoOfertadasDto,
+    UpdateMetasManuaisLibertyDto,
     TurmaHistoricoResponseDto,
     CreateTurmaHistoricoDto,
     AlunoTurmaHistoricoResponseDto,
@@ -426,6 +427,22 @@ export class TurmasController {
     ): Promise<TurmaResponseDto> {
         const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
         return this.turmasService.updateTurmasImersaoOfertadas(id, dto.turmas_imersao_ofertadas || [], userId);
+    }
+
+    /**
+     * Metas fixas (Credenciados / Confirmados) da empresa Liberty.
+     * Somente Admin ou Líder (e funções de liderança) podem editar.
+     */
+    @Put(':id/metas-manuais')
+    @UseGuards(JwtAuthGuard, PermissionsGuard)
+    @RequirePermission({ module: 'turmas', action: 'view' })
+    async updateMetasManuaisLiberty(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: UpdateMetasManuaisLibertyDto,
+        @Req() req: any,
+    ): Promise<TurmaResponseDto> {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.turmasService.updateMetasManuaisLiberty(id, dto, userId);
     }
 
     @Put(':id')

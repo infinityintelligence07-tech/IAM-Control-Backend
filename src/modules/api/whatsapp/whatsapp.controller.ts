@@ -1,8 +1,19 @@
-import { Controller, Post, Body, Get, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, Put, Res } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, UseGuards, UseInterceptors, ClassSerializerInterceptor, Put, Res, Req } from '@nestjs/common';
 import type { Response } from 'express';
 import { WhatsAppService } from './whatsapp.service';
 import { JwtAuthGuard } from '@/modules/auth/guards/jwt.guard';
 import { ChatGuruService } from './chatguru/chatguru.service';
+import { IsOptional, IsString } from 'class-validator';
+
+export class UpdateWhatsAppConfigEnvioDto {
+    @IsOptional()
+    @IsString()
+    numero?: string;
+
+    @IsOptional()
+    @IsString()
+    copy_checkin?: string;
+}
 
 export interface SendMessageDto {
     phone: string;
@@ -56,6 +67,20 @@ export class WhatsAppController {
         private readonly whatsappService: WhatsAppService,
         private readonly chatGuruService: ChatGuruService,
     ) {}
+
+    /** Número remetente + copy padrão do check-in (editável por líder+). */
+    @Get('config-envio')
+    @UseGuards(JwtAuthGuard)
+    async getConfigEnvio() {
+        return this.whatsappService.getConfigEnvio();
+    }
+
+    @Put('config-envio')
+    @UseGuards(JwtAuthGuard)
+    async updateConfigEnvio(@Body() dto: UpdateWhatsAppConfigEnvioDto, @Req() req: any) {
+        const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+        return this.whatsappService.updateConfigEnvio(dto, userId);
+    }
 
     @Post('send-message')
     @UseGuards(JwtAuthGuard)

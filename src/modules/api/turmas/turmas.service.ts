@@ -846,6 +846,66 @@ export class TurmasService {
         } as UpdateTurmaDto);
     }
 
+    private async validarPermissaoLiderOuAcima(userId?: number): Promise<void> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado a editar metas da turma');
+        }
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'setor', 'funcao'] as any,
+        });
+        if (!usuario) {
+            throw new ForbiddenException('Não autorizado a editar metas da turma');
+        }
+        if (this.isUsuarioAdministrador(usuario)) return;
+        const funcoes = (Array.isArray(usuario.funcao) ? usuario.funcao : []).map(String);
+        const isLiderOuAcima = funcoes.some(
+            (f) => getFunctionPriority(f) >= getFunctionPriority(EFuncoes.LIDER),
+        );
+        if (!isLiderOuAcima) {
+            throw new ForbiddenException('Somente líderes (ou acima) podem editar as metas da Liberty');
+        }
+    }
+
+    /**
+     * Salva metas fixas de Credenciados/Confirmados (apenas turmas da empresa Liberty).
+     */
+    async updateMetasManuaisLiberty(
+        id: number,
+        dto: { meta_credenciados_manual: number; meta_confirmados_manual: number },
+        userId?: number,
+    ): Promise<TurmaResponseDto> {
+        await this.validarPermissaoLiderOuAcima(userId);
+
+        const turma = await this.uow.turmasRP.findOne({
+            where: { id, deletado_em: null },
+            relations: ['id_treinamento_fk', 'id_treinamento_fk.id_empresa_fk'],
+        });
+        if (!turma) {
+            throw new NotFoundException('Turma não encontrada');
+        }
+
+        const empresaNome = String(turma.id_treinamento_fk?.id_empresa_fk?.nome || '').toLowerCase();
+        if (!empresaNome.includes('liberty')) {
+            throw new BadRequestException('Metas manuais só estão disponíveis para turmas da empresa Liberty');
+        }
+
+        const metaCredenciados = Math.max(0, Math.floor(Number(dto.meta_credenciados_manual) || 0));
+        const metaConfirmados = Math.max(0, Math.floor(Number(dto.meta_confirmados_manual) || 0));
+
+        await this.uow.turmasRP.update(id, {
+            meta_credenciados_manual: metaCredenciados,
+            meta_confirmados_manual: metaConfirmados,
+            ...(userId ? { atualizado_por: userId } : {}),
+        });
+
+        const atualizada = await this.findById(id);
+        if (!atualizada) {
+            throw new NotFoundException('Turma não encontrada após atualização das metas');
+        }
+        return atualizada;
+    }
+
     /**
      * Regra de exclusão/cancelamento de alunos da turma (a adição é liberada
      * para qualquer usuário autenticado):
@@ -2470,6 +2530,8 @@ export class TurmasService {
             liberacao_temporaria_observacao: turma.liberacao_temporaria_observacao ?? null,
             meta_pico_inscritos: turma.meta_pico_inscritos ?? null,
             meta_pico_extras: turma.meta_pico_extras ?? null,
+            meta_credenciados_manual: turma.meta_credenciados_manual ?? null,
+            meta_confirmados_manual: turma.meta_confirmados_manual ?? null,
             // Métricas não são calculadas no modo leve (não exibidas no calendário).
             alunos_count: 0,
             alunos_inscricoes_extras_count: 0,
@@ -2657,6 +2719,8 @@ export class TurmasService {
                     id_turma_bonus: turma.id_turma_bonus,
                     capacidade_turma: turma.capacidade_turma,
                     meta: turma.meta,
+                    meta_credenciados_manual: turma.meta_credenciados_manual ?? null,
+                    meta_confirmados_manual: turma.meta_confirmados_manual ?? null,
                     data_inicio: turma.data_inicio,
                     data_final: turma.data_final,
                     dias_montagem: turma.dias_montagem ?? null,
@@ -2797,6 +2861,8 @@ export class TurmasService {
                 meta: turma.meta,
                 meta_pico_inscritos: picos.meta_pico_inscritos,
                 meta_pico_extras: picos.meta_pico_extras,
+                meta_credenciados_manual: turma.meta_credenciados_manual ?? null,
+                meta_confirmados_manual: turma.meta_confirmados_manual ?? null,
                 data_inicio: turma.data_inicio,
                 data_final: turma.data_final,
                 dias_montagem: turma.dias_montagem ?? null,

@@ -1,6 +1,6 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { UnitOfWorkService } from '@/modules/config/unit_of_work/uow.service';
-import { EStatusAlunosTurmas } from '@/modules/config/entities/enum';
+import { EFuncoes, ESetores, EStatusAlunosTurmas } from '@/modules/config/entities/enum';
 import { TurmasAlunos } from '@/modules/config/entities/turmasAlunos.entity';
 import { ChatGuruService } from './chatguru/chatguru.service';
 import { WhatsAppBulkQueueService, BulkSendJobSnapshot } from './whatsapp-bulk-queue.service';
@@ -9,6 +9,14 @@ import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { validateBase64ImageField } from '../shared/image-base64.validator';
 import { validarIdadeMinimaNascimentoAluno } from '../shared/aluno-idade.validator';
 import { nomeAlunoCaixaAlta } from '../shared/nome-aluno.helper';
+import {
+    CONFIG_KEYS,
+    CONFIG_DEFAULTS,
+    DEFAULT_WHATSAPP_COPY_CHECKIN,
+    ConfiguracoesService,
+} from '../configuracoes/configuracoes.service';
+import { getFunctionPriority } from '@/modules/auth/permissions.constants';
+import { userHasSetor } from '@/common/utils/setor.util';
 
 export interface CheckInStudentDto {
     alunoTurmaId: string;
@@ -61,6 +69,7 @@ export class WhatsAppService {
         private readonly uow: UnitOfWorkService,
         private readonly chatGuruService: ChatGuruService,
         private readonly bulkQueue: WhatsAppBulkQueueService,
+        private readonly configuracoesService: ConfiguracoesService,
     ) {
         this.frontendUrl = process.env.FRONTEND_URL || 'http://iamcontrol.com.br';
         this.jwtSecret = this.resolveJwtSecret();
@@ -70,6 +79,103 @@ export class WhatsAppService {
         // UUID do template de QR Code na Gupshup
         this.QRCODE_TEMPLATE_NAME = process.env.GUPSHUP_QRCODE_TEMPLATE_NAME || this.QRCODE_TEMPLATE_ID_GUPSHUP;
         this.CONTRATO_TEMPLATE_NAME = process.env.GUPSHUP_CONTRATO_TEMPLATE_NAME || process.env.GUPSHUP_CONTRATO_TEMPLATE_ID || '';
+    }
+
+    async getConfigEnvio(): Promise<{ numero: string; copy_checkin: string }> {
+        const config = await this.configuracoesService.findAll();
+        const numero = String(config[CONFIG_KEYS.WHATSAPP_NUMERO_ENVIO] ?? '').trim();
+        const copy =
+            String(config[CONFIG_KEYS.WHATSAPP_COPY_CHECKIN] ?? '').trim() ||
+            CONFIG_DEFAULTS[CONFIG_KEYS.WHATSAPP_COPY_CHECKIN] ||
+            DEFAULT_WHATSAPP_COPY_CHECKIN;
+        return { numero, copy_checkin: copy };
+    }
+
+    async updateConfigEnvio(
+        dto: { numero?: string; copy_checkin?: string },
+        userId?: number,
+    ): Promise<{ numero: string; copy_checkin: string }> {
+        await this.validarPermissaoLiderOuAcima(userId);
+
+        const atual = await this.getConfigEnvio();
+        const numero =
+            dto.numero !== undefined ? String(dto.numero || '').trim() : atual.numero;
+        const copy_checkin =
+            dto.copy_checkin !== undefined
+                ? String(dto.copy_checkin || '').trim() || DEFAULT_WHATSAPP_COPY_CHECKIN
+                : atual.copy_checkin;
+
+        await this.configuracoesService.upsertMany({
+            itens: [
+                {
+                    chave: CONFIG_KEYS.WHATSAPP_NUMERO_ENVIO,
+                    valor: numero,
+                    descricao: 'Número WhatsApp (remetente) usado nos envios',
+                },
+                {
+                    chave: CONFIG_KEYS.WHATSAPP_COPY_CHECKIN,
+                    valor: copy_checkin,
+                    descricao: 'Copy padrão da mensagem de check-in',
+                },
+            ],
+        });
+
+        // Aplica imediatamente o número no cliente Gupshup/ChatGuru.
+        this.chatGuruService.useSource(numero || null);
+
+        return { numero, copy_checkin };
+    }
+
+    private async validarPermissaoLiderOuAcima(userId?: number): Promise<void> {
+        if (!userId) {
+            throw new ForbiddenException('Não autorizado a editar configuração de WhatsApp');
+        }
+        const usuario = await this.uow.usuariosRP.findOne({
+            where: { id: userId, deletado_em: null },
+            select: ['id', 'setor', 'funcao'] as any,
+        });
+        if (!usuario) {
+            throw new ForbiddenException('Não autorizado a editar configuração de WhatsApp');
+        }
+        const funcoes = Array.isArray(usuario.funcao) ? usuario.funcao.map(String) : [];
+        const isAdmin =
+            funcoes.includes(EFuncoes.ADMINISTRADOR) || userHasSetor(usuario, ESetores.ADMINISTRADOR);
+        if (isAdmin) return;
+        const isLiderOuAcima = funcoes.some(
+            (f) => getFunctionPriority(f) >= getFunctionPriority(EFuncoes.LIDER),
+        );
+        if (!isLiderOuAcima) {
+            throw new ForbiddenException('Somente líderes (ou acima) podem editar número/copy do WhatsApp');
+        }
+    }
+
+    private async aplicarNumeroEnvioConfigurado(): Promise<void> {
+        const { numero } = await this.getConfigEnvio();
+        this.chatGuruService.useSource(numero || null);
+    }
+
+    private montarMensagemCheckin(
+        template: string,
+        vars: {
+            nome: string;
+            treinamento: string;
+            data: string;
+            local: string;
+            endereco: string;
+            link: string;
+        },
+    ): string {
+        const localLine = vars.local ? `📌*LOCAL*: ${vars.local}\n` : '';
+        const trocar = (texto: string, de: string, para: string) => texto.split(de).join(para);
+        let out = template;
+        out = trocar(out, '{{nome}}', vars.nome);
+        out = trocar(out, '{{treinamento}}', vars.treinamento);
+        out = trocar(out, '{{data}}', vars.data);
+        out = trocar(out, '{{local_line}}', localLine);
+        out = trocar(out, '{{local}}', vars.local);
+        out = trocar(out, '{{endereco}}', vars.endereco);
+        out = trocar(out, '{{link}}', vars.link);
+        return out;
     }
 
     /**
@@ -319,6 +425,8 @@ export class WhatsAppService {
      */
     async sendMessage(phone: string, message: string, contactName?: string): Promise<{ success: boolean; message?: string; error?: string }> {
         try {
+            await this.aplicarNumeroEnvioConfigurado();
+
             let formattedPhone = phone.replace(/\D/g, '');
             if (!formattedPhone.startsWith('55')) {
                 formattedPhone = '55' + formattedPhone;
@@ -488,6 +596,8 @@ export class WhatsAppService {
         contactName?: string,
     ): Promise<{ success: boolean; message?: string; error?: string; warning?: string; messageId?: string; destination?: string }> {
         try {
+            await this.aplicarNumeroEnvioConfigurado();
+
             // Formatar número de telefone (remover caracteres especiais)
             let formattedPhone = phone.replace(/\D/g, '');
 
@@ -611,6 +721,8 @@ export class WhatsAppService {
             const phone = alunoTurma.id_aluno_fk.telefone_um;
             const alunoNome = alunoTurma.id_aluno_fk.nome || student.alunoNome;
 
+            await this.aplicarNumeroEnvioConfigurado();
+
             let sendResult: any = { success: false };
             const checkinTemplateNameFromEnv = process.env.GUPSHUP_TEMPLATE_NAME;
 
@@ -645,23 +757,16 @@ export class WhatsAppService {
             );
 
             // Não bloqueia o fluxo principal com a mensagem de redundância.
-            const localLine = localStr ? `📌*LOCAL*: ${localStr}\n` : '';
-            const checkInMessage = `Olá *${student.alunoNome}*, parabéns por dizer SIM a essa jornada transformadora! ✨
-
-Você garantiu a sua vaga no _*${student.treinamentoNome}*_ e estamos muito animados pra te receber! 🤩
-
-📌*DATA*: ${dataStr}
-${localLine}📌*ENDEREÇO*: ${enderecoStr}
-
-Um novo tempo se inicia na sua vida. Permita-se viver tudo o que Deus preparou pra você nesses três dias! 🙌
-Para confirmar sua presença, é só clicar no link abaixo, preencher as informações e salvar.
-
-${checkInUrl}
-
-Assim que finalizar, seu check-in será realizado automaticamente.
-Para não correr o risco de esquecer ou perder o prazo, faça agora mesmo seu check-in.
-
-Vamos Prosperar! 🙌`;
+            // Copy vem da configuração editável (líder+); número já aplicado acima.
+            const { copy_checkin } = await this.getConfigEnvio();
+            const checkInMessage = this.montarMensagemCheckin(copy_checkin, {
+                nome: student.alunoNome,
+                treinamento: student.treinamentoNome,
+                data: dataStr,
+                local: localStr,
+                endereco: enderecoStr,
+                link: checkInUrl,
+            });
 
             void this.sendMessage(phone, checkInMessage, alunoNome)
                 .then((redundancyResult) => {
@@ -1610,6 +1715,8 @@ Vamos Prosperar! 🙌`;
         data: SendQRCodeDto,
     ): Promise<{ success: boolean; message?: string; error?: string; messageId?: string; redundancySent?: boolean }> {
         try {
+            await this.aplicarNumeroEnvioConfigurado();
+
             // Gerar dados do QR code para a imagem
             const qrData = {
                 id_turma_aluno: data.alunoTurmaId,

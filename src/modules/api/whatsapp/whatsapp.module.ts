@@ -4,9 +4,10 @@ import { WhatsAppService } from './whatsapp.service';
 import { WhatsAppBulkQueueService } from './whatsapp-bulk-queue.service';
 import { ConfigModule } from '@/modules/config/config.module';
 import { ChatGuruModule } from './chatguru/chatguru.module';
+import { ConfiguracoesModule } from '../configuracoes/configuracoes.module';
 
 @Module({
-    imports: [ConfigModule, ChatGuruModule],
+    imports: [ConfigModule, ChatGuruModule, ConfiguracoesModule],
     controllers: [WhatsAppController],
     providers: [WhatsAppService, WhatsAppBulkQueueService],
     exports: [WhatsAppService],

@@ -545,6 +545,25 @@ export class UpdateTurmasImersaoOfertadasDto {
     turmas_imersao_ofertadas: number[];
 }
 
+/** Metas fixas (Credenciados / Confirmados) — apenas turmas da empresa Liberty. */
+export class UpdateMetasManuaisLibertyDto {
+    @IsInt()
+    @Min(0)
+    @Transform(({ value }) => {
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) ? n : 0;
+    })
+    meta_credenciados_manual: number;
+
+    @IsInt()
+    @Min(0)
+    @Transform(({ value }) => {
+        const n = typeof value === 'string' ? parseInt(value, 10) : value;
+        return Number.isFinite(n) ? n : 0;
+    })
+    meta_confirmados_manual: number;
+}
+
 export class OutroClienteTurmaAlunoDto {
     @IsOptional()
     @IsString()
@@ -846,6 +865,9 @@ export class TurmaResponseDto {
     meta_pico_inscritos?: number | null;
     /** Pico (máximo histórico) de alunos extras usado para congelar a meta. */
     meta_pico_extras?: number | null;
+    /** Metas fixas (Liberty): substituem a fórmula automática. */
+    meta_credenciados_manual?: number | null;
+    meta_confirmados_manual?: number | null;
     data_inicio: string;
     data_final: string;
     /** Dias de montagem no calendário (null = usar default por cidade/polo). */

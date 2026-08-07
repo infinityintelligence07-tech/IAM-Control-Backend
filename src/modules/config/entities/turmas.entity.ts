@@ -115,6 +115,16 @@ export class Turmas extends BaseEntity {
     @Column({ type: 'int', name: 'meta_pico_extras', nullable: true })
     meta_pico_extras: number | null;
 
+    /**
+     * Metas fixas (empresa Liberty): não usam a fórmula de inscritos/extras.
+     * Editáveis por líder+ no card Metas da turma.
+     */
+    @Column({ type: 'int', name: 'meta_credenciados_manual', nullable: true })
+    meta_credenciados_manual: number | null;
+
+    @Column({ type: 'int', name: 'meta_confirmados_manual', nullable: true })
+    meta_confirmados_manual: number | null;
+
     // Mentorias não têm data de evento (o período é por mentorado, a partir da assinatura).
     @Column({ type: 'date', name: 'data_inicio', nullable: true })
     data_inicio: string | null;

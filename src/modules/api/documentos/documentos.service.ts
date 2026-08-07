@@ -1183,9 +1183,10 @@ export class DocumentosService {
                         pendencia_pagamento: criarContratoDto.pendencia_pagamento ?? false,
                         quantidade_inscricoes: criarContratoDto.quantidade_inscricoes ?? 1,
                         outros_clientes: criarContratoDto.compradores_adicionais || [],
-                        // Snapshot dos comprovantes desta venda (fallback de leitura).
-                        comprovantes_pagamento: comprovantesVenda,
-                        comprovante_pagamento_base64: this.serializarComprovantes(comprovantesVenda),
+                        // NÃO gravar base64 aqui: o snapshot fica em dados_contrato
+                        // (JSONB) e duplicava dezenas de MB por venda. Comprovantes
+                        // ficam só na coluna comprovantes_pagamento do contrato.
+                        tem_comprovante: comprovantesVenda.length > 0,
                     },
                     status_conciliacao: statusConciliacao,
                     verificado: false,
@@ -3449,6 +3450,18 @@ export class DocumentosService {
                 throw new NotFoundException('Contrato não encontrado');
             }
 
+            // Remove base64 pesados do snapshot em memória (evita triplicar na
+            // resposta). A fonte dos comprovantes é a coluna do contrato.
+            if (contrato.dados_contrato?.turma_aluno) {
+                const turmaAlunoSnap = { ...(contrato.dados_contrato.turma_aluno as Record<string, unknown>) };
+                delete turmaAlunoSnap.comprovante_pagamento_base64;
+                delete turmaAlunoSnap.comprovantes_pagamento;
+                contrato.dados_contrato = {
+                    ...contrato.dados_contrato,
+                    turma_aluno: turmaAlunoSnap,
+                };
+            }
+
             // Mapear dados para o formato esperado pelo frontend
             const dadosContrato = contrato.dados_contrato || {};
             let turmaAlunoTreinamento = contrato.id_turma_aluno_treinamento_fk;
@@ -3677,8 +3690,9 @@ export class DocumentosService {
                         quantidade_inscricoes: quantidadeInscricoes,
                         outros_clientes: outrosClientes,
                         contrato_duplo: contratoDuplo,
-                        comprovante_pagamento_base64: comprovantePagamentoBase64,
-                        comprovantes_pagamento: comprovantesPagamento,
+                        // Sem base64 aqui: já vai em comprovantes_pagamento /
+                        // turma_aluno raiz. Evita triplicar dezenas de MB no JSON.
+                        tem_comprovante: comprovantesPagamento.length > 0,
                     },
                 },
             };
@@ -5010,8 +5024,10 @@ export class DocumentosService {
 
         const dadosContrato = { ...(contrato.dados_contrato || {}) };
         const turmaAlunoSnapshot = { ...(dadosContrato.turma_aluno || {}) };
-        turmaAlunoSnapshot.comprovantes_pagamento = comprovantesArray;
-        turmaAlunoSnapshot.comprovante_pagamento_base64 = this.serializarComprovantes(comprovantesArray);
+        // Mantém só flag leve no snapshot; o base64 vive na coluna do contrato.
+        delete turmaAlunoSnapshot.comprovantes_pagamento;
+        delete turmaAlunoSnapshot.comprovante_pagamento_base64;
+        turmaAlunoSnapshot.tem_comprovante = comprovantesArray.length > 0;
         dadosContrato.turma_aluno = turmaAlunoSnapshot;
 
         await this.uow.turmasAlunosTreinamentosContratosRP.update(contrato.id, {

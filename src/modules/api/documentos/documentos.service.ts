@@ -1382,6 +1382,18 @@ export class DocumentosService {
                 );
             }
 
+            // Notifica líderes do Cuidado de Alunos (+ acessora/financeiro) sobre a
+            // nova venda. Best-effort: falha não derruba a criação do contrato.
+            await this.notificarNovaVenda(
+                String(savedContrato.id),
+                {
+                    nomeAluno: aluno?.nome || 'Aluno não identificado',
+                    treinamento: treinamento?.treinamento || null,
+                    idTurmaDestino: criarContratoDto.id_turma_destino ? Number(criarContratoDto.id_turma_destino) : null,
+                },
+                userId,
+            );
+
             // Mapear signers com informações completas: assinante (aluno) +
             // testemunhas, cada um com o próprio link de assinatura da ZapSign.
             const signersResponse = signersParaGravar.map((signer, index) => {
@@ -5305,6 +5317,65 @@ export class DocumentosService {
         await this.notificarAtualizacaoVenda(contrato.id, dadosContrato, alteracoes, userId);
 
         return { atualizado: true };
+    }
+
+    /**
+     * Notifica líderes do Cuidado de Alunos (+ acessora da turma de destino e
+     * financeiro configurado) sobre uma NOVA venda. Nunca lança.
+     */
+    private async notificarNovaVenda(
+        contratoId: string,
+        info: { nomeAluno: string; treinamento?: string | null; idTurmaDestino?: number | null },
+        userId?: number,
+    ): Promise<void> {
+        try {
+            const idTurmaDestino = Number(info.idTurmaDestino) || null;
+            const destinatarios = await this.resolverDestinatariosMudancaVenda(idTurmaDestino);
+            if (destinatarios.length === 0) {
+                return;
+            }
+
+            let nomeUsuario: string | null = null;
+            if (userId) {
+                const usuario = await this.uow.usuariosRP.findOne({
+                    where: { id: userId },
+                    select: ['id', 'nome'] as any,
+                    withDeleted: true,
+                });
+                nomeUsuario = usuario?.nome || null;
+            }
+
+            const agora = new Date();
+            const linhasMensagem = [
+                `Aluno: ${info.nomeAluno || 'Aluno não identificado'}`,
+                info.treinamento ? `Produto: ${info.treinamento}` : null,
+                `Registrada por: ${nomeUsuario || 'Usuário não identificado'} - ${this.formatarDataHoraBr(agora)}`,
+            ].filter((linha): linha is string => Boolean(linha));
+
+            await this.notificacoesService.criarNotificacaoParaUsuarios(
+                {
+                    tipo: 'NOVA_VENDA',
+                    titulo: `Nova venda: ID ${contratoId}`,
+                    mensagem: linhasMensagem.join('\n'),
+                    setorDestino: ESetores.CUIDADO_DE_ALUNOS,
+                    criadoPor: userId,
+                    dados: {
+                        id_contrato: contratoId,
+                        nome_aluno: info.nomeAluno || null,
+                        treinamento: info.treinamento || null,
+                        id_turma_destino: idTurmaDestino,
+                        criado_por: userId ?? null,
+                        criado_por_nome: nomeUsuario,
+                        criado_em: agora.toISOString(),
+                    },
+                },
+                destinatarios,
+            );
+        } catch (error) {
+            this.logger.warn(
+                `notificacoes.venda.nova | Falha ao notificar nova venda do contrato ${contratoId}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            );
+        }
     }
 
     /**

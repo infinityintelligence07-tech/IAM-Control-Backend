@@ -52,11 +52,13 @@ function shouldGrantPendenciaETestemunha(setor: ESetores, funcao: string): boole
 }
 
 /**
- * Marketing colaborador+: ver leads MC, marcar presença e adicionar/editar leads
- * (credenciamento.view já vem na base autenticada; aqui libera o edit).
+ * Colaborador+ em Marketing e Cuidado de Alunos: ver leads MC, marcar presença
+ * e adicionar/editar leads (credenciamento.view já vem na base; aqui libera o edit).
  */
-function shouldGrantMarketingCredenciamentoEdit(setor: ESetores, funcao: string): boolean {
-    if (setor !== ESetores.MARKETING) return false;
+function shouldGrantCredenciamentoEditColaboradorPlus(setor: ESetores, funcao: string): boolean {
+    if (setor !== ESetores.MARKETING && setor !== ESetores.CUIDADO_DE_ALUNOS) {
+        return false;
+    }
     if (funcao === PADRAO_SETOR_KEY) return false;
     if (funcao === EFuncoes.STAFF || funcao === EFuncoes.ESTAGIARIO) return false;
     return getFunctionPriority(funcao) >= COLABORADOR_MIN_PRIORITY;
@@ -268,7 +270,7 @@ export function buildDefaultPermissionsMatrix(): PermissionsMatrix {
             if (shouldGrantPendenciaETestemunha(setor, funcao)) {
                 next = grantPendenciaETestemunha(next);
             }
-            if (shouldGrantMarketingCredenciamentoEdit(setor, funcao)) {
+            if (shouldGrantCredenciamentoEditColaboradorPlus(setor, funcao)) {
                 next = grantModule(next, 'credenciamento', ['view', 'edit']);
             }
             sectorRow[funcao] = grantDisponibilidadePitchStaffPlus(funcao, next);

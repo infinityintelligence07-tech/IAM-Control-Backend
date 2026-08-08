@@ -336,6 +336,8 @@ export class PermissionsMatrixService {
      *     turmas.delete; reaplica delete onde o padrão prevê.
      * v17: Cuidado de Alunos (não líderes) perde turmas.create — acessoras
      *     não criam turma/evento.
+     * v18: Cuidado de Alunos colaborador+ ganha credenciamento.edit (adicionar/
+     *     editar leads e marcar presença nas palestras masterclass).
      */
     private upgradeMatrixContent(matrix: PermissionsMatrix, fromVersion: number): PermissionsMatrix {
         const next = JSON.parse(JSON.stringify(matrix)) as PermissionsMatrix;
@@ -526,6 +528,20 @@ export class PermissionsMatrixService {
                         create: false,
                         edit: Boolean(role.turmas?.edit),
                         delete: Boolean(role.turmas?.delete),
+                    };
+                }
+
+                if (fromVersion < 18 && defaultRole.credenciamento?.edit) {
+                    // Cuidado colaborador+ (e demais papéis com edit no padrão): leads MC.
+                    role.credenciamento = {
+                        view: true,
+                        create: Boolean(
+                            role.credenciamento?.create || defaultRole.credenciamento.create,
+                        ),
+                        edit: true,
+                        delete: Boolean(
+                            role.credenciamento?.delete || defaultRole.credenciamento.delete,
+                        ),
                     };
                 }
             }
